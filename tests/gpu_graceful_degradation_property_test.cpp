@@ -398,7 +398,12 @@ RC_GTEST_PROP(GpuGracefulDegradation,
     RC_ASSERT(rendered.layerCount() == 1u);
     RC_ASSERT(rendered.width() == frame.width);
     RC_ASSERT(rendered.height() == frame.height);
-    RC_ASSERT(rendered.hostData() != nullptr); // software produced host-memory pixels
+    // software produced host-memory pixels.
+    // Evaluate the void* check into a bool first: RC_ASSERT stringifies its
+    // operands via rc::show(), and rc::show(void*) is ill-formed (void* is not
+    // dereferenceable). A bool operand Shows fine.
+    const bool producedHostPixels = (rendered.hostData() != nullptr);
+    RC_ASSERT(producedHostPixels);
 
     // --- Encode lane: must bind to the FFmpeg software backend --------------
     SoftwareEncodeBackend* encBackend = nullptr;
@@ -476,7 +481,11 @@ RC_GTEST_PROP(GpuGracefulDegradation,
     RC_ASSERT(rendered.layerCount() == 1u);
     RC_ASSERT(rendered.width() == frame.width);
     RC_ASSERT(rendered.height() == frame.height);
-    RC_ASSERT(rendered.hostData() != nullptr);
+    // Evaluate the void* check into a bool first: rc::show(void*) is ill-formed
+    // because void* cannot be dereferenced, so a direct RC_ASSERT on it would
+    // fail to compile. A bool operand Shows fine.
+    const bool producedHostPixels = (rendered.hostData() != nullptr);
+    RC_ASSERT(producedHostPixels);
 }
 
 // ===========================================================================
