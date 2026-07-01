@@ -128,12 +128,16 @@ RC_GTEST_PROP(ExportOrderingProperties,
     const FrameRate fps(num, den);
     RC_ASSERT(fps.isValid());
 
-    // Arbitrary timeline length (whole frames) and output resolution.
+    // Arbitrary timeline length (whole frames) and output resolution. The
+    // export codecs use 4:2:0 chroma subsampling, so ExportEngine only accepts
+    // EVEN width and height; generate small even, positive dimensions so the
+    // property is exercised over valid export targets (odd/1px sizes are
+    // legitimately rejected by the engine and are out of this property's domain).
     const std::int64_t lengthFrames = *rc::gen::inRange<std::int64_t>(1, 250);
     const std::uint32_t width =
-        static_cast<std::uint32_t>(*rc::gen::inRange<int>(1, 9));
+        static_cast<std::uint32_t>(2 * *rc::gen::inRange<int>(1, 5)); // {2,4,6,8}
     const std::uint32_t height =
-        static_cast<std::uint32_t>(*rc::gen::inRange<int>(1, 9));
+        static_cast<std::uint32_t>(2 * *rc::gen::inRange<int>(1, 5)); // {2,4,6,8}
     const Resolution canvas{width, height};
 
     // Software Compositor fed synthetic solid frames at the export resolution,

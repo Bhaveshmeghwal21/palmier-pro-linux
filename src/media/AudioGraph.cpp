@@ -360,23 +360,90 @@ public:
             return AudioBuffer(outRate_, outChannels_, 0);
         }
 
-        const int maxOut = swr_get_out_samples(swr_, static_cast<int>(inFrames));
-        if (maxOut < 0) {
+        // Identity conversion (same rate and channel count): pass the samples
+        // through unchanged, preserving the exact input frame count and avoiding
+        // any needless filtering — matching the linear backend's identity path.
+        if (inRate_ == outRate_ && inChannels_ == outChannels_) {
+            std::vector<float> passthrough = input.samples();
+            return AudioBuffer::interleaved(outRate_, outChannels_, std::move(passthrough));
+        }
+
+        // Canonical output length the rest of the audio graph is defined against
+        // (AudioGraph::render's "longest resampled source" and the pure
+        // resampledFrameCount math). Both resampler backends MUST agree on this
+        // so the linear and libswresample lanes are interchangeable.
+        const std::size_t targetFrames = resampledFrameCount(inFrames, inRate_, outRate_);
+        const std::size_t oc = static_cast<std::size_t>(outChannels_);
+
+        // Size the buffer to hold the primary conversion plus the buffered tail
+        // a flush drains. swr_get_out_samples already accounts for the
+        // resampler's internal delay; add slack and never fall below the target.
+        const int query = swr_get_out_samples(swr_, static_cast<int>(inFrames));
+        if (query < 0) {
             return err<AudioBuffer>(makeError(ErrorCode::Internal, "resampler size query failed"));
         }
+        std::size_t capacityFrames =
+            std::max<std::size_t>(static_cast<std::size_t>(query), targetFrames) + 8;
 
-        std::vector<float> out(static_cast<std::size_t>(maxOut) *
-                                   static_cast<std::size_t>(outChannels_),
-                               0.0f);
+        std::vector<float> out(capacityFrames * oc, 0.0f);
         const std::uint8_t* inData[1] = {
             reinterpret_cast<const std::uint8_t*>(input.samples().data())};
-        std::uint8_t* outData[1] = {reinterpret_cast<std::uint8_t*>(out.data())};
 
-        const int produced = swr_convert(swr_, outData, maxOut, inData, static_cast<int>(inFrames));
-        if (produced < 0) {
-            return err<AudioBuffer>(makeError(ErrorCode::Internal, "resampling failed"));
+        std::size_t producedFrames = 0;
+
+        // Primary conversion of the input block.
+        {
+            std::uint8_t* outPtr =
+                reinterpret_cast<std::uint8_t*>(out.data() + producedFrames * oc);
+            std::uint8_t* outData[1] = {outPtr};
+            const int produced =
+                swr_convert(swr_, outData, static_cast<int>(capacityFrames - producedFrames),
+                            inData, static_cast<int>(inFrames));
+            if (produced < 0) {
+                return err<AudioBuffer>(makeError(ErrorCode::Internal, "resampling failed"));
+            }
+            producedFrames += static_cast<std::size_t>(produced);
         }
-        out.resize(static_cast<std::size_t>(produced) * static_cast<std::size_t>(outChannels_));
+
+        // FLUSH: repeatedly drain the resampler's buffered/latency samples with a
+        // null input until it yields nothing more. Without this, a finite
+        // one-shot swr_convert leaves the tail the filter still holds unread,
+        // returning too few frames with ramped leading values.
+        for (;;) {
+            if (producedFrames >= capacityFrames) {
+                capacityFrames += 8;
+                out.resize(capacityFrames * oc, 0.0f);
+            }
+            std::uint8_t* outPtr =
+                reinterpret_cast<std::uint8_t*>(out.data() + producedFrames * oc);
+            std::uint8_t* outData[1] = {outPtr};
+            const int drained = swr_convert(
+                swr_, outData, static_cast<int>(capacityFrames - producedFrames), nullptr, 0);
+            if (drained < 0) {
+                return err<AudioBuffer>(makeError(ErrorCode::Internal, "resampling flush failed"));
+            }
+            if (drained == 0) break;
+            producedFrames += static_cast<std::size_t>(drained);
+        }
+
+        // NORMALIZE to EXACTLY targetFrames so the libswresample and linear
+        // backends agree on output length. Trim any extra tail; if the filter
+        // produced fewer (should not happen after a flush), pad by repeating the
+        // last produced frame rather than zero-padding, to avoid an audible click.
+        if (producedFrames >= targetFrames) {
+            out.resize(targetFrames * oc);
+        } else {
+            out.resize(targetFrames * oc, 0.0f);
+            if (producedFrames > 0) {
+                const std::size_t lastFrame = producedFrames - 1;
+                for (std::size_t f = producedFrames; f < targetFrames; ++f) {
+                    for (std::size_t c = 0; c < oc; ++c) {
+                        out[f * oc + c] = out[lastFrame * oc + c];
+                    }
+                }
+            }
+        }
+
         return AudioBuffer::interleaved(outRate_, outChannels_, std::move(out));
     }
 
