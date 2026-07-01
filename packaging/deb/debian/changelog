@@ -1,0 +1,9 @@
+palmier-pro (0.1.0-1) unstable; urgency=medium
+
+  * Initial Debian packaging of the Palmier Pro Linux port.
+  * Multi-track timeline editor with GPU-accelerated decode/encode/effects.
+  * Local MCP server and in-app agent chat over the shared tool surface.
+  * Declares runtime dependencies on Qt 6, FFmpeg (libav*), the Vulkan loader,
+    shaderc, libva, lcms2, and libsecret.
+
+ -- Palmier, Inc. and contributors <maintainers@palmier.io>  Mon, 01 Jan 2024 00:00:00 +0000

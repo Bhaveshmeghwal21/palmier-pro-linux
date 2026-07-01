@@ -1,0 +1,4 @@
+packaging/shared/io.palmier.PalmierPro.desktop      usr/share/applications
+packaging/shared/io.palmier.PalmierPro.metainfo.xml  usr/share/metainfo
+packaging/shared/io.palmier.PalmierPro.xml           usr/share/mime/packages
+packaging/shared/io.palmier.PalmierPro.svg           usr/share/icons/hicolor/scalable/apps

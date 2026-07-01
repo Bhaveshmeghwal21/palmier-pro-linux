@@ -1,0 +1,1361 @@
+{
+  "pbtResults": {
+    "6.2 Write property test for generated-clip version retention": {
+      "status": "passed",
+      "lastRunTimestamp": 1782892291883
+    },
+    "5.2 Write property test for project persistence round-trip": {
+      "status": "passed",
+      "lastRunTimestamp": 1782892412421
+    },
+    "3.5 Write property test for track ordering and non-overlap invariant": {
+      "status": "passed",
+      "lastRunTimestamp": 1782892941808
+    },
+    "3.4 Write property test for undo/redo round-trip": {
+      "status": "passed",
+      "lastRunTimestamp": 1782893024077
+    },
+    "3.7 Write property test for reorder preserving clip count": {
+      "status": "passed",
+      "lastRunTimestamp": 1782893711745
+    },
+    "3.8 Write property test for trim adjusting duration to boundary": {
+      "status": "passed",
+      "lastRunTimestamp": 1782893904295
+    },
+    "7.6 Write property test for GPU/CPU parity (golden-image)": {
+      "status": "passed",
+      "lastRunTimestamp": 1782894040663
+    },
+    "14.3 Write property test for no-partial-edits atomicity": {
+      "status": "passed",
+      "lastRunTimestamp": 1782894533075
+    },
+    "10.3 Write property test for export frame ordering": {
+      "status": "passed",
+      "lastRunTimestamp": 1782895039331
+    },
+    "15.4 Write property test for UI/MCP/agent edit equivalence": {
+      "status": "passed",
+      "lastRunTimestamp": 1782897919237
+    }
+  },
+  "executionHistory": {
+    "1.1 Create CMake project structure and dependency discovery": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566293
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886572606
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886906329
+      }
+    ],
+    "1.2 Wire up test frameworks (GoogleTest + RapidCheck)": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566299
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886910917
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782887334942
+      }
+    ],
+    "1.3 Implement core shared types and utilities": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566303
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886911957
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782887335941
+      }
+    ],
+    "2.1 Implement Project, Track, Clip, and Effect data structures": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566314
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782887345023
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888066261
+      }
+    ],
+    "3.1 Implement EditCommand interface, CommandResult, and undo/redo stack": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566318
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888078905
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888729759
+      }
+    ],
+    "3.2 Implement TimelineEngine (apply/undo/redo, observers, invariant enforcement)": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566322
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889119098
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889901906
+      }
+    ],
+    "3.3 Implement editing commands (add/delete/move/trim/split/reorder)": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566325
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891080668
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891974019
+      }
+    ],
+    "4. Checkpoint - domain core": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566329
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782900657628
+      }
+    ],
+    "5.1 Implement .palmier serialization and deserialization": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566335
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889122127
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889903479
+      }
+    ],
+    "5.3 Implement save success/failure handling": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566339
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891081914
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891983651
+      }
+    ],
+    "6.1 Implement Media Manager library and version retention": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566342
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889926401
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782890502699
+      }
+    ],
+    "7.1 Implement Vulkan context, device enumeration, and selection policy": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566346
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782887346096
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888068258
+      }
+    ],
+    "7.2 Implement zero-copy GPU FramePool": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566350
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888079971
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888730697
+      }
+    ],
+    "7.3 Implement Compositor render graph (renderAt)": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566354
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889120144
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889902136
+      }
+    ],
+    "7.4 Implement SPIR-V effect kernels and registration": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566357
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891081064
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891979213
+      }
+    ],
+    "7.5 Implement HW decode/encode bridge and software fallback selection": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566362
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888080955
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888731284
+      }
+    ],
+    "8.1 Implement demux/probe and media import (MediaInfo)": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566366
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888081954
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888732032
+      }
+    ],
+    "8.2 Implement MediaDecoder (hardware-preferred, software fallback)": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566369
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889121111
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889902537
+      }
+    ],
+    "8.3 Implement MediaEncoder (hardware-preferred, software fallback)": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566373
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889927404
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782890506551
+      }
+    ],
+    "8.4 Implement audio graph and resampler": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566378
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889928403
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782890507393
+      }
+    ],
+    "8.5 Implement import validation and error handling": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566381
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889930245
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782890507984
+      }
+    ],
+    "9. Checkpoint - media + GPU pipeline": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566386
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782900659984
+      }
+    ],
+    "10.1 Implement export render loop and progress reporting": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566390
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782892536275
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782893421558
+      }
+    ],
+    "10.2 Implement export validation and failure cleanup": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566394
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894777041
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782895663985
+      }
+    ],
+    "11.1 Implement transcription producing time-aligned segments": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566397
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889930328
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782890508537
+      }
+    ],
+    "12.1 Implement KeyMoment detector": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566401
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891082962
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891986018
+      }
+    ],
+    "12.2 Integrate key-moment markers with the Timeline Engine model": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566405
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782892541806
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782893425615
+      }
+    ],
+    "13.1 Implement login, session, and entitlement handling": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566409
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782887346413
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888068988
+      }
+    ],
+    "13.2 Implement BYOK credential validation and secure storage": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566413
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888082476
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888732252
+      }
+    ],
+    "14.1 Implement GenerativeClient submit/poll/fetch with timeout and cancel": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566417
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782890529939
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891006995
+      }
+    ],
+    "14.2 Integrate generated media into library and timeline placement": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566421
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891083322
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891992523
+      }
+    ],
+    "15.1 Implement ToolRegistry and tool schemas mapped to EditCommands": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566425
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782892544328
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782893428423
+      }
+    ],
+    "15.2 Implement HTTP endpoint binding and lifecycle": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566429
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894777436
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782895670612
+      }
+    ],
+    "15.3 Implement tool execution with rollback, timeout, and error handling": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566433
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894778448
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782895671437
+      }
+    ],
+    "16.1 Implement agent orchestrator reusing MCP tool handlers": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566438
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782896348579
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782896882685
+      }
+    ],
+    "16.2 Implement @-mention resolution": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566441
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782897970101
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782898501332
+      }
+    ],
+    "17.1 Implement language selection, live switching, fallback, and persistence": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566445
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889122774
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889904484
+      }
+    ],
+    "18. Checkpoint - services layer": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566449
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782900662353
+      }
+    ],
+    "19.1 Implement application shell and platform compatibility checks": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566453
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782897970164
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782898501703
+      }
+    ],
+    "19.2 Implement Timeline view (QML) bound to the engine model": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566457
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782898875365
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782899759135
+      }
+    ],
+    "19.3 Implement Preview/Player view with playback": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566460
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782898876366
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782899762385
+      }
+    ],
+    "19.4 Implement Inspector and Effects panel": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566465
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782898881083
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782899765215
+      }
+    ],
+    "19.5 Implement Media Browser panel": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566469
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782898881605
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782899773139
+      }
+    ],
+    "19.6 Implement Agent Chat panel and GPU-unavailable/service-unavailable notifications": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566473
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782898882008
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782899775818
+      }
+    ],
+    "20.1 Add GPLv3 license and source headers": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566477
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886912480
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782887339043
+      }
+    ],
+    "20.2 Create distributable packaging (Flatpak, AppImage, .deb)": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566481
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782900639622
+      }
+    ],
+    "21.1 Wire all components into the application composition root": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566485
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782900636654
+      }
+    ],
+    "22. Final checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782886566490
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782900665841
+      }
+    ],
+    "1. Set up project scaffolding and build system": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782887335945
+      }
+    ],
+    "2. Implement project data models and validation": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888066266
+      }
+    ],
+    "2.2 Write unit tests for data model validation": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888067254
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888071728
+      }
+    ],
+    "13. Implement Authentication and Subscription client": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888732256
+      }
+    ],
+    "3.4 Write property test for undo/redo round-trip": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888800168
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782892547811
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782893432209
+      }
+    ],
+    "3.5 Write property test for track ordering and non-overlap invariant": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888801584
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782892548315
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782893433952
+      }
+    ],
+    "3.6 Write property test for split contiguity and duration conservation": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888802354
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782893441787
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894078409
+      }
+    ],
+    "3.7 Write property test for reorder preserving clip count": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888803288
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782893442992
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894078990
+      }
+    ],
+    "3.8 Write property test for trim adjusting duration to boundary": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888806238
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782893444035
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894085737
+      }
+    ],
+    "3.9 Write unit tests for clip math edge cases and undo-empty/split-miss handling": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888807922
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782893445026
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894088022
+      }
+    ],
+    "5.2 Write property test for project persistence round-trip": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888808771
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782892016285
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782892488295
+      }
+    ],
+    "6.2 Write property test for generated-clip version retention": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888809463
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782892021071
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782892491929
+      }
+    ],
+    "7.6 Write property test for GPU/CPU parity (golden-image)": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888810503
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782893445310
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894090390
+      }
+    ],
+    "7.7 Write property test for graceful degradation (software-only lane)": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888811256
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894097730
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894743040
+      }
+    ],
+    "7.8 Write unit tests for capability probing with mocked device descriptors": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888814614
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888859936
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889108300
+      }
+    ],
+    "8.6 Write unit tests for media import error paths": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888815338
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891060769
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891070487
+      }
+    ],
+    "10.3 Write property test for export frame ordering": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888816159
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894780790
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782895677406
+      }
+    ],
+    "10.4 Write integration test for import -> edit -> export": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888816880
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782895682720
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782896333889
+      }
+    ],
+    "11.2 Write unit tests for transcription ordering, empty-audio, and failure paths": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888817965
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891061775
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891071293
+      }
+    ],
+    "12.3 Write unit tests for key-moment bounds and error handling": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888818944
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894781441
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782895677782
+      }
+    ],
+    "13.3 Write unit tests for auth flows and lockout": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888820423
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891058960
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891069806
+      }
+    ],
+    "14.3 Write property test for no-partial-edits atomicity": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888823512
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894098255
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894754385
+      }
+    ],
+    "14.4 Write unit tests for generation validation and auth gating": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888824533
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894098944
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782894743355
+      }
+    ],
+    "15.4 Write property test for UI/MCP/agent edit equivalence": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888825300
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782896887899
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782897962134
+      }
+    ],
+    "15.5 Write integration tests for MCP HTTP protocol conformance": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888826464
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782896348846
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782896883781
+      }
+    ],
+    "16.3 Write unit tests for mention resolution and auth gating": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888827486
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782898506094
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782898862361
+      }
+    ],
+    "17.2 Write unit tests for localization fallback and default selection": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782888828400
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891063596
+      },
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891071680
+      }
+    ],
+    "17. Implement Localization Manager": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782889904488
+      }
+    ],
+    "6. Implement media library and generated-clip versioning": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782890502703
+      }
+    ],
+    "8. Implement Media Engine (FFmpeg)": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782890507988
+      }
+    ],
+    "11. Implement Transcription Service": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782890508541
+      }
+    ],
+    "3. Implement Timeline Engine and command/undo-redo system": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891974024
+      }
+    ],
+    "7. Implement GPU Abstraction Layer (Vulkan) — headline capability": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891979219
+      }
+    ],
+    "5. Implement project persistence (.palmier)": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891983655
+      }
+    ],
+    "14. Implement Generative AI client": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782891992527
+      }
+    ],
+    "12. Implement Key Moment Detection": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782893425619
+      }
+    ],
+    "10. Implement Export Engine": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782895663989
+      }
+    ],
+    "15. Implement MCP Server": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782895671444
+      }
+    ],
+    "16. Implement In-App Agent Chat orchestrator": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782898501336
+      }
+    ],
+    "19. Implement Qt 6 UI and application shell": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782899775822
+      }
+    ],
+    "21. Final integration and wiring": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782900636658
+      }
+    ],
+    "20. Packaging and licensing": [
+      {
+        "executionId": "6dc59551-3765-4b06-ae3a-a60b50afbc5b",
+        "chatSessionId": "04c0c539-96a1-41c0-ad49-3493f3c821ac",
+        "timestamp": 1782900639626
+      }
+    ]
+  }
+}

@@ -1,0 +1,60 @@
+Source: palmier-pro
+Section: video
+Priority: optional
+Maintainer: Palmier, Inc. and contributors <maintainers@palmier.io>
+Build-Depends: debhelper-compat (= 13),
+               cmake (>= 3.22),
+               ninja-build,
+               pkg-config,
+               qt6-base-dev,
+               qt6-declarative-dev,
+               libavcodec-dev,
+               libavformat-dev,
+               libavutil-dev,
+               libswscale-dev,
+               libswresample-dev,
+               libvulkan-dev,
+               glslang-tools,
+               libshaderc-dev,
+               libva-dev,
+               liblcms2-dev,
+               libsecret-1-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/palmier-io/palmier-pro
+Rules-Requires-Root: no
+
+Package: palmier-pro
+Architecture: amd64
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         libqt6core6,
+         libqt6gui6,
+         libqt6widgets6,
+         libqt6quick6,
+         libqt6qml6,
+         libavcodec58 | libavcodec59 | libavcodec60,
+         libavformat58 | libavformat59 | libavformat60,
+         libavutil56 | libavutil57 | libavutil58,
+         libswscale5 | libswscale6 | libswscale7,
+         libswresample3 | libswresample4 | libswresample5,
+         libvulkan1,
+         libshaderc1,
+         libva2,
+         libva-drm2,
+         liblcms2-2,
+         libsecret-1-0
+Recommends: mesa-vulkan-drivers,
+            va-driver-all
+Suggests: nvidia-vaapi-driver
+Description: AI-native multi-track video editor with GPU acceleration
+ Palmier Pro for Linux is a multi-track timeline video editor with first-class
+ GPU acceleration for NVIDIA, AMD, and Intel graphics and a graceful CPU
+ fallback. It is the ground-up C++20 Linux port of Palmier Pro, built with
+ Qt 6 (UI), FFmpeg (media/codecs), and Vulkan (GPU compositing and the
+ hardware-codec bridge).
+ .
+ The package bundles the open-source Timeline Editor and the local Model
+ Context Protocol (MCP) server, which expose the same editing tool surface to
+ the in-app agent chat and to external AI agents over loopback HTTP. These
+ components are free software under the GNU GPL v3 (or later) and remain fully
+ functional with no network connection to the account-gated generative service.

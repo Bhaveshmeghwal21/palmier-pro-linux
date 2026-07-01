@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Palmier Pro for Linux -- Flatpak manifest (PRIMARY distributable).
+# Copyright (C) 2024 Palmier, Inc. and contributors
+#
+# Build with:  flatpak-builder --user --install --force-clean \
+#                  build-flatpak packaging/flatpak/io.palmier.PalmierPro.yaml
+#
+# The KDE runtime is used because it ships Qt 6 (Core/Gui/Quick/Widgets),
+# the Vulkan loader, PipeWire/PulseAudio, and Wayland/X11 integration. The
+# remaining runtime dependencies that are not part of the runtime -- FFmpeg
+# (libav*), shaderc, libva (VAAPI), LittleCMS (lcms2), and libsecret -- are
+# bundled as modules built ahead of the application so the editor launches on
+# a supported host without additional system packages.
+
+app-id: io.palmier.PalmierPro
+runtime: org.kde.Platform
+runtime-version: '6.7'
+sdk: org.kde.Sdk
+command: palmier-pro
+rename-icon: io.palmier.PalmierPro
+rename-desktop-file: io.palmier.PalmierPro.desktop
+rename-appdata-file: io.palmier.PalmierPro.metainfo.xml
+
+finish-args:
+  # Windowing / rendering.
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  # GPU acceleration (Vulkan + VAAPI/NVDEC/NVENC/QSV hardware codecs).
+  - --device=dri
+  # Audio playback and export.
+  - --socket=pulseaudio
+  # Loopback network only is not expressible; full network is required so the
+  # (closed, account-gated) Generative_AI_Service client and MCP loopback work.
+  - --share=network
+  # Access to user media for import/export.
+  - --filesystem=home
+  - --filesystem=xdg-videos
+  - --filesystem=xdg-pictures
+  # Secure credential storage for BYOK tokens via the Secret Service API.
+  - --talk-name=org.freedesktop.secrets
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /lib/cmake
+  - /share/man
+  - /share/doc
+  - '*.a'
+  - '*.la'
+
+modules:
+  # -- LittleCMS (color management) ----------------------------------------
+  - name: lcms2
+    buildsystem: meson
+    config-opts:
+      - -Dtests=disabled
+    sources:
+      - type: archive
+        url: https://github.com/mm2/Little-CMS/releases/download/lcms2.16/lcms2-2.16.tar.gz
+        sha256: d873d34ad8b9b4cea010631f1a6228d2087475e4dc5e763eb81acc23d9d45a51
+
+  # -- libva (VAAPI hardware codec interface) ------------------------------
+  - name: libva
+    buildsystem: meson
+    config-opts:
+      - -Ddisable_drm=false
+      - -Dwith_x11=yes
+      - -Dwith_wayland=yes
+    sources:
+      - type: archive
+        url: https://github.com/intel/libva/releases/download/2.22.0/libva-2.22.0.tar.bz2
+        sha256: 467c418c2640a178c6baad5be2e00d569842123763b80507721ab87eb7af8735
+
+  # -- shaderc (GLSL -> SPIR-V for effect kernels) -------------------------
+  - name: shaderc
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DSHADERC_SKIP_TESTS=ON
+      - -DSHADERC_SKIP_EXAMPLES=ON
+    sources:
+      - type: git
+        url: https://github.com/google/shaderc.git
+        tag: v2024.1
+
+  # -- FFmpeg (demux/mux, decode/encode, scaling, resampling) --------------
+  - name: ffmpeg
+    buildsystem: autotools
+    config-opts:
+      - --enable-shared
+      - --disable-static
+      - --enable-gpl
+      - --enable-version3
+      - --disable-doc
+      - --disable-programs
+      - --enable-vaapi
+      - --enable-libx264
+      - --enable-libx265
+    sources:
+      - type: archive
+        url: https://ffmpeg.org/releases/ffmpeg-7.0.2.tar.xz
+        sha256: 8646515b638a3ad303e23af6a3587734447cb8fc0a30fd05f9d59a1a2aa833aa
+
+  # -- Palmier Pro editor (this repository) --------------------------------
+  - name: palmier-pro
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      - -DPALMIER_BUILD_UI=ON
+      - -DPALMIER_BUILD_TESTS=OFF
+    sources:
+      - type: dir
+        path: ../..
+    post-install:
+      # Desktop entry, AppStream metadata, MIME type, and icon.
+      - install -Dm644 packaging/shared/io.palmier.PalmierPro.desktop
+          /app/share/applications/io.palmier.PalmierPro.desktop
+      - install -Dm644 packaging/shared/io.palmier.PalmierPro.metainfo.xml
+          /app/share/metainfo/io.palmier.PalmierPro.metainfo.xml
+      - install -Dm644 packaging/shared/io.palmier.PalmierPro.xml
+          /app/share/mime/packages/io.palmier.PalmierPro.xml
+      - install -Dm644 packaging/shared/io.palmier.PalmierPro.svg
+          /app/share/icons/hicolor/scalable/apps/io.palmier.PalmierPro.svg

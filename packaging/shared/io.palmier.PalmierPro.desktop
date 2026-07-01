@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Palmier Pro
+GenericName=Video Editor
+Comment=AI-native multi-track video editor with GPU acceleration
+Exec=palmier-pro %F
+TryExec=palmier-pro
+Icon=io.palmier.PalmierPro
+Terminal=false
+Categories=AudioVideo;AudioVideoEditing;Video;Qt;
+MimeType=application/x-palmier-project;video/mp4;video/x-matroska;video/quicktime;
+Keywords=video;editor;timeline;AI;GPU;compositing;
+StartupNotify=true
+StartupWMClass=palmier-pro

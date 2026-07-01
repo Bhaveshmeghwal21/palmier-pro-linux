@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (C) 2024 Palmier, Inc. and contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f8a4c"/>
+      <stop offset="1" stop-color="#0d5f30"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="24" ry="24" fill="url(#bg)"/>
+  <!-- Filmstrip perforations -->
+  <g fill="#ffffff" opacity="0.85">
+    <rect x="24" y="30" width="10" height="10" rx="2"/>
+    <rect x="24" y="58" width="10" height="10" rx="2"/>
+    <rect x="24" y="86" width="10" height="10" rx="2"/>
+    <rect x="94" y="30" width="10" height="10" rx="2"/>
+    <rect x="94" y="58" width="10" height="10" rx="2"/>
+    <rect x="94" y="86" width="10" height="10" rx="2"/>
+  </g>
+  <!-- Play triangle -->
+  <path d="M52 44 L52 84 L86 64 Z" fill="#ffffff"/>
+</svg>

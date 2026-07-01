@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (C) 2024 Palmier, Inc. and contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<component type="desktop-application">
+  <id>io.palmier.PalmierPro</id>
+
+  <!-- Metadata (this file) is CC0; the program itself is GPLv3-or-later. -->
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>Palmier Pro</name>
+  <summary>AI-native multi-track video editor with GPU acceleration</summary>
+
+  <description>
+    <p>
+      Palmier Pro for Linux is an AI-native, multi-track video editor with
+      first-class GPU acceleration for NVIDIA, AMD, and Intel graphics, and a
+      graceful CPU fallback when no compatible GPU is available. It is the
+      ground-up C++20 Linux port of Palmier Pro, built with Qt 6, FFmpeg, and
+      Vulkan.
+    </p>
+    <p>Key capabilities:</p>
+    <ul>
+      <li>Multi-track timeline editing (1-50 tracks) with trim, split, move, and reorder.</li>
+      <li>GPU-accelerated decoding, encoding, effects, and playback with zero-copy frames.</li>
+      <li>A local Model Context Protocol (MCP) server for external AI agents over loopback HTTP.</li>
+      <li>An in-app agent chat that drives the editor through the same tool surface.</li>
+      <li>In-timeline generative AI (account-gated closed service), transcription, and key-moment detection.</li>
+    </ul>
+    <p>
+      The Timeline Editor and MCP Server are free software under the GNU GPL v3
+      (or later) and remain fully functional with no network connection to the
+      generative service.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.palmier.PalmierPro.desktop</launchable>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>AudioVideoEditing</category>
+    <category>Video</category>
+  </categories>
+
+  <keywords>
+    <keyword>video</keyword>
+    <keyword>editor</keyword>
+    <keyword>timeline</keyword>
+    <keyword>AI</keyword>
+    <keyword>GPU</keyword>
+  </keywords>
+
+  <url type="homepage">https://github.com/palmier-io/palmier-pro</url>
+  <url type="bugtracker">https://github.com/palmier-io/palmier-pro/issues</url>
+  <url type="vcs-browser">https://github.com/palmier-io/palmier-pro</url>
+
+  <developer id="io.palmier">
+    <name>Palmier, Inc. and contributors</name>
+  </developer>
+
+  <provides>
+    <binary>palmier-pro</binary>
+  </provides>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.1.0" date="2024-01-01">
+      <description>
+        <p>Initial Linux port: timeline editor, GPU acceleration, MCP server, and agent chat.</p>
+      </description>
+    </release>
+  </releases>
+</component>

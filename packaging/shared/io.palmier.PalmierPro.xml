@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (C) 2024 Palmier, Inc. and contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Shared MIME-info definition for the Palmier Pro project file (.palmier). -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-palmier-project">
+    <comment>Palmier Pro project</comment>
+    <glob pattern="*.palmier"/>
+    <icon name="io.palmier.PalmierPro"/>
+  </mime-type>
+</mime-info>

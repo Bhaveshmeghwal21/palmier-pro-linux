@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Palmier Pro for Linux -- Debian packaging rules.
+# Copyright (C) 2024 Palmier, Inc. and contributors
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@ --buildsystem=cmake+ninja
+
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-DCMAKE_BUILD_TYPE=RelWithDebInfo \
+		-DPALMIER_BUILD_UI=ON \
+		-DPALMIER_BUILD_TESTS=OFF
+
+# The upstream test suite requires Qt/FFmpeg/Vulkan runners not available in a
+# minimal build chroot; packaging builds skip it (tests run in CI).
+override_dh_auto_test:
+

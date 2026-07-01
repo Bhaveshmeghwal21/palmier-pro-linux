@@ -1,0 +1,288 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Unit tests for the Qt-free Inspector/Effects view model (task 19.4;
+// Requirement 2.4).
+//
+// These exercise the whole selection -> read-projection -> edit -> command
+// mapping without any Qt dependency:
+//   * the projection reflects the selected clip's properties and effect chain
+//     (with parameters in a deterministic, name-sorted order);
+//   * adding an effect issues an AddEffectCommand and shows up in the engine
+//     snapshot and the projection;
+//   * editing an effect parameter and a clip property (opacity/gain) maps to the
+//     right command, reflects in the engine, and undoes exactly;
+//   * an out-of-range property value is rejected by the engine's invariant check
+//     and leaves the project unchanged;
+//   * trimming maps to TrimClipCommand, constrained to [1 frame, source duration]
+//     (Requirement 2.4);
+//   * the onChanged callback fires on selection changes, on the model's own
+//     edits, and on external edits (undo / other surfaces).
+//
+// The view model and its two extra commands (SetClipPropertyCommand,
+// SetEffectParameterCommand) are compiled directly into this binary alongside
+// Palmier::core, so the tests run without Qt or PALMIER_BUILD_UI.
+
+#include "ui/InspectorViewModel.hpp"
+
+#include <memory>
+#include <optional>
+
+#include <gtest/gtest.h>
+
+#include "core/Clip.hpp"
+#include "core/CommandResult.hpp"
+#include "core/EditCommands.hpp"
+#include "core/Effect.hpp"
+#include "core/FrameRate.hpp"
+#include "core/Project.hpp"
+#include "core/TimelineEngine.hpp"
+#include "core/Track.hpp"
+#include "core/Uuid.hpp"
+
+namespace palmier {
+namespace ui {
+namespace {
+
+constexpr Duration ms(std::int64_t v) { return Duration::fromMilliseconds(v); }
+
+Clip makeClip(ClipId id, Duration timelineStart, Duration sourceIn, Duration sourceOut) {
+    Clip clip;
+    clip.id = id;
+    clip.assetRef = MediaAssetRef(Uuid::generateV4(), "mem://asset");
+    clip.timelineStart = timelineStart;
+    clip.sourceIn = sourceIn;
+    clip.sourceOut = sourceOut;
+    return clip;
+}
+
+// A project with one video track holding a single [0,1000)ms clip.
+Project makeProjectWithClip(ClipId clipId) {
+    Project project;
+    project.id = Uuid::generateV4();
+    project.name = "test";
+    project.timelineFps = FrameRate::fps24();
+    Track track;
+    track.id = Uuid::generateV4();
+    track.kind = TrackKind::Video;
+    track.clips.push_back(makeClip(clipId, ms(0), ms(0), ms(1000)));
+    project.tracks.push_back(std::move(track));
+    return project;
+}
+
+// --- Selection / projection ------------------------------------------------
+
+TEST(InspectorViewModel, NoSelectionHasEmptyProjectionAndRejectsEdits) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+
+    EXPECT_FALSE(model.hasSelection());
+    EXPECT_FALSE(model.selectedClip().has_value());
+
+    const CommandResult r = model.setOpacity(0.5);
+    EXPECT_TRUE(r.isError());
+    EXPECT_EQ(r.error().code(), ErrorCode::FailedPrecondition);
+    // Nothing was applied.
+    EXPECT_EQ(engine.clip(clip)->opacity, 1.0);
+}
+
+TEST(InspectorViewModel, ProjectionReflectsClipPropertiesAndSortedEffectParameters) {
+    const ClipId clip = Uuid::generateV4();
+    Project project = makeProjectWithClip(clip);
+    // Seed the clip with an effect carrying two parameters (insertion order b, a).
+    Effect fx(Uuid::generateV4(), EffectType::ColorGrade, {{"zed", 2.0}, {"alpha", 1.0}});
+    project.tracks[0].clips[0].effects.push_back(fx);
+    project.tracks[0].clips[0].opacity = 0.4;
+    project.tracks[0].clips[0].gain = 1.5;
+    TimelineEngine engine(std::move(project));
+    InspectorViewModel model(engine);
+
+    model.selectClip(clip);
+    const auto view = model.selectedClip();
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->id, clip);
+    EXPECT_EQ(view->opacity, 0.4);
+    EXPECT_EQ(view->gain, 1.5);
+    EXPECT_EQ(view->duration, ms(1000));
+    ASSERT_EQ(view->effects.size(), 1u);
+    EXPECT_EQ(view->effects[0].id, fx.id);
+    EXPECT_EQ(view->effects[0].type, EffectType::ColorGrade);
+    // Parameters are exposed in name-sorted order (alpha before zed).
+    ASSERT_EQ(view->effects[0].parameters.size(), 2u);
+    EXPECT_EQ(view->effects[0].parameters[0].name, "alpha");
+    EXPECT_EQ(view->effects[0].parameters[1].name, "zed");
+}
+
+TEST(InspectorViewModel, SelectingRemovedClipYieldsEmptyProjection) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+
+    model.selectClip(Uuid::generateV4());  // an id not present in the project
+    EXPECT_TRUE(model.hasSelection());
+    EXPECT_FALSE(model.selectedClip().has_value());
+}
+
+// --- Add effect ------------------------------------------------------------
+
+TEST(InspectorViewModel, AddEffectIssuesAddEffectCommand) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    const CommandResult r = model.addBrightnessEffect(0.2);
+    ASSERT_TRUE(r.changed());
+    EXPECT_EQ(r.message(), "AddEffect");
+
+    // Reflected in the engine snapshot and in the projection.
+    ASSERT_EQ(engine.clip(clip)->effects.size(), 1u);
+    EXPECT_EQ(engine.clip(clip)->effects[0].type, EffectType::Brightness);
+    const auto view = model.selectedClip();
+    ASSERT_TRUE(view.has_value());
+    ASSERT_EQ(view->effects.size(), 1u);
+    EXPECT_EQ(view->effects[0].parameters[0].name, "amount");
+    EXPECT_EQ(view->effects[0].parameters[0].value, 0.2);
+}
+
+// --- Set effect parameter --------------------------------------------------
+
+TEST(InspectorViewModel, SetEffectParameterUpdatesValueAndUndoesExactly) {
+    const ClipId clip = Uuid::generateV4();
+    Project project = makeProjectWithClip(clip);
+    Effect fx = Effect::brightness(0.1);
+    project.tracks[0].clips[0].effects.push_back(fx);
+    TimelineEngine engine(std::move(project));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    const CommandResult r = model.setEffectParameter(fx.id, "amount", 0.75);
+    ASSERT_TRUE(r.changed());
+    EXPECT_EQ(engine.clip(clip)->effects[0].parameters.at("amount"), 0.75);
+
+    // Undo restores the prior parameter value exactly.
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_EQ(engine.clip(clip)->effects[0].parameters.at("amount"), 0.1);
+}
+
+TEST(InspectorViewModel, SetEffectParameterOnMissingEffectFailsAndLeavesProjectUnchanged) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    const CommandResult r = model.setEffectParameter(Uuid::generateV4(), "amount", 0.5);
+    EXPECT_TRUE(r.isError());
+    EXPECT_EQ(r.error().code(), ErrorCode::NotFound);
+    EXPECT_TRUE(engine.clip(clip)->effects.empty());
+}
+
+// --- Set opacity / gain ----------------------------------------------------
+
+TEST(InspectorViewModel, SetOpacityAndGainApplyAndUndo) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    ASSERT_TRUE(model.setOpacity(0.25).changed());
+    EXPECT_EQ(engine.clip(clip)->opacity, 0.25);
+    ASSERT_TRUE(model.setGain(2.0).changed());
+    EXPECT_EQ(engine.clip(clip)->gain, 2.0);
+
+    // Undo the gain change, then the opacity change (LIFO).
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_EQ(engine.clip(clip)->gain, 1.0);
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_EQ(engine.clip(clip)->opacity, 1.0);
+}
+
+TEST(InspectorViewModel, OutOfRangeOpacityIsRejectedByEngineAndLeavesClipUnchanged) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    // opacity must be in [0,1]; 2.0 violates the invariant -> rolled back.
+    const CommandResult r = model.setOpacity(2.0);
+    EXPECT_TRUE(r.isError());
+    EXPECT_EQ(engine.clip(clip)->opacity, 1.0);  // unchanged
+}
+
+TEST(InspectorViewModel, NegativeGainIsRejectedByEngineAndLeavesClipUnchanged) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    const CommandResult r = model.setGain(-1.0);  // gain must be >= 0
+    EXPECT_TRUE(r.isError());
+    EXPECT_EQ(engine.clip(clip)->gain, 1.0);  // unchanged
+}
+
+// --- Trim (Requirement 2.4) ------------------------------------------------
+
+TEST(InspectorViewModel, TrimEndMapsToTrimClipCommandAndSetsOutPoint) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    ASSERT_TRUE(model.trimEnd(ms(600), FrameRate::fps24(), ms(2000)).changed());
+    EXPECT_EQ(engine.clip(clip)->sourceOut, ms(600));
+    EXPECT_EQ(engine.clip(clip)->duration(), ms(600));
+    EXPECT_EQ(engine.clip(clip)->timelineStart, ms(0));  // end edge leaves start fixed
+}
+
+TEST(InspectorViewModel, TrimEndClampsToSourceDuration) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    // Requesting an out-point past the source clamps to sourceDuration (2000ms).
+    ASSERT_TRUE(model.trimEnd(ms(9000), FrameRate::fps24(), ms(2000)).changed());
+    EXPECT_EQ(engine.clip(clip)->sourceOut, ms(2000));
+}
+
+TEST(InspectorViewModel, TrimStartShiftsInPointAndTimeline) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    ASSERT_TRUE(model.trimStart(ms(300), FrameRate::fps24(), ms(2000)).changed());
+    EXPECT_EQ(engine.clip(clip)->sourceIn, ms(300));
+    EXPECT_EQ(engine.clip(clip)->timelineStart, ms(300));
+    EXPECT_EQ(engine.clip(clip)->duration(), ms(700));
+}
+
+// --- Change notification ---------------------------------------------------
+
+TEST(InspectorViewModel, OnChangedFiresForSelectionEditAndExternalChange) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+
+    int notifications = 0;
+    model.setOnChanged([&] { ++notifications; });
+
+    model.selectClip(clip);          // selection change -> 1
+    EXPECT_EQ(notifications, 1);
+
+    ASSERT_TRUE(model.setOpacity(0.5).changed());  // model's own edit -> engine emit -> 2
+    EXPECT_EQ(notifications, 2);
+
+    // An edit from another surface (here: a direct engine command) also refreshes.
+    ASSERT_TRUE(engine.apply(std::make_unique<AddEffectCommand>(clip, Effect::blur(1.0)))
+                    .changed());
+    EXPECT_EQ(notifications, 3);
+
+    // Selecting the same clip again is a no-op (no extra notification).
+    model.selectClip(clip);
+    EXPECT_EQ(notifications, 3);
+}
+
+}  // namespace
+}  // namespace ui
+}  // namespace palmier

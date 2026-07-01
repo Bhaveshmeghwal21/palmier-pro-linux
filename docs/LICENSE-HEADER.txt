@@ -1,0 +1,80 @@
+Palmier Pro for Linux -- per-file license header templates
+==========================================================
+
+Every source file in the open-source components (Timeline_Editor, MCP_Server,
+and Agent_Chat) MUST begin with a GPLv3 header. We use the standard SPDX short
+identifier `GPL-3.0-or-later` as the first line so that automated license
+scanners (e.g. `reuse`, GitHub's license detection) recognize the file, and we
+follow it with the standard GPLv3 notice recommended by the Free Software
+Foundation ("How to Apply These Terms to Your New Programs" in the LICENSE
+file).
+
+Replace <YEAR> with the year the file was created (or a range such as
+2024-2025) and keep the copyright holder line consistent with the project.
+
+--------------------------------------------------------------------------------
+C++ sources and headers (.cpp, .hpp, .h, .cc, .cxx) and GLSL/shader sources
+--------------------------------------------------------------------------------
+
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Palmier Pro for Linux -- <one-line description of this file's purpose>
+// Copyright (C) <YEAR> Palmier, Inc. and contributors
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+--------------------------------------------------------------------------------
+Hash-comment files (CMakeLists.txt, *.cmake, shell scripts, YAML, Python)
+--------------------------------------------------------------------------------
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Palmier Pro for Linux -- <one-line description of this file's purpose>
+# Copyright (C) <YEAR> Palmier, Inc. and contributors
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+--------------------------------------------------------------------------------
+QML files (.qml)
+--------------------------------------------------------------------------------
+
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Palmier Pro for Linux -- <one-line description>
+// Copyright (C) <YEAR> Palmier, Inc. and contributors
+// Licensed under the GNU GPL v3 or later; see the LICENSE file at the
+// repository root or <https://www.gnu.org/licenses/>.
+
+--------------------------------------------------------------------------------
+Minimal header (acceptable for short build/config files)
+--------------------------------------------------------------------------------
+
+At minimum, a file MUST carry the SPDX identifier on its first line:
+
+  # SPDX-License-Identifier: GPL-3.0-or-later      (hash-comment files)
+  // SPDX-License-Identifier: GPL-3.0-or-later     (C-style files)
+
+Files that generate the closed-source Generative_AI_Service CLIENT stubs are
+still GPLv3 (only the remote service is proprietary) and therefore use the same
+headers above. See the NOTICE file for the open-source / closed-service split.

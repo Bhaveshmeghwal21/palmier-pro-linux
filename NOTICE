@@ -1,0 +1,77 @@
+Palmier Pro for Linux
+Copyright (C) 2024 Palmier, Inc. and contributors
+
+================================================================================
+Licensing overview
+================================================================================
+
+Palmier Pro for Linux is composed of two distinctly licensed parts. Read this
+notice together with the LICENSE file (the full, unmodified GNU General Public
+License, version 3) before redistributing or building upon this software.
+
+--------------------------------------------------------------------------------
+1. Open-source components  --  GNU GPLv3 (or later)
+--------------------------------------------------------------------------------
+
+The following components ARE the open-source project and are licensed under the
+GNU General Public License, version 3 or (at your option) any later version.
+Their complete corresponding source code is distributed under GPLv3, and the
+full unmodified license text is provided in the LICENSE file at the repository
+root:
+
+  * Timeline_Editor  -- the multi-track timeline video editor, domain core,
+                        media engine, GPU abstraction layer, export engine,
+                        localization, and Qt 6 UI (src/core, src/media,
+                        src/gpu, src/ui, src/app, and supporting build files).
+
+  * MCP_Server        -- the local Model Context Protocol server that exposes
+                        editor tools to external AI agents over loopback HTTP
+                        (part of src/services).
+
+  * Agent_Chat        -- the in-app conversational assistant that drives the
+                        editor through the same tool surface as the MCP_Server
+                        (part of src/services).
+
+These components operate with full functionality without any network connection
+to the closed generative service (see Requirement 13.3).
+
+--------------------------------------------------------------------------------
+2. Closed-source capability  --  NOT covered by the GPLv3 grant
+--------------------------------------------------------------------------------
+
+The generative-AI capability (the "Generative_AI_Service") is a closed-source,
+hosted service that is account-gated and requires a valid authenticated user
+account (an active subscription entitlement or valid Bring-Your-Own-Key
+credentials) before access is granted (see Requirements 6, 9, and 13.2).
+
+  * The Generative_AI_Service backend, its models, and its server-side source
+    code are proprietary and are NOT distributed under the GPLv3 and are NOT
+    part of the Corresponding Source of the open-source components above.
+
+  * This repository contains only the open-source GPLv3 CLIENT code that talks
+    to the hosted Generative_AI_Service over the network. The client stub is
+    GPLv3; the remote service it contacts is not.
+
+  * When no network connection or authenticated account is available, the
+    open-source editor, MCP server, and agent chat continue to function; only
+    the generative capability is unavailable, and the application surfaces a
+    non-blocking indication to that effect (see Requirement 13.4).
+
+--------------------------------------------------------------------------------
+3. Third-party dependencies
+--------------------------------------------------------------------------------
+
+This software builds against third-party libraries (for example Qt 6, FFmpeg,
+Vulkan/shaderc, libva, LittleCMS/lcms2, libsecret, GoogleTest, and RapidCheck),
+each distributed under its own license. Those licenses are not superseded by
+the GPLv3 grant that covers Palmier Pro's own source code; consult each
+dependency's license for its terms.
+
+================================================================================
+Applying the license header
+================================================================================
+
+Every source file in the open-source components carries an SPDX identifier
+(SPDX-License-Identifier: GPL-3.0-or-later). See docs/LICENSE-HEADER.txt for the
+canonical per-file header templates and CONTRIBUTING.md for the convention that
+all newly added files must follow.

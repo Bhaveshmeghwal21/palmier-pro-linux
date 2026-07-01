@@ -1,0 +1,1292 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# tests — GoogleTest (unit) + RapidCheck (property-based) test tree.
+#
+# This file wires up the two testing frameworks used across the project and
+# registers the resulting test binaries with CTest:
+#
+#   * GoogleTest  — example-based unit tests (see design "Unit testing").
+#   * RapidCheck  — property-based tests for correctness properties P1-P12
+#                   (see design "Property-based testing"). RapidCheck's
+#                   GoogleTest integration (RC_GTEST_PROP) lets property tests
+#                   run inside the same GoogleTest binary and be discovered by
+#                   CTest like any other test case.
+#
+# Both frameworks are pulled in with FetchContent so a checkout builds and
+# tests without a system-wide install. Pins are exact (a release tag for
+# GoogleTest, a commit for RapidCheck, which publishes no releases) for
+# reproducible builds.
+#
+# Property-test conventions enforced project-wide (see design "Testing
+# Strategy"):
+#   * Each property test runs a MINIMUM of 100 iterations. RapidCheck's default
+#     max_success is 100; we also set RC_PARAMS in the test environment so the
+#     floor is explicit and cannot silently regress.
+#   * Each property test is tagged, in the form:
+#         Feature: palmier-pro-linux, Property {n}: {text}
+#     and references the requirement clause(s) it validates.
+#
+# The placeholder property test (palmier_placeholder_property_test.cpp) exists
+# only to demonstrate this wiring, the tag format, and the 100-iteration floor;
+# real property tests for P1-P12 are added by later tasks and replace it.
+
+include(FetchContent)
+
+# ---------------------------------------------------------------------------
+# Minimum number of successful cases every property test must exercise.
+# Surfaced as a CMake cache variable so CI can raise (never lower) it, and
+# injected into each test's environment via RC_PARAMS below.
+# ---------------------------------------------------------------------------
+set(PALMIER_PBT_MIN_SUCCESS 100 CACHE STRING
+    "Minimum successful iterations per RapidCheck property test (>= 100)")
+
+# ---------------------------------------------------------------------------
+# GoogleTest — example-based unit tests.
+# ---------------------------------------------------------------------------
+FetchContent_Declare(googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        v1.15.2  # b514bdc898e2951020cbdca1304b75f5950d1f59
+    GIT_SHALLOW    TRUE)
+
+# Do not install GoogleTest with our project, and reuse our shared CRT on MSVC.
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+
+# ---------------------------------------------------------------------------
+# RapidCheck — property-based tests. Enable its GoogleTest integration so we
+# can write RC_GTEST_PROP(...) properties that CTest discovers as test cases.
+# RapidCheck has no tagged releases, so we pin an exact commit.
+# ---------------------------------------------------------------------------
+FetchContent_Declare(rapidcheck
+    GIT_REPOSITORY https://github.com/emil-e/rapidcheck.git
+    GIT_TAG        b2d9ed2dddefc4b84318d664b4f221eb792d89c7
+    GIT_SHALLOW    FALSE)
+
+set(RC_ENABLE_GTEST ON CACHE BOOL "Build the RapidCheck GoogleTest integration" FORCE)
+set(RC_ENABLE_TESTS OFF CACHE BOOL "Do not build RapidCheck's own test suite" FORCE)
+set(RC_ENABLE_EXAMPLES OFF CACHE BOOL "Do not build RapidCheck's examples" FORCE)
+
+FetchContent_MakeAvailable(googletest rapidcheck)
+
+# gtest_discover_tests() lives in the GoogleTest CMake module.
+include(GoogleTest)
+
+# ---------------------------------------------------------------------------
+# palmier_test_support — INTERFACE target bundling everything a test binary
+# needs: GoogleTest, RapidCheck, and RapidCheck's GoogleTest bridge. Test
+# targets added by later tasks just link this one.
+# ---------------------------------------------------------------------------
+add_library(palmier_test_support INTERFACE)
+add_library(Palmier::test_support ALIAS palmier_test_support)
+target_link_libraries(palmier_test_support INTERFACE
+    GTest::gtest
+    GTest::gtest_main
+    rapidcheck
+    rapidcheck_gtest)
+target_compile_features(palmier_test_support INTERFACE cxx_std_20)
+
+# ---------------------------------------------------------------------------
+# palmier_register_test(<target>)
+#
+# Registers a GoogleTest/RapidCheck binary with CTest via test discovery and
+# pins the property-test iteration floor into the test environment so every
+# RapidCheck property runs at least PALMIER_PBT_MIN_SUCCESS (>= 100) cases.
+# ---------------------------------------------------------------------------
+function(palmier_register_test target)
+    gtest_discover_tests(${target}
+        PROPERTIES
+            LABELS "palmier"
+            ENVIRONMENT "RC_PARAMS=max_success=${PALMIER_PBT_MIN_SUCCESS}")
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Placeholder test binary — proves the GoogleTest + RapidCheck wiring, the
+# required property tag format, and the 100-iteration floor. Replaced by the
+# real P1-P12 property tests in later tasks.
+# ---------------------------------------------------------------------------
+add_executable(palmier_placeholder_tests
+    palmier_placeholder_property_test.cpp)
+target_link_libraries(palmier_placeholder_tests PRIVATE Palmier::test_support)
+
+palmier_register_test(palmier_placeholder_tests)
+
+# ---------------------------------------------------------------------------
+# GPU abstraction layer — unit tests for device selection, capability probing,
+# the software fallback, and persisted GPU selection (task 7.1). These drive
+# GpuContext through a synthetic device enumerator so they run without a Vulkan
+# loader or physical GPU.
+# ---------------------------------------------------------------------------
+add_executable(palmier_gpu_tests
+    gpu_context_test.cpp
+    gpu_capability_probe_test.cpp
+    gpu_codec_bridge_test.cpp
+    frame_pool_test.cpp
+    gpu_compositor_test.cpp
+    gpu_effect_kernels_test.cpp)
+target_link_libraries(palmier_gpu_tests PRIVATE
+    Palmier::test_support
+    Palmier::gpu)
+
+palmier_register_test(palmier_gpu_tests)
+
+# ---------------------------------------------------------------------------
+# Core domain tests — unit tests for the project data model and validation
+# rules (task 2.2). Links the core library under test alongside the shared
+# GoogleTest/RapidCheck support target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_core_tests
+    core/project_validation_test.cpp
+    core/undo_redo_stack_test.cpp
+    core/timeline_engine_test.cpp)
+target_link_libraries(palmier_core_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_core_tests)
+
+# ---------------------------------------------------------------------------
+# Authentication service unit tests (Requirements 9.2-9.4). The auth source is
+# compiled directly into the test binary so the login/lockout policy can be
+# exercised in isolation, without pulling in the media/FFmpeg dependencies that
+# the full Palmier::services library links. AuthenticationService references the
+# BYOK manager (for its optional BYOK integration), so that source is compiled
+# in too.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_auth_tests
+    AuthenticationService_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
+target_include_directories(palmier_services_auth_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_auth_tests PRIVATE Palmier::test_support)
+
+palmier_register_test(palmier_services_auth_tests)
+
+# ---------------------------------------------------------------------------
+# BYOK credential unit tests (Requirements 9.5, 9.6). Exercise the validate ->
+# persist -> authorize policy and the AuthenticationService BYOK integration
+# with a scriptable provider-validator fake and the in-memory secret store.
+# SecretStore.cpp is compiled WITHOUT the PALMIER_HAVE_LIBSECRET define, so the
+# real libsecret path is not linked and makeSystemSecretStore() returns the
+# Unsupported stub the test asserts on — keeping the binary free of libsecret /
+# Secret Service dependencies.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_byok_tests
+    ByokCredentialManager_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/SecretStore.cpp")
+target_include_directories(palmier_services_byok_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_byok_tests PRIVATE Palmier::test_support)
+
+palmier_register_test(palmier_services_byok_tests)
+
+# ---------------------------------------------------------------------------
+# Media engine tests — unit tests for MediaDecoder's open/nextFrame/seek surface
+# and its HW-preferred / SW-fallback routing and zero-copy FramePool frames
+# (task 8.2; Requirements 3.1, 10.2, 10.5). These drive the decoder through the
+# IDecodeBackend seam with a mock backend and a host-memory FramePool, so they
+# run without a GPU, FFmpeg, or any vendor SDK. Links Palmier::media (which
+# brings in Palmier::gpu and Palmier::core).
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_tests
+    media_decoder_test.cpp)
+target_link_libraries(palmier_media_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_tests)
+
+# ---------------------------------------------------------------------------
+# Project store unit tests (task 5.1; Requirements 3.5, 3.6). The .palmier
+# serializer/deserializer is compiled directly into the test binary alongside
+# the core library so the persistence round-trip can be exercised in isolation,
+# without pulling in the media/FFmpeg, libsecret, or lcms2 dependencies that the
+# full Palmier::services library links. ProjectStore depends only on Palmier::core.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_project_store_tests
+    services/project_store_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp")
+target_include_directories(palmier_services_project_store_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_project_store_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_project_store_tests)
+
+
+# ---------------------------------------------------------------------------
+# Localization manager unit tests (Requirements 12.1-12.5, task 17.2). The
+# LocalizationManager source is compiled directly into the test binary so the
+# language-set / fallback / default-selection / persistence policy is exercised
+# in isolation, without pulling in the media/FFmpeg/libsecret dependencies that
+# the full Palmier::services library links. The manager is Qt-free and
+# dependency-free (standard library + core Result/Error only).
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_localization_tests
+    LocalizationManager_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/LocalizationManager.cpp")
+target_include_directories(palmier_services_localization_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_localization_tests PRIVATE Palmier::test_support)
+
+palmier_register_test(palmier_services_localization_tests)
+
+
+# ---------------------------------------------------------------------------
+# Media import validation unit tests (task 8.5; Requirements 3.2, 3.3). Drive
+# validateMediaImport through MediaProbe's injectable backend seam to cover the
+# accept path, the unsupported-format rejection (names the format), and the
+# unreadable-file rejection (indicates unreadable) — all without FFmpeg or real
+# media. Links Palmier::media (which brings in Palmier::gpu and Palmier::core).
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_import_validation_tests
+    media_import_validation_test.cpp)
+target_link_libraries(palmier_media_import_validation_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_import_validation_tests)
+
+
+# ---------------------------------------------------------------------------
+# Media manager unit tests (task 6.1; Requirements 3.1, 3.4). Exercise the
+# project media library (import/availability) and the per-clip generated-clip
+# version history, including the "at least the 10 most recent versions retained
+# and selectable" bound. MediaManager is pure domain data, so this links only
+# Palmier::core alongside the shared GoogleTest/RapidCheck support target. (The
+# dedicated version-retention property test P12 is added by task 6.2.)
+# ---------------------------------------------------------------------------
+add_executable(palmier_core_media_manager_tests
+    core/media_manager_test.cpp)
+target_link_libraries(palmier_core_media_manager_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_core_media_manager_tests)
+
+
+# ---------------------------------------------------------------------------
+# Transcription service unit tests (task 11.1; Requirements 4.1-4.6). The
+# TranscriptionService source is compiled directly into the test binary
+# alongside the core library so the ordering/validation, association,
+# empty-audio, and failure policy is exercised in isolation via a mock
+# ITranscriptionBackend, without pulling in the media/FFmpeg, libsecret, or
+# lcms2 dependencies that the full Palmier::services library links.
+# TranscriptionService depends only on Palmier::core.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_transcription_tests
+    TranscriptionService_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/TranscriptionService.cpp")
+target_include_directories(palmier_services_transcription_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_transcription_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_transcription_tests)
+
+
+# ---------------------------------------------------------------------------
+# Audio graph tests — unit tests for the audio graph's FFmpeg-free numeric core
+# (task 8.4; Requirement 2.8): buffer/rate math, channel up/down-mix, the linear
+# resampler, multi-source mixing (sum + clamp with gain), PCM pack/unpack, and
+# the AudioGraph orchestration. These run without FFmpeg, a GPU, or any vendor
+# SDK; the libswresample backend (when compiled in) satisfies the same IResampler
+# seam. Links Palmier::media (which brings in Palmier::gpu and Palmier::core).
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_audio_tests
+    media_audio_graph_test.cpp)
+target_link_libraries(palmier_media_audio_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_audio_tests)
+
+
+# ---------------------------------------------------------------------------
+# Media encoder tests — unit tests for MediaEncoder's create/submit/finish
+# surface and its HW-preferred / SW-fallback-on-init routing, GPU-vs-CPU frame
+# acceptance, and the resolution / presentation-order guards (task 8.3;
+# Requirements 10.2, 10.5). These drive the encoder through the IEncodeBackend
+# seam with a mock backend and a host-memory FramePool, so they run without a
+# GPU, FFmpeg, or any vendor SDK. Links Palmier::media (which brings in
+# Palmier::gpu and Palmier::core).
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_encoder_tests
+    media_encoder_test.cpp)
+target_link_libraries(palmier_media_encoder_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_encoder_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Generative AI client unit tests (task 14.1; Requirements 6.1, 6.3, 6.4, 6.6,
+# 6.8). The GenerativeClient source is compiled directly into the test binary
+# alongside the core library so the submit/poll/fetch lifecycle, the 300-second
+# timeout+cancel budget, and provider-failure handling are exercised in
+# isolation via a mock IGenerativeBackend and an injectable clock — without a
+# real network or the media/FFmpeg, libsecret, or lcms2 dependencies that the
+# full Palmier::services library links. GenerativeClient depends only on
+# Palmier::core.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_generative_tests
+    GenerativeClient_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp")
+target_include_directories(palmier_services_generative_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_generative_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_generative_tests)
+
+
+# ---------------------------------------------------------------------------
+# Project save-service unit tests (task 5.3; Requirements 3.6, 3.7). Exercise the
+# save success/failure handling layered on the `.palmier` store: a completed save
+# writes the complete state to the single target and reports success, while a save
+# that fails (inaccessible location, insufficient permissions, insufficient disk
+# space) preserves the last successfully saved file byte-for-byte via the atomic
+# write-to-temp-then-rename sequence and leaves the recorded last-saved status
+# unchanged. Disk-space / permission failures are injected through the
+# RawFileWriter seam, so the tests need no real full disk or root privileges. The
+# ProjectSaveService and ProjectStore sources are compiled directly into the test
+# binary alongside Palmier::core, without the media/FFmpeg, libsecret, or lcms2
+# dependencies that the full Palmier::services library links.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_project_save_tests
+    services/project_save_service_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp")
+target_include_directories(palmier_services_project_save_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_project_save_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_project_save_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Key-moment detector unit tests (task 12.1; Requirements 5.1, 5.2, 5.5). The
+# KeyMomentDetector source is compiled directly into the test binary alongside
+# the core library so the bounds enforcement, count cap, ordering/de-duplication,
+# and empty/zero-duration/failure policy is exercised in isolation via a mock
+# IKeyMomentBackend, without pulling in the media/FFmpeg, libsecret, or lcms2
+# dependencies that the full Palmier::services library links. KeyMomentDetector
+# depends only on Palmier::core.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_key_moment_tests
+    KeyMomentDetector_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/KeyMomentDetector.cpp")
+target_include_directories(palmier_services_key_moment_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_key_moment_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_key_moment_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Editing command unit tests (task 3.3; Requirements 2.2-2.7). Exercise the
+# concrete EditCommand subclasses (AddClip, DeleteClip, MoveClip, TrimClip,
+# SplitClip, ReorderClips, AddEffect): their edit semantics, the overlap /
+# out-of-range rejection paths, and the apply()/revert() round-trip (driven both
+# directly against a Project and through the TimelineEngine so invariant
+# enforcement and atomic rollback are covered). Links Palmier::core alongside the
+# shared GoogleTest/RapidCheck support target. (The dedicated property tests for
+# these commands — P3, P8, P9, P10 — are added by tasks 3.5-3.8.)
+# ---------------------------------------------------------------------------
+add_executable(palmier_core_edit_commands_tests
+    core/edit_commands_test.cpp)
+target_link_libraries(palmier_core_edit_commands_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_core_edit_commands_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Generative media coordinator unit tests (task 14.2; Requirements 6.2, 6.5,
+# 6.7, 9.7). Exercise prompt-length validation, entitlement gating (mock gate
+# plus the real AuthServiceGenerationGate over AuthenticationService, including
+# the BYOK path), and successful generate-and-place through the real
+# TimelineEnginePlacer + MediaManager. The coordinator and its collaborators are
+# compiled directly into the test binary so the policy runs in isolation, via a
+# mock generation gate/runner and an in-memory secret store, without a real
+# network, GPU, or the media/FFmpeg/libsecret dependencies that the full
+# Palmier::services library links. SecretStore.cpp is intentionally omitted
+# (InMemorySecretStore is header-only), keeping the binary free of libsecret.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_generative_coordinator_tests
+    GenerativeMediaCoordinator_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
+target_include_directories(palmier_services_generative_coordinator_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_generative_coordinator_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_generative_coordinator_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Media manager version-retention property test (task 6.2; Requirement 3.4).
+# The dedicated RapidCheck property P12 (generated-clip version retention): a
+# clip replaced by a generated clip keeps its prior version retained and
+# selectable, and at least the 10 most recent versions stay selectable. Drives
+# arbitrary sequences of generated-clip replacements against the pure-domain
+# MediaManager, so this links only Palmier::core alongside the shared
+# GoogleTest/RapidCheck support target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_core_media_manager_version_retention_tests
+    core/media_manager_version_retention_property_test.cpp)
+target_link_libraries(palmier_core_media_manager_version_retention_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_core_media_manager_version_retention_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Project store property test (task 5.2; Requirement 3.5). RapidCheck property
+# P11: for any valid project, serialize -> deserialize yields an equivalent
+# project (all clips, tracks, edits, and media references preserved). Like the
+# project-store unit tests, the `.palmier` serializer/deserializer is compiled
+# directly into the test binary alongside the core library so the round-trip is
+# exercised in isolation, without pulling in the media/FFmpeg, libsecret, or
+# lcms2 dependencies that the full Palmier::services library links. ProjectStore
+# depends only on Palmier::core.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_project_store_property_tests
+    services/project_store_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp")
+target_include_directories(palmier_services_project_store_property_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_project_store_property_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_project_store_property_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Timeline ordering / non-overlap property test (task 3.5; Requirements 2.2,
+# 2.3). RapidCheck property P3: after any sequence of editing commands
+# (add/move/trim/split/reorder/delete) driven through a TimelineEngine, every
+# track's clips remain ordered by timelineStart and non-overlapping outside an
+# incoming clip's explicit transition region. Drives arbitrary command sequences
+# against the engine's invariant enforcement and the concrete EditCommands, so
+# this links only Palmier::core alongside the shared GoogleTest/RapidCheck
+# support target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_core_timeline_ordering_property_tests
+    core/timeline_ordering_property_test.cpp)
+target_link_libraries(palmier_core_timeline_ordering_property_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_core_timeline_ordering_property_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Timeline undo/redo round-trip property test (task 3.4; Requirement 2.9).
+# RapidCheck property P1: for any command, apply() then undo() restores the
+# exact prior project state, and redo() reproduces the post-apply state. Drives
+# arbitrary sequences of the concrete EditCommands (add/delete/move/trim/split/
+# reorder/add-effect) through a TimelineEngine, snapshotting before and after
+# each applied command and asserting the undo/redo round-trip. Links only
+# Palmier::core alongside the shared GoogleTest/RapidCheck support target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_core_timeline_undo_redo_roundtrip_property_tests
+    core/timeline_undo_redo_roundtrip_property_test.cpp)
+target_link_libraries(palmier_core_timeline_undo_redo_roundtrip_property_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_core_timeline_undo_redo_roundtrip_property_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Key-moment marker overlay unit tests (task 12.2; Requirements 5.3, 5.4, 5.5).
+# Exercise the mapping from a detection result to timeline marker data: one
+# marker per detected timestamp (5.3), the distinct "no key moments" indication
+# with zero markers (5.4), a detection error recording nothing (5.5), the query
+# and observer surface, and the TimelineEngine integration (markers pruned when a
+# clip is removed). The KeyMomentMarkers and KeyMomentDetector sources are
+# compiled directly into the test binary alongside Palmier::core (which supplies
+# the real TimelineEngine and EditCommands), without the media/FFmpeg, libsecret,
+# or lcms2 dependencies that the full Palmier::services library links.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_key_moment_markers_tests
+    KeyMomentMarkers_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/KeyMomentMarkers.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/KeyMomentDetector.cpp")
+target_include_directories(palmier_services_key_moment_markers_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_key_moment_markers_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_key_moment_markers_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Export engine tests — unit tests for the export render loop + progress
+# reporting (task 10.1; Requirements 11.1, 11.2, 10.3, 10.8). Drive
+# ExportEngine::run with a real software Compositor (fed synthetic frames) and a
+# MediaEncoder built behind the IEncodeBackend seam with a mock backend, so the
+# full loop — frame stepping, strictly increasing presentation order, monotonic
+# 0-100% progress, HW-preferred routing, and error propagation — runs without a
+# GPU, FFmpeg, or any vendor SDK, and without mutating the source timeline. Links
+# Palmier::media (which brings in Palmier::gpu and Palmier::core).
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_export_tests
+    media_export_engine_test.cpp)
+target_link_libraries(palmier_media_export_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_export_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Timeline split contiguity / duration-conservation property test (task 3.6;
+# Requirement 2.5). RapidCheck property P8: splitting a clip at any interior
+# playhead yields two contiguous, non-overlapping clips whose combined timeline
+# duration equals the original clip duration and whose combined source range
+# equals the original source range. Drives the SplitClipCommand through a
+# TimelineEngine over arbitrary clip geometries and interior playhead positions,
+# so this links only Palmier::core alongside the shared GoogleTest/RapidCheck
+# support target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_core_timeline_split_property_tests
+    core/timeline_split_property_test.cpp)
+target_link_libraries(palmier_core_timeline_split_property_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_core_timeline_split_property_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Timeline reorder clip-count property test (task 3.7; Requirement 2.7).
+# RapidCheck property P9 (reorder preserves clip count): for any track and any
+# reordering of its clips — a valid permutation (accepted) or a malformed request
+# such as a wrong-length list, an unknown id, or a duplicate (rejected and rolled
+# back) — the track's total clip count is unchanged. Drives arbitrary sequences
+# of ReorderClipsCommand attempts through a TimelineEngine and asserts the count
+# after every attempt, so this links only Palmier::core alongside the shared
+# GoogleTest/RapidCheck support target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_core_timeline_reorder_property_tests
+    core/timeline_reorder_clip_count_property_test.cpp)
+target_link_libraries(palmier_core_timeline_reorder_property_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_core_timeline_reorder_property_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Timeline trim duration property test (task 3.8; Requirement 2.4). RapidCheck
+# property P10: for any clip and any valid trim boundary, after trimming the
+# clip's duration equals `sourceOut - sourceIn` for the new boundary, constrained
+# to [1 frame, source duration]. Drives TrimClipCommand on both edges with
+# whole-frame boundaries generated inside the permitted band, and independently
+# asserts the moved edge lands on the boundary, the duration matches, and the
+# retained content keeps its timeline position. Links only Palmier::core
+# alongside the shared GoogleTest/RapidCheck support target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_core_timeline_trim_property_tests
+    core/timeline_trim_duration_property_test.cpp)
+target_link_libraries(palmier_core_timeline_trim_property_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_core_timeline_trim_property_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Clip math edge case + undo-empty / split-miss unit tests (task 3.9;
+# Requirements 2.6, 2.10). Cover the clip/duration/frame arithmetic underpinning
+# the timeline (duration()/timelineEnd() identities, zero-length, single-tick,
+# and one-frame clips, and the frame <-> duration round-trip at boundary counts),
+# the undo/redo empty-history no-op-with-indication behaviour (2.10), and the
+# split-when-the-playhead-misses-all-clips rejection that leaves the project
+# unchanged (2.6). Drives the real TimelineEngine and SplitClipCommand, so this
+# links only Palmier::core alongside the shared GoogleTest/RapidCheck support
+# target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_core_clip_math_tests
+    core/clip_math_edge_cases_test.cpp)
+target_link_libraries(palmier_core_clip_math_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_core_clip_math_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# GPU/CPU parity property test (task 7.6; Requirement 10.7). RapidCheck property
+# P5: for any source frame and effect parameters, GPU vs software compositing
+# differ by no more than 1 per channel on a 0-255 scale (golden-image
+# comparison). Because this sandbox has no Vulkan/GPU, the test drives two lanes
+# through the available abstraction: the production software fallback
+# (applyEffectSoftware / applyTransitionSoftware) as the CPU lane, and an
+# independent normalized-space reference model of the SPIR-V effect kernels'
+# semantics (mirroring the GLSL in EffectKernels.cpp) as the GPU lane, asserting
+# per-channel parity within the tolerance. It is ready to compare against a real
+# compute-shader dispatch when a device is present. Links Palmier::gpu (which
+# supplies the software compositing reference and the kernel sources) alongside
+# the shared GoogleTest/RapidCheck support target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_gpu_parity_property_tests
+    gpu_gpu_cpu_parity_property_test.cpp)
+target_link_libraries(palmier_gpu_parity_property_tests PRIVATE
+    Palmier::gpu
+    Palmier::test_support)
+
+palmier_register_test(palmier_gpu_parity_property_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Generation validation & auth-gating unit tests (task 14.4; Requirements 6.5,
+# 6.7, 6.8). Targeted cases that complement the broader GenerativeClient (14.1)
+# and GenerativeMediaCoordinator (14.2) suites without duplicating them: the
+# prompt-length boundaries accepted through the full generate-and-place pipeline
+# (6.7), timeout cancellation on the fetchResult path / through the
+# GenerativeClientRunner adapter / surfaced by the coordinator (6.8), and the
+# AuthServiceGenerationGate subscription/BYOK branches plus the real gate driving
+# the coordinator end-to-end (6.5). Like the coordinator suite, the coordinator,
+# client, auth, and BYOK sources are compiled directly into the test binary so
+# the policy runs in isolation via mocks, an in-memory secret store, and an
+# injectable clock — without a real network, GPU, or the media/FFmpeg/libsecret
+# dependencies that the full Palmier::services library links. SecretStore.cpp is
+# intentionally omitted (InMemorySecretStore is header-only), keeping the binary
+# free of libsecret.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_generation_validation_tests
+    GenerationValidationAndAuthGating_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
+target_include_directories(palmier_services_generation_validation_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_generation_validation_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_generation_validation_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# No-partial-edits atomicity property test (task 14.3; Requirement 6.6).
+# RapidCheck property P2: any command either fully applies or leaves the project
+# unchanged — never a partial mutation. Exercises two axes: (1) arbitrary
+# EditCommand sequences (mixing success and deliberately-failing commands, plus a
+# null command every step) through a TimelineEngine, asserting a changed apply
+# yields an invariant-satisfying project and any non-change leaves it byte-for-
+# byte unchanged; and (2) the generative path — a GenerativeMediaCoordinator over
+# the real GenerativeClientRunner/GenerativeClient whose backend fails the job at
+# the provider — asserting the timeline and media library are left unchanged
+# (Req 6.6). Following the generative-coordinator test's isolated-source compile
+# pattern, the coordinator/client/auth/BYOK sources are compiled directly into
+# the binary alongside Palmier::core, without the media/FFmpeg, libsecret, or
+# lcms2 dependencies that the full Palmier::services library links.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_generative_atomicity_property_tests
+    services/generative_atomicity_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
+target_include_directories(palmier_services_generative_atomicity_property_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_generative_atomicity_property_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_generative_atomicity_property_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Graceful degradation property test (task 7.7; Requirements 10.4, 13.3).
+# RapidCheck property P7 (software-only lane): with no supported GPU (the
+# software-fallback context) or when ForceSoftware is selected, decode,
+# composite (renderAt), and encode all remain fully functional on the software
+# path for any source frame and effect parameters. The decode/encode lanes are
+# driven through the IDecodeBackend / IEncodeBackend seams with software-only
+# capabilities and BridgeAvailability::softwareOnly(), and compositing uses the
+# real vendor-neutral software Compositor — so the whole property runs without a
+# Vulkan loader, GPU, FFmpeg, or any vendor SDK, which is exactly the environment
+# graceful degradation must cover. Links Palmier::media (which brings in
+# Palmier::gpu and Palmier::core) alongside the shared GoogleTest/RapidCheck
+# support target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_gpu_graceful_degradation_property_tests
+    gpu_graceful_degradation_property_test.cpp)
+target_link_libraries(palmier_gpu_graceful_degradation_property_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_gpu_graceful_degradation_property_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Export frame ordering property test (task 10.3; Requirement 11.1). RapidCheck
+# property P6: the frames rendered by an export are emitted in strictly
+# increasing presentation time. Drives ExportEngine::run over arbitrary
+# timelines, frame rates (integer and NTSC-style rational), and output
+# resolutions with a real software Compositor (fed synthetic solid frames) and a
+# MediaEncoder built behind the IEncodeBackend seam with a mock backend that
+# records every submitted frame's presentation time, then asserts the recorded
+# sequence is strictly increasing. Runs without a GPU, FFmpeg, or any vendor SDK.
+# Links Palmier::media (which brings in Palmier::gpu and Palmier::core) alongside
+# the shared GoogleTest/RapidCheck support target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_export_ordering_property_tests
+    media_export_ordering_property_test.cpp)
+target_link_libraries(palmier_media_export_ordering_property_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_export_ordering_property_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Key-moment bounds & error-handling unit tests (task 12.3; Requirements 5.2,
+# 5.4, 5.5). Focused cases complementing the broader task-12.1 suite: the tight
+# inclusive/just-past-edge timestamp bounds and whole-millisecond precision
+# (5.2), empty-result handling for both an empty backend result and an all-out-
+# of-range result that filters to empty (5.4), and the empty / zero-duration
+# clip error path — descriptive error, no timestamps, engine never consulted
+# (5.5). Following the task-12.1 isolated-source pattern, KeyMomentDetector.cpp
+# is compiled directly into the test binary alongside Palmier::core, without the
+# media/FFmpeg, libsecret, or lcms2 dependencies that the full Palmier::services
+# library links. KeyMomentDetector depends only on Palmier::core.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_key_moment_bounds_tests
+    KeyMomentBounds_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/KeyMomentDetector.cpp")
+target_include_directories(palmier_services_key_moment_bounds_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_key_moment_bounds_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_key_moment_bounds_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# MCP server transport + lifecycle unit tests (task 15.2; Requirements 7.1,
+# 7.2, 7.3, 7.9). Exercise the pure request-routing (dispatch: /mcp-only, POST-
+# only, JSON parse-error, handler delegation, missing-handler 503), the
+# loopback-only admission check, and the real bind/listen/accept lifecycle over
+# an ephemeral loopback port — start/stop within budget, idempotent stop, a live
+# HTTP round-trip to an injected handler, and the port-in-use refusal that leaves
+# the server stopped. The McpServer source (and the Json value it uses) are
+# compiled directly into the test binary alongside Palmier::core, so the tests
+# run without the media/FFmpeg, libsecret, or lcms2 dependencies that the full
+# Palmier::services library links. McpServer uses only POSIX sockets + the
+# standard library and depends only on Palmier::core.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_mcp_server_tests
+    services/mcp_server_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_mcp_server_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_mcp_server_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_mcp_server_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# MCP tool-execution policy unit tests (task 15.3; Requirements 7.4-7.7, 7.10).
+# Exercise McpToolExecutor over a real TimelineEngine and the shared ToolRegistry:
+# recognized-tool success within budget (7.4), unknown-tool error leaving the
+# project unchanged (7.5), execution-failure rollback (7.6), timeout abort +
+# rollback driven through an injected clock (7.7), the no-project-open error
+# (7.10), and schema validation rejecting malformed input before any command is
+# created (7.10). The executor, tool surface, and JSON value sources are compiled
+# directly into the test binary alongside Palmier::core (which supplies the real
+# TimelineEngine and EditCommands), without the media/FFmpeg, libsecret, or lcms2
+# dependencies that the full Palmier::services library links.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_mcp_executor_tests
+    services/mcp_tool_executor_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_mcp_executor_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_mcp_executor_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_mcp_executor_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Import -> edit -> export end-to-end integration test (task 10.4; Requirements
+# 11.1, 11.6). Wires the real production pipeline together per source codec
+# (H.264, HEVC, AV1, VP9): import validation through MediaProbe's injectable
+# backend seam, cataloging in the real MediaManager, real edits through the
+# TimelineEngine + EditCommands (AddEffect + SplitClip), the vendor-neutral
+# software Compositor fed by a real MediaDecoder decoding synthetic per-codec
+# frames, and ExportEngine::run driving the Compositor + MediaEncoder behind the
+# IEncodeBackend seam with a mock backend that writes a genuine, well-formed
+# output file to disk. Asserts that, for every codec, the complete timeline is
+# rendered into a single output file (11.1) whose reported location names a real,
+# valid, non-empty file (11.6). Runs without a GPU, FFmpeg, or any vendor SDK.
+# Links Palmier::media (which brings in Palmier::gpu and Palmier::core) alongside
+# the shared GoogleTest/RapidCheck support target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_import_edit_export_integration_tests
+    media_import_edit_export_integration_test.cpp)
+target_link_libraries(palmier_media_import_edit_export_integration_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_import_edit_export_integration_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# In-app agent orchestrator unit tests (task 16.1; Requirements 8.1, 8.5, 8.6,
+# 8.7). Exercise the agent chat send pipeline over a real TimelineEngine, the
+# shared ToolRegistry, and the real McpToolExecutor: a message translated into a
+# tool call mutates the project through the same path as the MCP server and is
+# reflected synchronously (8.1/8.6); a failed edit is rolled back and the project
+# left unchanged with an error surfaced (8.7); and an unauthorized send is
+# rejected (Unauthenticated) with the unsent message preserved for retry (8.5),
+# covering both a mock gate and the real AuthServiceAgentGate over the
+# AuthenticationService (subscription + BYOK branches). The orchestrator, tool
+# surface, JSON value, auth, and BYOK sources are compiled directly into the test
+# binary alongside Palmier::core (which supplies the real TimelineEngine and
+# EditCommands), without the media/FFmpeg, libsecret, or lcms2 dependencies that
+# the full Palmier::services library links.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_agent_orchestrator_tests
+    services/agent_orchestrator_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
+target_include_directories(palmier_services_agent_orchestrator_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_agent_orchestrator_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_agent_orchestrator_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# MCP HTTP protocol-conformance integration tests (task 15.5; Requirements 7.4,
+# 7.5, 7.6, 7.10). Unlike the transport unit tests (15.2) and the execution-
+# policy unit tests (15.3), which each cover one half of Component 2 in
+# isolation, this suite wires the two halves TOGETHER as the composition root
+# does — a real TimelineEngine + the default ToolRegistry behind an
+# McpToolExecutor, plugged into the McpServer as its request handler — and drives
+# real HTTP POST requests to /mcp over an ephemeral loopback port. It asserts a
+# recognized edit tool changes the resulting project state (7.4), an unknown tool
+# returns an error response and leaves the project unchanged (7.5), a failing tool
+# rolls back and returns an error (7.6), and a no-project / schema-invalid request
+# returns the appropriate error (7.10), plus HTTP-level conformance (unknown path
+# 404, non-POST 405, malformed JSON 400). The McpServer, McpToolExecutor,
+# ToolRegistry, and Json sources are compiled directly into the test binary
+# alongside Palmier::core (which supplies the real TimelineEngine and
+# EditCommands), so the tests run without the media/FFmpeg, libsecret, or lcms2
+# dependencies that the full Palmier::services library links. The whole stack uses
+# only POSIX sockets + the standard library and depends only on Palmier::core.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_mcp_http_integration_tests
+    services/mcp_http_integration_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_mcp_http_integration_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_mcp_http_integration_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_mcp_http_integration_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# UI / MCP / agent edit equivalence property test (task 15.4; Requirements 7.4,
+# 8.1, 8.4). RapidCheck property P4: for any generated editing operation
+# (add/delete/move/trim/split/reorder/add_effect) applied to three identical
+# starting projects, issuing the edit via the UI path (a concrete EditCommand
+# applied through TimelineEngine::apply), the MCP path (McpToolExecutor over the
+# shared ToolRegistry), and the agent path (AgentOrchestrator driving the same
+# executor+registry) all produce the same resulting project state. Freshly
+# minted ids (a split's right-half id, an add_effect's effect id) are compared
+# modulo a consistent id renaming; the add_clip id is pre-generated and passed
+# explicitly through every path. Following the agent-orchestrator test's
+# isolated-source compile pattern, the orchestrator, executor, tool surface,
+# JSON value, auth, and BYOK sources are compiled directly into the test binary
+# alongside Palmier::core (which supplies the real TimelineEngine and
+# EditCommands), without the media/FFmpeg, libsecret, or lcms2 dependencies that
+# the full Palmier::services library links.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_edit_equivalence_property_tests
+    services/edit_equivalence_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
+target_include_directories(palmier_services_edit_equivalence_property_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_edit_equivalence_property_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_edit_equivalence_property_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# @-mention resolution tests (task 16.2; Requirements 8.2, 8.3, 8.4). Exercise
+# the MentionResolver's parsing, matching, and canonical rewrite, its
+# MessagePreprocessor adapters, and an end-to-end check that a resolved mention
+# reaches the shared tool executor while an unmatched (8.3) or ambiguous (8.4)
+# mention rejects the message before it is submitted. Following the agent-
+# orchestrator suite's isolated-source compile pattern, the resolver,
+# orchestrator, executor, tool surface, JSON value, auth, and BYOK sources are
+# compiled directly into the test binary alongside Palmier::core (which supplies
+# the real TimelineEngine, EditCommands, and MediaManager), without the
+# media/FFmpeg, libsecret, or lcms2 dependencies that the full Palmier::services
+# library links. (Task 16.3 adds the dedicated mention-resolution + auth-gating
+# suite under its own target.)
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_mention_resolver_tests
+    services/mention_resolver_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/MentionResolver.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
+target_include_directories(palmier_services_mention_resolver_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_mention_resolver_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_mention_resolver_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Application shell — platform compatibility unit tests (task 19.1; Requirements
+# 1.1, 1.3, 1.4, 1.5, 13.3, 13.4). Exercise the Qt-free PlatformCompatibility
+# checker's pure verdict logic (evaluateCompatibility) with injected
+# PlatformFacts: a supported host passes; an unsupported CPU architecture and a
+# too-old / undetectable glibc are each reported as an unsupported platform;
+# every missing runtime dependency is named individually; combined failures are
+# all reported together; and the verdict is a deterministic, network-free pure
+# function that completes far within the launch budget. Links only
+# Palmier::app_platform (the always-built, Qt-free checker library) alongside the
+# shared GoogleTest/RapidCheck support target, so it runs without Qt, FFmpeg,
+# Vulkan, or a GPU.
+# ---------------------------------------------------------------------------
+add_executable(palmier_app_platform_compat_tests
+    app/platform_compatibility_test.cpp)
+target_link_libraries(palmier_app_platform_compat_tests PRIVATE
+    Palmier::app_platform
+    Palmier::test_support)
+
+palmier_register_test(palmier_app_platform_compat_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Mention-resolution + auth-gating combined unit tests (task 16.3; Requirements
+# 8.2, 8.3, 8.4, 8.5). Unlike the mention-resolver suite (16.2), which drives the
+# MentionResolver in isolation with an always-authorizing gate, and the agent-
+# orchestrator suite (16.1), which drives the auth gate with the mention seam
+# stubbed, this suite exercises BOTH policies together END-TO-END through the
+# AgentOrchestrator with the real @-mention preprocessor and the auth gate wired
+# in. It covers the 16.3 checklist — single-match resolve (8.2), no-match
+# rejection (8.3), multi-match prompt (8.4), unauthenticated gating (8.5) — plus
+# the interaction the isolated suites cannot: the gate runs BEFORE mention
+# resolution (an unauthorized send of an unmatched/ambiguous @mention is rejected
+# as Unauthenticated with the RAW text preserved, and the preprocessor never
+# runs), and a preserved @mention message then resolves after authenticating —
+# via a mock gate and via the real AuthServiceAgentGate (subscription + BYOK
+# branches). Following the mention-resolver suite's isolated-source compile
+# pattern, the resolver, orchestrator, executor, tool surface, JSON value, auth,
+# and BYOK sources are compiled directly into the test binary alongside
+# Palmier::core (which supplies the real TimelineEngine, EditCommands, and
+# MediaManager), without the media/FFmpeg, libsecret, or lcms2 dependencies that
+# the full Palmier::services library links.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_mention_auth_gating_tests
+    services/mention_auth_gating_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/MentionResolver.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
+target_include_directories(palmier_services_mention_auth_gating_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_mention_auth_gating_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_mention_auth_gating_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Media Browser view-model unit tests (task 19.5; Requirements 3.1, 3.4, 5.3,
+# 5.4). Exercise the Qt-free MediaBrowserViewModel: import wired to the Media
+# Manager (adds to the library on success (3.1); leaves it unchanged and surfaces
+# a naming message on an unsupported-format (3.2) / unreadable-file (3.3)
+# rejection), the per-clip retained-version list (selectable, active version
+# marked, at least the 10 most recent retained — 3.4), and the key-moment display
+# (a marker per detected timestamp (5.3), the distinct "no key moments"
+# indication with no markers (5.4), and NotAnalyzed before any detection). The
+# view model and the KeyMomentMarkers/KeyMomentDetector service sources it reads
+# are compiled directly into the test binary alongside Palmier::core (which
+# supplies the real MediaManager and TimelineEngine), following the isolated-
+# source pattern so the tests run without Qt or the media/FFmpeg, libsecret, or
+# lcms2 dependencies that the full Palmier::services library links.
+# ---------------------------------------------------------------------------
+add_executable(palmier_ui_media_browser_viewmodel_tests
+    ui/media_browser_viewmodel_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/ui/MediaBrowserViewModel.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/KeyMomentMarkers.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/KeyMomentDetector.cpp")
+target_include_directories(palmier_ui_media_browser_viewmodel_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_ui_media_browser_viewmodel_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_ui_media_browser_viewmodel_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Inspector/Effects view-model unit tests (task 19.4; Requirement 2.4). Exercise
+# the Qt-free InspectorViewModel end-to-end: the selected-clip projection
+# (properties + name-sorted effect parameters), and the mapping of every
+# Inspector edit onto the undoable EditCommand path — adding an effect
+# (AddEffectCommand), editing an effect parameter (SetEffectParameterCommand),
+# adjusting opacity/gain (SetClipPropertyCommand, including the engine's
+# out-of-range rejection), and trimming an edge (TrimClipCommand, constrained to
+# [1 frame, source duration]), plus the onChanged notification on selection,
+# self-edits, and external edits. Following the services suites' isolated-source
+# pattern, the view model source (which also defines the two Inspector-only
+# commands) is compiled directly into the test binary alongside Palmier::core
+# (which supplies the real TimelineEngine and EditCommands), so the tests run
+# without Qt or the PALMIER_BUILD_UI dependency chain.
+# ---------------------------------------------------------------------------
+add_executable(palmier_ui_inspector_viewmodel_tests
+    ui/inspector_viewmodel_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/ui/InspectorViewModel.cpp")
+target_include_directories(palmier_ui_inspector_viewmodel_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_ui_inspector_viewmodel_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_ui_inspector_viewmodel_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Timeline view-model unit tests (task 19.2; Requirements 2.1-2.7). Exercise the
+# Qt-free TimelineViewModel — the presentation adapter behind the Qt Timeline
+# view — in isolation: the tracks x clips model-shape projection across the full
+# 1-50 track range (2.1), and the gesture -> EditCommand mapping with its
+# indication classification (drag-move + invalid-drop retention 2.2/2.3, trim to
+# boundary 2.4, split contiguity + nothing-to-split 2.5/2.6, reorder preserving
+# clip count 2.7, and undo/redo with the empty-history no-op 2.9/2.10). The
+# adapter's source is compiled directly into the test binary alongside
+# Palmier::core (which supplies the real TimelineEngine and EditCommands), so the
+# tests run WITHOUT Qt, FFmpeg, Vulkan, or a GPU — independent of PALMIER_BUILD_UI.
+# ---------------------------------------------------------------------------
+add_executable(palmier_ui_timeline_viewmodel_tests
+    ui/timeline_viewmodel_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/ui/TimelineViewModel.cpp")
+target_include_directories(palmier_ui_timeline_viewmodel_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_ui_timeline_viewmodel_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_ui_timeline_viewmodel_tests)
+
+
+
+
+
+# ---------------------------------------------------------------------------
+# Agent Chat view-model unit tests (task 19.6; Requirements 8.1, 8.2, 8.3, 8.4,
+# 8.5, 10.4, 13.4). Exercise the Qt-free AgentChatViewModel end-to-end: a sent
+# message drives the SAME shared tool path as the MCP server and lands in the
+# transcript (8.1/8.6); an unauthorized send is surfaced as
+# AuthenticationRequired with the unsent text preserved (8.5); @-mention
+# affordances report unique-resolve (8.2), unmatched (8.3), and ambiguous-with-
+# candidates (8.4) both as a pre-send preview and on submit; the non-blocking
+# GPU-unavailable notice is derived from a software-fallback GpuContext (10.4);
+# and the generative-service-unavailable error leaves the open-source editor
+# fully functional (13.4). Following the services / sibling view-model suites'
+# isolated-source pattern, the view model and the agent send-stack sources it
+# drives (AgentOrchestrator, MentionResolver, McpToolExecutor, ToolRegistry,
+# Json, AuthenticationService, ByokCredentialManager) are compiled directly into
+# the test binary alongside Palmier::core (which supplies the real TimelineEngine
+# and EditCommands), so the tests run without Qt or the media/FFmpeg, libsecret,
+# or lcms2 dependencies that the full Palmier::services library links.
+# ---------------------------------------------------------------------------
+add_executable(palmier_ui_agent_chat_viewmodel_tests
+    ui/agent_chat_viewmodel_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/ui/AgentChatViewModel.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/MentionResolver.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
+target_include_directories(palmier_ui_agent_chat_viewmodel_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_ui_agent_chat_viewmodel_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_ui_agent_chat_viewmodel_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Preview/player controller unit tests (task 19.3; Requirements 2.8, 10.7).
+# Exercise the Qt-free PreviewController headlessly: the preview frame rate
+# floored at a minimum of 24 fps (2.8), the >= 24-frames-per-wall-second
+# presentation cadence driven by an injected manual clock, the GPU-active vs
+# CPU-fallback render-path selection from the GpuContext capabilities and the
+# retry-on-CPU degrade when a GPU render fails (10.7), the FrameSink delivery of
+# composited frames, and the transport (play/pause/stop/seek + auto-stop at the
+# end of a bounded timeline). The controller source is compiled directly into
+# the test binary alongside Palmier::core and Palmier::gpu (which supply the real
+# Project model and the vendor-neutral software Compositor / GpuContext), so the
+# tests run without Qt, Vulkan, FFmpeg, or a GPU.
+# ---------------------------------------------------------------------------
+add_executable(palmier_ui_preview_controller_tests
+    ui/preview_controller_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp")
+target_include_directories(palmier_ui_preview_controller_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_ui_preview_controller_tests PRIVATE
+    Palmier::core
+    Palmier::gpu
+    Palmier::test_support)
+
+palmier_register_test(palmier_ui_preview_controller_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Application composition-root unit tests (task 21.1; Requirements 1.6, 7.1,
+# 7.2, 7.9, 13.3). Exercise the Qt-free ApplicationComposition headlessly: every
+# component is composed and cross-wired (the executor is bound to the composed
+# TimelineEngine, the shared ToolRegistry backs both the MCP server and the
+# agent); the MCP server starts on launch and stops on close within its
+# lifecycle (idempotent stop, restart, and destructor-stops-a-running-server);
+# a tools/call routed through the composed server reaches the same engine; the
+# offline auth gate rejects an agent send while preserving the unsent text; and
+# the GPU context degrades to the software fallback with no GPU. Following the
+# services suites' isolated-source pattern, the composition root and the whole
+# service send-stack it wires (project I/O, auth + BYOK, generative client +
+# coordinator, ToolRegistry, executor, McpServer, agent orchestrator, mention
+# resolver, localization) plus the Json value are compiled directly into the
+# test binary alongside Palmier::core and Palmier::gpu (which supply the real
+# TimelineEngine, MediaManager, and the software GpuContext), so the tests run
+# WITHOUT Qt or the media/FFmpeg, libsecret, or lcms2 dependencies that the full
+# Palmier::services library links. SecretStore.cpp is intentionally omitted
+# (InMemorySecretStore is header-only), keeping the binary free of libsecret.
+# ---------------------------------------------------------------------------
+add_executable(palmier_app_composition_tests
+    app/application_composition_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/app/ApplicationComposition.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/MentionResolver.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/LocalizationManager.cpp")
+target_include_directories(palmier_app_composition_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_app_composition_tests PRIVATE
+    Palmier::core
+    Palmier::gpu
+    Palmier::test_support)
+
+palmier_register_test(palmier_app_composition_tests)

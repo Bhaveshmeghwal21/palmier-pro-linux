@@ -1,0 +1,129 @@
+# -----------------------------------------------------------------------------
+# Palmier Pro Linux — Continuous Integration
+#
+# Builds the ground-up C++20 Linux port (Qt 6 + FFmpeg + Vulkan + shaderc +
+# lcms2 + libsecret) and runs the full GoogleTest + RapidCheck suite end-to-end.
+#
+# Unlike the lightweight dev sandbox (which lacks the native toolchain), this CI
+# runner installs every native dependency the project discovers in
+# cmake/PalmierDependencies.cmake, so the complete CMake configure -> build ->
+# CTest flow — including the P1–P12 RapidCheck property tests — runs for real.
+#
+# Notes on build options (see cmake/PalmierOptions.cmake):
+#   * PALMIER_BUILD_TESTS  = ON   -> compile + register the CTest suite
+#   * PALMIER_BUILD_UI     = ON   -> build the Qt 6 presentation layer
+#   * PALMIER_ENABLE_VAAPI = ON   -> libva HW path (libva-dev is installed)
+#   * PALMIER_ENABLE_NVENC = OFF  -> would need ffnvcodec (nv-codec-headers)
+#   * PALMIER_ENABLE_QSV   = OFF  -> would need oneVPL/libvpl (libvpl-dev)
+# NVENC/QSV are disabled here so configuration succeeds with the packages that
+# ship in the Ubuntu archive; the FFmpeg software codec path still covers tests.
+#
+# Runs on ubuntu-24.04 to satisfy the app's platform check (glibc >= 2.31).
+# RapidCheck reads RC_PARAMS from the environment; the tests already set a
+# >=100 max_success floor via gtest_discover_tests ENVIRONMENT, so no extra
+# RC_PARAMS is needed. CTest is wrapped in `xvfb-run -a` to give any Qt widget
+# test a virtual display.
+# -----------------------------------------------------------------------------
+
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - main
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+
+    env:
+      CMAKE_BUILD_TYPE: RelWithDebInfo
+      # Route compilation through ccache to speed up incremental CI builds.
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            ccache \
+            xvfb \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-declarative-dev \
+            qt6-tools-dev \
+            qt6-tools-dev-tools \
+            qml6-module-qtquick \
+            qml6-module-qtquick-controls \
+            qml6-module-qtquick-window \
+            qml6-module-qtqml-workerscript \
+            libgl1-mesa-dev \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libavfilter-dev \
+            libswscale-dev \
+            libswresample-dev \
+            libavdevice-dev \
+            libvulkan-dev \
+            vulkan-validationlayers \
+            glslang-tools \
+            spirv-tools \
+            libshaderc-dev \
+            libva-dev \
+            liblcms2-dev \
+            libsecret-1-dev
+
+      - name: Verify toolchain versions
+        run: |
+          cmake --version
+          ninja --version
+          pkg-config --modversion libavcodec || true
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-
+
+      - name: Configure (CMake + Ninja)
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DPALMIER_BUILD_TESTS=ON \
+            -DPALMIER_BUILD_UI=ON \
+            -DPALMIER_ENABLE_VAAPI=ON \
+            -DPALMIER_ENABLE_NVENC=OFF \
+            -DPALMIER_ENABLE_QSV=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test (CTest, headless via xvfb)
+        run: xvfb-run -a ctest --test-dir build --output-on-failure
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-logs
+          path: build/Testing/**
+          if-no-files-found: ignore
