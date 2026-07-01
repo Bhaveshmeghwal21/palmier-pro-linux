@@ -58,7 +58,7 @@ Result<ClipMarkers> KeyMomentMarkerModel::record(
 
     ClipMarkers markers = std::move(classified).value();
     byClip_[clipId] = markers;
-    emit(markers);
+    notifyObservers(markers);
     return markers;
 }
 
@@ -128,7 +128,7 @@ Subscription KeyMomentMarkerModel::observe(std::function<void(const ClipMarkers&
     });
 }
 
-void KeyMomentMarkerModel::emit(const ClipMarkers& markers) const {
+void KeyMomentMarkerModel::notifyObservers(const ClipMarkers& markers) const {
     // Iterate over a snapshot so an observer that (un)subscribes from within its
     // callback cannot invalidate the iteration.
     std::vector<std::function<void(const ClipMarkers&)>> current;

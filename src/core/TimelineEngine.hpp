@@ -133,7 +133,10 @@ private:
     };
 
     // Emit a change to every currently-registered observer.
-    void emit(const ChangeSet& change) const;
+    // NB: intentionally NOT named `emit` — that is a Qt keyword-macro (from
+    // <QObject>), so a member of that name breaks any Qt translation unit that
+    // includes this header (e.g. src/ui/TimelineModel.cpp + AUTOMOC).
+    void notifyObservers(const ChangeSet& change) const;
 
     Project                          project_;
     UndoRedoStack                    undoStack_;

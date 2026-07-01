@@ -254,7 +254,7 @@ CommandResult TimelineEngine::apply(std::unique_ptr<EditCommand> cmd) {
     // 3. Success: record the command for undo, then notify observers with a
     //    granular ChangeSet before returning.
     undoStack_.record(std::move(cmd));
-    emit(buildChangeSet(before, project_, ChangeOrigin::Apply, description));
+    notifyObservers(buildChangeSet(before, project_, ChangeOrigin::Apply, description));
     return CommandResult::applied(std::move(description));
 }
 
@@ -262,7 +262,7 @@ CommandResult TimelineEngine::undo() {
     Project before = project_;
     CommandResult result = undoStack_.undo(project_);
     if (result.changed()) {
-        emit(buildChangeSet(before, project_, ChangeOrigin::Undo, result.message()));
+        notifyObservers(buildChangeSet(before, project_, ChangeOrigin::Undo, result.message()));
     }
     return result;
 }
@@ -271,7 +271,7 @@ CommandResult TimelineEngine::redo() {
     Project before = project_;
     CommandResult result = undoStack_.redo(project_);
     if (result.changed()) {
-        emit(buildChangeSet(before, project_, ChangeOrigin::Redo, result.message()));
+        notifyObservers(buildChangeSet(before, project_, ChangeOrigin::Redo, result.message()));
     }
     return result;
 }
@@ -294,7 +294,7 @@ Subscription TimelineEngine::observe(std::function<void(const ChangeSet&)> callb
     });
 }
 
-void TimelineEngine::emit(const ChangeSet& change) const {
+void TimelineEngine::notifyObservers(const ChangeSet& change) const {
     // Iterate over a snapshot of the callbacks so an observer that unsubscribes
     // (or subscribes) from within its callback cannot invalidate the iteration.
     std::vector<std::function<void(const ChangeSet&)>> current;

@@ -171,7 +171,7 @@ public:
     /// describing the first problem encountered.
     [[nodiscard]] static Result<Json> parse(std::string_view text);
 
-    [[nodiscard]] friend bool operator==(const Json& a, const Json& b);
+    friend bool operator==(const Json& a, const Json& b);
     [[nodiscard]] friend bool operator!=(const Json& a, const Json& b) { return !(a == b); }
 
 private:

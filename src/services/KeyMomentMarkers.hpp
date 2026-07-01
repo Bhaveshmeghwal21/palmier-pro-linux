@@ -235,7 +235,11 @@ private:
         std::uint64_t nextId = 1;
     };
 
-    void emit(const ClipMarkers& markers) const;
+    // NB: intentionally NOT named `emit` — that is a Qt keyword-macro (from
+    // <QObject>). This header is pulled into Qt translation units (via
+    // ui/MediaBrowserViewModel.hpp -> ui/MediaBrowserPanel.hpp), so a member
+    // named `emit` would be mangled by the macro and fail to compile there.
+    void notifyObservers(const ClipMarkers& markers) const;
 
     std::unordered_map<ClipId, ClipMarkers> byClip_;
     std::vector<Subscription>               timelineSubscriptions_;
