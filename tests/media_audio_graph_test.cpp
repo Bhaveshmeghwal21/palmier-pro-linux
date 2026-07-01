@@ -259,30 +259,33 @@ TEST(AudioGraph, MixesTwoSourcesIntoCommonOutputFormat) {
     ASSERT_TRUE(b.isOk());
     EXPECT_EQ(graph.sourceCount(), 2u);
 
-    AudioBuffer inA = AudioBuffer::interleaved(48000, 2, {0.2f, 0.2f, 0.2f, 0.2f}); // 2 frames
-    AudioBuffer inB = AudioBuffer::interleaved(24000, 1, {0.1f, 0.1f});             // 2 -> 4 frames
+    // Long, constant-valued buffers so a deep interior frame is unambiguously
+    // at the input value on BOTH backends (well past any resampler filter delay).
+    AudioBuffer inA =
+        AudioBuffer::interleaved(48000, 2, std::vector<float>(240, 0.2f)); // 120 frames
+    AudioBuffer inB =
+        AudioBuffer::interleaved(24000, 1, std::vector<float>(100, 0.1f)); // 100 -> 200 frames
 
     auto rendered = graph.render({inA, inB});
     ASSERT_TRUE(rendered.isOk());
     const AudioBuffer& out = rendered.value();
     EXPECT_EQ(out.channels(), 2);
     EXPECT_EQ(out.sampleRate(), 48000);
-    // Longest resampled source is B (4 frames at 48k).
-    EXPECT_EQ(out.frameCount(), 4u);
-    // Exact frame-0 values are NOT asserted: the leading output frame is
-    // resampler-backend-dependent (the linear fallback interpolates from a
-    // ramped edge, while libswresample's polyphase filter shapes the edge
-    // differently), so bit-for-bit agreement is not guaranteed. We instead
-    // check the mix geometry with tolerances that hold for BOTH backends:
-    //   - source A has only 2 frames: it contributes 0.2 to frames 0-1 and
-    //     silence at frames 2-3;
-    //   - source B (constant 0.1) resamples to span all 4 frames.
-    // So frames 0-1 mix to ~0.3 (A+B) and frames 2-3 to ~0.1 (B only). Frame 1
-    // is past the worst of the resampler's frame-0 edge ramp, and frame 3 proves
-    // B alone was resampled and mixed across the extended length.
-    EXPECT_NEAR(out.at(1, 0), 0.3f, 0.05f); // A(0.2) + B(0.1) on both channels
-    EXPECT_NEAR(out.at(1, 1), 0.3f, 0.05f);
-    EXPECT_NEAR(out.at(3, 0), 0.1f, 0.05f); // B only, past A's end
+    // Longest resampled source is B: resampledFrameCount(100, 24000, 48000) = 200
+    // frames at 48k, versus A's 120 identity frames.
+    EXPECT_EQ(out.frameCount(), 200u);
+    // Values are asserted deep in the steady-state interior (not the leading
+    // frames) because the leading output frames carry the resampler backend's
+    // filter warm-up/latency (libswresample) which the linear fallback does not
+    // have; steady-state interior samples equal the constant input on both
+    // backends. A takes the identity fast-path (exact 0.2 for 120 frames);
+    // B (constant 0.1) resamples to exactly 200 frames.
+    //   - Overlap steady-state (A still active: frame < 120, deep past warm-up):
+    EXPECT_NEAR(out.at(80, 0), 0.3f, 0.02f); // A(0.2) + B(0.1)
+    EXPECT_NEAR(out.at(80, 1), 0.3f, 0.02f);
+    //   - B-only steady-state (A ended at 120, B continues to 200; deep interior):
+    EXPECT_NEAR(out.at(160, 0), 0.1f, 0.02f); // B only
+    EXPECT_NEAR(out.at(160, 1), 0.1f, 0.02f);
 }
 
 TEST(AudioGraph, GainAffectsContribution) {
