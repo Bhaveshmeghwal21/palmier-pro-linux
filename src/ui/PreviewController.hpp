@@ -37,6 +37,7 @@
 #define PALMIER_UI_PREVIEWCONTROLLER_HPP
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <optional>
 

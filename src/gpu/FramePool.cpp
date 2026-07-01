@@ -13,6 +13,7 @@
 #include "gpu/FramePool.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <new>
 #include <utility>
 

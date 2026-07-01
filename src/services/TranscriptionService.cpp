@@ -6,6 +6,7 @@
 #include "services/TranscriptionService.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <utility>
 

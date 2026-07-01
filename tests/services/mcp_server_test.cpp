@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <cstdint>
 #include <string>
 #include <thread>
 

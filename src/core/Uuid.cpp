@@ -4,6 +4,7 @@
 
 #include "core/Uuid.hpp"
 
+#include <cstdint>
 #include <cstdio>
 #include <random>
 

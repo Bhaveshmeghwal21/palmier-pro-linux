@@ -14,6 +14,7 @@
 
 #include "core/EditCommands.hpp"
 
+#include <cstdint>
 #include <memory>
 
 #include <gtest/gtest.h>

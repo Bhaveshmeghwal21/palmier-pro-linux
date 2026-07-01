@@ -23,6 +23,7 @@
 #include "services/McpToolExecutor.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>

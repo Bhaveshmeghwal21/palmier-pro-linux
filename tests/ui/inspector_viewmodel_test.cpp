@@ -24,6 +24,7 @@
 
 #include "ui/InspectorViewModel.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 

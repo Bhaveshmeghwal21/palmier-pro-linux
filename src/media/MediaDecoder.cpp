@@ -12,6 +12,7 @@
 
 #include "media/MediaDecoder.hpp"
 
+#include <cstdint>
 #include <utility>
 
 #include "media/MediaProbe.hpp"

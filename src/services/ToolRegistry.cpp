@@ -9,6 +9,7 @@
 
 #include "services/ToolRegistry.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>

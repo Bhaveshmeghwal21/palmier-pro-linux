@@ -15,6 +15,7 @@
 #define PALMIER_GPU_GPUTYPES_HPP
 
 #include <cstddef>
+#include <cstdint>
 #include <set>
 #include <string>
 #include <string_view>

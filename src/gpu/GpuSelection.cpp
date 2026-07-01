@@ -4,6 +4,8 @@
 
 #include "gpu/GpuSelection.hpp"
 
+#include <cstdint>
+
 namespace palmier::gpu {
 
 namespace {

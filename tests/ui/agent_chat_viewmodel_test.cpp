@@ -26,6 +26,7 @@
 
 #include "ui/AgentChatViewModel.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>

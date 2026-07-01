@@ -10,6 +10,7 @@
 
 #include "media/MediaProbe.hpp"
 
+#include <cstdint>
 #include <system_error>
 #include <utility>
 

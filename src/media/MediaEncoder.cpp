@@ -14,6 +14,7 @@
 
 #include "media/MediaEncoder.hpp"
 
+#include <cstdint>
 #include <string>
 #include <utility>
 

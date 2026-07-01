@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <utility>

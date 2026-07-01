@@ -14,6 +14,7 @@
 
 #include "services/GenerativeMediaCoordinator.hpp"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>

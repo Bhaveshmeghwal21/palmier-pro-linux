@@ -34,6 +34,7 @@
 #include "services/GenerativeMediaCoordinator.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>

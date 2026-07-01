@@ -10,6 +10,7 @@
 #include "services/ProjectSaveService.hpp"
 
 #include <atomic>
+#include <cstdint>
 #include <fstream>
 #include <ios>
 #include <string>

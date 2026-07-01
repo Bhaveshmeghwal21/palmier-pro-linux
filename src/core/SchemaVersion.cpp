@@ -5,6 +5,7 @@
 #include "core/SchemaVersion.hpp"
 
 #include <charconv>
+#include <cstdint>
 
 namespace palmier {
 

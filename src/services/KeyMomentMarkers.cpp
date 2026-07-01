@@ -5,6 +5,7 @@
 
 #include "services/KeyMomentMarkers.hpp"
 
+#include <cstdint>
 #include <utility>
 #include <vector>
 
