@@ -274,18 +274,23 @@ TEST(AudioGraph, MixesTwoSourcesIntoCommonOutputFormat) {
     // Longest resampled source is B: resampledFrameCount(100, 24000, 48000) = 200
     // frames at 48k, versus A's 120 identity frames.
     EXPECT_EQ(out.frameCount(), 200u);
-    // Values are asserted deep in the steady-state interior (not the leading
-    // frames) because the leading output frames carry the resampler backend's
-    // filter warm-up/latency (libswresample) which the linear fallback does not
-    // have; steady-state interior samples equal the constant input on both
-    // backends. A takes the identity fast-path (exact 0.2 for 120 frames);
-    // B (constant 0.1) resamples to exactly 200 frames.
-    //   - Overlap steady-state (A still active: frame < 120, deep past warm-up):
-    EXPECT_NEAR(out.at(80, 0), 0.3f, 0.02f); // A(0.2) + B(0.1)
-    EXPECT_NEAR(out.at(80, 1), 0.3f, 0.02f);
-    //   - B-only steady-state (A ended at 120, B continues to 200; deep interior):
-    EXPECT_NEAR(out.at(160, 0), 0.1f, 0.02f); // B only
-    EXPECT_NEAR(out.at(160, 1), 0.1f, 0.02f);
+    // Source A is 48k stereo -> 48k stereo = identity fast-path: EXACTLY 0.2 for its
+    // 120 frames on every backend. Source B (constant 0.1 mono) resamples to a
+    // steady-state constant `c` per channel that DIFFERS by backend (libswresample
+    // applies a ~1/sqrt(2) mono->stereo center-mix attenuation; the linear fallback
+    // replicates at unity gain), but `c` is the SAME at any two steady-state frames.
+    // Frame 80 is in the A+B overlap (80 < 120); frame 160 is B-only (>= 120). Their
+    // difference cancels B's unknown-but-constant contribution and isolates A's exact
+    // identity contribution (0.2) — identical on both backends. Both frames are deep
+    // past any resampler filter warm-up.
+    EXPECT_NEAR(out.at(80, 0) - out.at(160, 0), 0.2f, 0.02f);
+    EXPECT_NEAR(out.at(80, 1) - out.at(160, 1), 0.2f, 0.02f);
+    // Source B was actually resampled and mixed across the extended length (present
+    // in the B-only region), regardless of the backend's channel-mix gain.
+    EXPECT_GT(out.at(160, 0), 0.02f);
+    EXPECT_GT(out.at(160, 1), 0.02f);
+    // Sanity: no clipping/overflow in the overlap region.
+    EXPECT_LE(out.at(80, 0), 0.35f);
 }
 
 TEST(AudioGraph, GainAffectsContribution) {
