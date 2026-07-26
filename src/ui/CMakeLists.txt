@@ -6,6 +6,36 @@
 # Only built when PALMIER_BUILD_UI is ON. Concrete sources are added by later
 # tasks (19.x).
 
+# ---------------------------------------------------------------------------
+# palmier_ui_preview_vm — the Qt-free preview/player playback engine
+# (task 19.3; extended by task 7.5 of end-to-end-editor-integration).
+#
+# PreviewController owns the playhead clock and the whole playback transport
+# (play/pause/stop/seek-with-clamp, the end-of-timeline halt, drop accounting, the
+# playhead-indicator cadence, the decode-failure pause and the runtime fallback to
+# software compositing) and drives gpu::Compositor at the playhead. It has NO Qt
+# dependency, so it links only the domain core and the GPU layer.
+#
+# Defined ABOVE the PALMIER_BUILD_UI guard below — and therefore built in BOTH
+# trees — because the composition root (Palmier::app_composition, src/app) owns
+# the single instance of it as the Requirement 1.1 Playback_Engine, and the
+# composition root is Qt-free and is built and tested with the UI off. Everything
+# in this file after the guard needs Qt and stays behind it. The thin Qt surface
+# (palmier_ui_preview_view, at the end of this file) owns one of these.
+# ---------------------------------------------------------------------------
+add_library(palmier_ui_preview_vm STATIC
+    PreviewController.cpp)
+add_library(Palmier::ui_preview_vm ALIAS palmier_ui_preview_vm)
+
+target_include_directories(palmier_ui_preview_vm PUBLIC
+    "${PROJECT_SOURCE_DIR}/src")
+
+target_compile_features(palmier_ui_preview_vm PUBLIC cxx_std_20)
+
+target_link_libraries(palmier_ui_preview_vm PUBLIC
+    Palmier::core
+    Palmier::gpu)
+
 if(NOT PALMIER_BUILD_UI)
     return()
 endif()
@@ -261,29 +291,9 @@ if(TARGET Qt6::Widgets)
 endif()
 
 
-# ---------------------------------------------------------------------------
-# palmier_ui_preview_vm — the Qt-free preview/player playback engine (task 19.3).
-#
-# PreviewController owns the playhead clock, drives the Compositor to render the
-# composited preview at the playhead at a minimum of 24 fps (Requirement 2.8),
-# and selects the GPU-active compositing path with a CPU/software fallback
-# (Requirement 10.7). It has NO Qt dependency, so it links only the domain core
-# and the GPU layer and is fully unit-testable headlessly (see the
-# palmier_ui_preview_controller_tests target in tests/CMakeLists.txt). The thin
-# Qt surface (palmier_ui_preview_view below) owns one of these.
-# ---------------------------------------------------------------------------
-add_library(palmier_ui_preview_vm STATIC
-    PreviewController.cpp)
-add_library(Palmier::ui_preview_vm ALIAS palmier_ui_preview_vm)
-
-target_include_directories(palmier_ui_preview_vm PUBLIC
-    "${PROJECT_SOURCE_DIR}/src")
-
-target_compile_features(palmier_ui_preview_vm PUBLIC cxx_std_20)
-
-target_link_libraries(palmier_ui_preview_vm PUBLIC
-    Palmier::core
-    Palmier::gpu)
+# (palmier_ui_preview_vm — the Qt-free preview/player playback engine, task 19.3 —
+# is defined at the TOP of this file, above the PALMIER_BUILD_UI guard, because the
+# Qt-free composition root owns the single instance of it in both build trees.)
 
 # ---------------------------------------------------------------------------
 # palmier_ui_preview_view — the thin Qt 6 preview surface (task 19.3).

@@ -90,7 +90,17 @@ class MediaManager;
 
 namespace palmier::gpu {
 class GpuContext;
+class Compositor;
 }  // namespace palmier::gpu
+
+namespace palmier::media {
+class DecoderTeardownQueue;
+class DecoderClipFrameProvider;
+}  // namespace palmier::media
+
+namespace palmier::ui {
+class PreviewController;
+}  // namespace palmier::ui
 
 namespace palmier::services {
 class ProjectSession;
@@ -229,6 +239,46 @@ public:
 
     /// The current project's media library, owned by the same session.
     [[nodiscard]] MediaManager&                  mediaLibrary() noexcept;
+
+    // --- Playback_Engine (task 7.5; Requirement 1.1) -----------------------
+    //
+    // The Playback_Engine of Requirement 1.1 is three collaborating objects, each
+    // constructed exactly once here and each reachable through a non-null
+    // reference for the process lifetime:
+    //
+    //   * the single `gpu::Compositor` over the single `gpu::GpuContext`;
+    //   * the single `media::DecoderClipFrameProvider` installed as that
+    //     compositor's clip frame provider, itself owning the decode worker pool
+    //     and retiring decoders through the one `media::DecoderTeardownQueue`;
+    //   * the single `ui::PreviewController` — the transport (play, pause, stop,
+    //     seek-with-clamp, end-of-timeline halt, drop accounting, decode-failure
+    //     pause and the software-compositing fallback) that the Qt preview surface
+    //     drives with a timer in task 11.3.
+
+    /// The one Compositor of the application: what playback composites through,
+    /// and the object the clip frame provider is installed on.
+    [[nodiscard]] gpu::Compositor& compositor() noexcept { return *compositor_; }
+
+    /// The one Playback_Engine transport of the application (Requirement 1.1).
+    [[nodiscard]] ui::PreviewController& playbackEngine() noexcept { return *playbackEngine_; }
+
+    /// The decoder-backed clip frame provider feeding the compositor.
+    [[nodiscard]] media::DecoderClipFrameProvider& clipFrameProvider() noexcept {
+        return *clipFrameProvider_;
+    }
+
+    /// The one decoder teardown queue: retired decoders are closed on its thread
+    /// so no close ever blocks playback, the audio callback or the Qt main thread
+    /// (Requirement 14.8). Shared with the audio decoder from stage 8 onward.
+    [[nodiscard]] media::DecoderTeardownQueue& decoderTeardownQueue() noexcept {
+        return *decoderTeardown_;
+    }
+
+    /// The status-bar notice stating that software compositing is in use after a
+    /// runtime GPU compositing failure, or empty while the GPU path is in use
+    /// (Requirement 5.6). Distinct from `gpuUnavailableNotice()`, which reports
+    /// that no compatible device was found at startup (Requirement 1.6).
+    [[nodiscard]] const std::string& softwareCompositingNotice() const noexcept;
     [[nodiscard]] services::ProjectSaveService&  projectSaveService() noexcept { return *saveService_; }
     [[nodiscard]] services::AuthenticationService& auth() noexcept { return *auth_; }
     [[nodiscard]] services::ByokCredentialManager& byokManager() noexcept { return *byokManager_; }
@@ -279,6 +329,12 @@ private:
     // --- GPU + the one project session (engine + media library) ------------
     std::unique_ptr<gpu::GpuContext>            gpu_;
     std::unique_ptr<services::ProjectSession>   session_;
+
+    // --- Playback_Engine: compositor -> provider -> transport (task 7.5) ---
+    std::unique_ptr<gpu::Compositor>                    compositor_;
+    std::unique_ptr<media::DecoderTeardownQueue>        decoderTeardown_;
+    std::unique_ptr<media::DecoderClipFrameProvider>    clipFrameProvider_;
+    std::unique_ptr<ui::PreviewController>              playbackEngine_;
 
     // --- Project I/O -------------------------------------------------------
     std::unique_ptr<services::ProjectSaveService> saveService_;

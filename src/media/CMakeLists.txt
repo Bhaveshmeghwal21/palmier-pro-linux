@@ -135,3 +135,40 @@ target_sources(palmier_media PRIVATE DecoderTeardownQueue.cpp)
 target_sources(palmier_media PRIVATE
     DecodeWorkerPool.cpp
     DecoderClipFrameProvider.cpp)
+
+
+
+# Audio output seam (task 8.3; Requirements 6.2, 6.3, 6.7).
+#
+# media/AudioSink.{hpp,cpp} declares IAudioSink — the interface the PipeWire and
+# ALSA sinks of task 8.6 will implement — and the always-compiled NullAudioSink,
+# which consumes and discards buffers while advancing a monotonic sample position
+# from an INJECTABLE steady clock. That is what makes "audio output unavailable"
+# (Requirement 6.7) a normal code path, keeps the sink-as-master-clock design
+# (Requirement 6.3) working with no device present, and lets the whole audio stage
+# be tested in CI on a machine with no sound card and without a single sleep.
+#
+# Standard library plus the existing AudioGraph value types only — no PipeWire,
+# ALSA, FFmpeg or GPU dependency. Added via target_sources (append-only) so it
+# composes with the sources declared in the add_library() call above without
+# editing that list.
+target_sources(palmier_media PRIVATE AudioSink.cpp)
+
+
+
+# Audio engine (task 8.4; Requirements 6.2, 6.3, 6.4, 6.6, 6.7, 6.8, 6.9, 6.11).
+#
+# media/AudioEngine.{hpp,cpp} composes what already exists rather than inventing a
+# parallel mixer: MediaDecoder's audio surface (task 8.1) supplies source blocks,
+# the existing AudioGraph does every bit of the resampling, channel mapping,
+# per-clip gain, summing and [-1, 1] clamping, and IAudioSink (task 8.3) receives
+# the fixed 48 000 Hz / 2-channel / F32 output and serves as the master clock.
+# Retired decoders go to DecoderTeardownQueue (task 7.1), which is why that queue
+# had to land first.
+#
+# Every seam is injectable — project provider, sink, decode backend factory, asset
+# path resolver and the steady clock — so the engine is exercisable with no
+# FFmpeg, no GPU, no sound card, no media fixture and no sleeping. Added via
+# target_sources (append-only) so it composes with the sources declared in the
+# add_library() call above without editing that list.
+target_sources(palmier_media PRIVATE AudioEngine.cpp)

@@ -108,9 +108,17 @@ target_include_directories(palmier_app_composition PUBLIC
 
 target_compile_features(palmier_app_composition PUBLIC cxx_std_20)
 
+# Task 7.5 adds the Playback_Engine of Requirement 1.1 to the composition: the
+# single gpu::Compositor, the single media::DecoderTeardownQueue, the single
+# media::DecoderClipFrameProvider and the single ui::PreviewController transport.
+# Palmier::media supplies the decode side, and Palmier::ui_preview_vm the Qt-free
+# transport (that target is defined above src/ui's PALMIER_BUILD_UI guard exactly
+# so this Qt-free library can link it in both build trees).
 target_link_libraries(palmier_app_composition PUBLIC
     Palmier::core
     Palmier::gpu
+    Palmier::media
+    Palmier::ui_preview_vm
     Palmier::services)
 
 if(PALMIER_WERROR)

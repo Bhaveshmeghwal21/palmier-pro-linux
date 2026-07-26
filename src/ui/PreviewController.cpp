@@ -15,21 +15,16 @@
 #include <cstdint>
 #include <utility>
 
+#include "core/TimelineEngine.hpp" // timelineDuration()
+
 namespace palmier::ui {
 namespace {
 
-/// Total timeline length of `project`: the maximum clip end across all tracks,
-/// or Duration::zero() when there are no clips. (Kept local so the controller
-/// does not depend on the full TimelineEngine translation unit.)
-[[nodiscard]] Duration timelineLength(const Project& project) noexcept {
-    Duration total = Duration::zero();
-    for (const Track& track : project.tracks) {
-        for (const Clip& clip : track.clips) {
-            const Duration end = clip.timelineEnd();
-            if (end > total) total = end;
-        }
-    }
-    return total;
+/// Total timeline length of `project` — the SAME free function
+/// `media::ExportEngine::plannedFrameCount` measures against, so playback and
+/// export cannot disagree about where the timeline ends (Requirement 5.7).
+[[nodiscard]] Duration timelineLength(const Project& project) {
+    return palmier::timelineDuration(project);
 }
 
 } // namespace
@@ -115,57 +110,135 @@ FrameRate PreviewController::previewFrameRate() const {
 }
 
 // ---------------------------------------------------------------------------
-// Transport.
+// Pacing helpers.
+// ---------------------------------------------------------------------------
+void PreviewController::adoptRate(const Project& project) {
+    previewRate_ = computePreviewRate(project);
+    interval_ = previewRate_.frameDuration();
+}
+
+Duration PreviewController::positionFor(std::int64_t index) const {
+    return previewRate_.durationForFrames(index);
+}
+
+Duration PreviewController::deadlineFor(std::int64_t index) const {
+    // The deadline of frame `index` is the anchor plus the exact span from the
+    // anchored frame to it — index arithmetic, never accumulation, so a rational
+    // rate (24000/1001 and friends) cannot drift over a long run.
+    return anchor_ + previewRate_.durationForFrames(index - baseIndex_);
+}
+
+void PreviewController::anchorPacing() {
+    baseIndex_ = frameIndex_;
+    anchor_ = clock_->now();
+}
+
+void PreviewController::notifyIndicator(Duration position) const {
+    if (indicator_) indicator_(position);
+}
+
+// ---------------------------------------------------------------------------
+// Transport (Requirements 5.4, 5.8, 5.9, 5.10).
 // ---------------------------------------------------------------------------
 void PreviewController::play() {
     if (state_ == PlaybackState::Playing) return;
 
     const Project project = projectSource_ ? projectSource_() : Project{};
-    previewRate_ = computePreviewRate(project);
-    interval_ = previewRate_.frameDuration();
+    adoptRate(project);
+
+    if (state_ == PlaybackState::Stopped) {
+        // A fresh run: the next frame due is the one covering the playhead, and
+        // the accounting of Requirements 5.2/5.7 starts over.
+        frameIndex_ = previewRate_.framesForDuration(playhead_);
+        presented_ = 0;
+        dropped_ = 0;
+        endOfTimeline_ = false;
+        playbackNotice_.clear();
+    }
 
     state_ = PlaybackState::Playing;
-    // The first frame is due immediately; subsequent frames are paced by interval_.
-    nextDeadline_ = clock_->now();
+    // The frame at frameIndex_ is due immediately; the rest are paced from here.
+    anchorPacing();
 }
 
 void PreviewController::pause() {
-    if (state_ == PlaybackState::Playing) {
-        state_ = PlaybackState::Paused;
+    if (state_ != PlaybackState::Playing) return;
+
+    // Requirement 5.4: advance stops inside this call, the playhead is retained at
+    // the position of the last presented frame, and that frame is presented again
+    // so the surface unambiguously shows the paused position.
+    state_ = PlaybackState::Paused;
+    if (lastFrame_.has_value()) {
+        playhead_ = lastFrame_->presentationTime;
     }
+    const Project project = projectSource_ ? projectSource_() : Project{};
+    presentAt(project, playhead_);
 }
 
 void PreviewController::stop() {
+    // Requirement 5.8: advance stops inside this call, the playhead goes to
+    // timeline position zero, and the frame for zero is presented.
     state_ = PlaybackState::Stopped;
     playhead_ = Duration::zero();
+    frameIndex_ = 0;
+    endOfTimeline_ = false;
+    const Project project = projectSource_ ? projectSource_() : Project{};
+    adoptRate(project);
+    anchorPacing();
+    presentAt(project, Duration::zero());
 }
 
 void PreviewController::seek(Duration position) {
-    playhead_ = position.isNegative() ? Duration::zero() : position;
+    const Project project = projectSource_ ? projectSource_() : Project{};
+    adoptRate(project);
+
+    // Requirement 5.9: clamp to [0, timeline duration]. A zero-length timeline is
+    // the still-preview case and has no meaningful upper bound, so only the lower
+    // clamp applies there.
+    const Duration total = timelineLength(project);
+    Duration clamped = position.isNegative() ? Duration::zero() : position;
+    if (total.isPositive() && clamped > total) {
+        clamped = total;
+    }
+
+    playhead_ = clamped;
+    frameIndex_ = previewRate_.framesForDuration(clamped);
+    endOfTimeline_ = false;
     // Re-anchor pacing so a subsequent pump does not fire a burst of catch-up
     // frames for the time spent scrubbing.
-    if (state_ == PlaybackState::Playing) {
-        nextDeadline_ = clock_->now();
-    }
+    anchorPacing();
+
+    presentAt(project, clamped);
+}
+
+Duration PreviewController::timelineDuration() const {
+    return timelineLength(projectSource_ ? projectSource_() : Project{});
 }
 
 // ---------------------------------------------------------------------------
 // Rendering.
 // ---------------------------------------------------------------------------
-Result<PreviewFrameInfo> PreviewController::renderCurrent(const Project& project) {
+Result<PreviewFrameInfo> PreviewController::renderAt(const Project& project, Duration position) {
     const gpu::RenderTarget target =
         gpu::RenderTarget::forCanvas(project.canvas, options_.clearColor);
 
     RenderPath attempt = degradedToCpu_ ? RenderPath::CpuFallback : preferredPath_;
 
-    Result<gpu::RenderedFrame> result = renderFn_(attempt, project, playhead_, target);
+    Result<gpu::RenderedFrame> result = renderFn_(attempt, project, position, target);
 
-    // GPU render failed: retry once on the software path and stay there
-    // (mirrors the GPU-op "retry once on CPU" degradation, Requirement 10.5/10.7).
+    // GPU render failed: retry once on the software path and stay there for the
+    // remainder of the session, with the status-bar notice recorded (mirrors the
+    // GPU-op "retry once on CPU" degradation; Requirements 10.5/10.7, 5.6).
     if (result.isError() && attempt == RenderPath::GpuActive) {
         degradedToCpu_ = true;
+        if (softwareCompositingNotice_.empty()) {
+            softwareCompositingNotice_ =
+                "Software compositing is in use: the GPU compositing path failed (" +
+                result.error().message() +
+                "); frames are composited on the CPU for the rest of this session.";
+        }
         attempt = RenderPath::CpuFallback;
-        result = renderFn_(attempt, project, playhead_, target);
+        result = renderFn_(attempt, project, position, target);
     }
 
     if (result.isError()) {
@@ -184,9 +257,20 @@ Result<PreviewFrameInfo> PreviewController::renderCurrent(const Project& project
     return info;
 }
 
+void PreviewController::presentAt(const Project& project, Duration position) {
+    const Result<PreviewFrameInfo> frame = renderAt(project, position);
+    if (frame.isOk()) {
+        playhead_ = position;
+        notifyIndicator(position);
+    }
+    // A failure outside the pacing loop is recorded in lastError_ by renderAt and
+    // leaves the previously presented frame on the surface; it does not change the
+    // transport state, which the caller has just set deliberately.
+}
+
 Result<PreviewFrameInfo> PreviewController::renderFrame() {
     const Project project = projectSource_ ? projectSource_() : Project{};
-    return renderCurrent(project);
+    return renderAt(project, playhead_);
 }
 
 std::size_t PreviewController::pump() {
@@ -196,32 +280,69 @@ std::size_t PreviewController::pump() {
     const Duration total = timelineLength(project);
     const bool bounded = total.isPositive();
 
+    if (!interval_.isPositive()) {
+        // Degenerate rate: pacing is impossible (previewRate_ is always >= 24 fps,
+        // so this is only a defensive guard).
+        return 0;
+    }
+
     std::size_t rendered = 0;
-    while (rendered < options_.maxFramesPerPump && clock_->now() >= nextDeadline_) {
-        Result<PreviewFrameInfo> frame = renderCurrent(project);
-        if (frame.isError()) {
-            // Surface the error and hold playback so the caller can react.
-            state_ = PlaybackState::Paused;
-            break;
-        }
-        ++rendered;
-
-        // Advance the playhead by one preview frame.
-        if (interval_.isPositive()) {
-            playhead_ += interval_;
-            nextDeadline_ += interval_;
-        } else {
-            // Degenerate rate: present a single frame and stop pacing to avoid
-            // an unbounded loop (previewRate_ is always >= 24, so this is only a
-            // defensive guard).
-            break;
-        }
-
-        // Auto-stop at the end of a bounded timeline.
-        if (bounded && playhead_ >= total) {
+    std::size_t steps = 0;
+    while (steps < options_.maxFramesPerPump && clock_->now() >= deadlineFor(frameIndex_)) {
+        // End of a bounded timeline: halt within this call, keep the last
+        // presented frame on the surface, rest the playhead on the duration, and
+        // report Stopped (Requirement 5.10).
+        if (bounded && positionFor(frameIndex_) >= total) {
             playhead_ = total;
             state_ = PlaybackState::Stopped;
+            endOfTimeline_ = true;
+            notifyIndicator(playhead_);
             break;
+        }
+
+        const Duration position = positionFor(frameIndex_);
+        const Duration startedAt = clock_->now();
+
+        Result<PreviewFrameInfo> frame = renderAt(project, position);
+        if (frame.isError()) {
+            // Requirement 5.5: a decode/composite failure stops advancing the
+            // playhead immediately, retains the last successfully presented frame,
+            // reports Paused, and records a notice quoting the error — which names
+            // the asset, because the clip frame provider names it.
+            state_ = PlaybackState::Paused;
+            playbackNotice_ = "Playback paused: " + frame.error().message();
+            break;
+        }
+
+        playhead_ = position;
+        ++presented_;
+        ++rendered;
+        ++steps;
+        notifyIndicator(position);
+        ++frameIndex_;
+
+        // Drop accounting (Requirements 5.2, 5.7). The composite of the frame just
+        // presented occupied `cost` of wall clock. Every following frame whose slot
+        // elapsed ENTIRELY inside that composite is counted dropped and skipped,
+        // rather than presented late: a composite of cost c consumes the presenting
+        // frame's own slot plus one further slot for each whole interval by which c
+        // exceeds the interval.
+        //
+        // The measure is the composite's own cost, not the clock's absolute
+        // lateness, because a late CALLER (one big clock jump between pumps, which
+        // is exactly how a Qt timer behaves after the event loop stalls, and how the
+        // cadence tests drive a whole second at once) is a catch-up the engine
+        // presents in full — not a drop the engine caused.
+        const Duration cost = clock_->now() - startedAt;
+        std::int64_t skips = 0;
+        while (cost > interval_ * (skips + 1)) ++skips;
+        for (std::int64_t i = 0; i < skips && steps < options_.maxFramesPerPump; ++i) {
+            if (bounded && positionFor(frameIndex_) >= total) {
+                break; // let the halt branch above own the end-of-timeline case.
+            }
+            ++dropped_;
+            ++steps;
+            ++frameIndex_;
         }
     }
     return rendered;

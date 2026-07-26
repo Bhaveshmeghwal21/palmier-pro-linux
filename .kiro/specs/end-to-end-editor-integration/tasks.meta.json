@@ -31,6 +31,14 @@
     "7.4 Write the frame-fidelity property test": {
       "status": "passed",
       "lastRunTimestamp": 1785091237926
+    },
+    "7.6 Write the playback transport and pacing property tests": {
+      "status": "passed",
+      "lastRunTimestamp": 1785093403997
+    },
+    "8.5 Write the audio-engine property tests": {
+      "status": "passed",
+      "lastRunTimestamp": 1785093406802
     }
   },
   "executionHistory": {

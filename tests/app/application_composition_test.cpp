@@ -18,7 +18,10 @@
 #include "app/ApplicationComposition.hpp"
 #include "core/Error.hpp"
 #include "core/Result.hpp"
+#include "core/TimelineEngine.hpp"
+#include "gpu/Compositor.hpp"
 #include "gpu/GpuContext.hpp"
+#include "ui/PreviewController.hpp"
 #include "services/AgentOrchestrator.hpp"
 #include "services/Json.hpp"
 #include "services/LocalizationManager.hpp"
@@ -86,6 +89,45 @@ TEST(ApplicationComposition, ComposesAllComponentsWithoutStarting) {
     // single registry being what both the MCP server and the agent drive).
     EXPECT_GT(composition.toolRegistry().size(), 0u);
     EXPECT_TRUE(composition.toolRegistry().has("timeline.read"));
+}
+
+// --- Playback_Engine (task 7.5; Requirement 1.1) ---------------------------
+//
+// The Playback_Engine named in Requirement 1.1 is composed here: one Compositor
+// over the one GpuContext, one decoder teardown queue, one decoder-backed clip
+// frame provider installed on that compositor, and one PreviewController
+// transport reading the one session's project. Each accessor must hand back a
+// non-null reference to the SAME instance for the process lifetime.
+TEST(ApplicationComposition, ComposesOnePlaybackEngineOverTheOneSession) {
+    ApplicationComposition composition{ephemeralConfig()};
+
+    // Same instance on every call (Requirement 1.1).
+    EXPECT_EQ(&composition.playbackEngine(), &composition.playbackEngine());
+    EXPECT_EQ(&composition.compositor(), &composition.compositor());
+    EXPECT_EQ(&composition.clipFrameProvider(), &composition.clipFrameProvider());
+    EXPECT_EQ(&composition.decoderTeardownQueue(), &composition.decoderTeardownQueue());
+
+    // The compositor has its source of pixels wired in — the decoder-backed
+    // provider, not a test double — so a position covered by a clip can decode.
+    EXPECT_TRUE(composition.compositor().hasFrameProvider());
+
+    // The transport starts halted at position zero on the composed session's
+    // empty default project, and its preview cadence is the documented minimum.
+    EXPECT_EQ(composition.playbackEngine().state(), palmier::ui::PlaybackState::Stopped);
+    EXPECT_EQ(composition.playbackEngine().playhead(), palmier::Duration::zero());
+    EXPECT_GE(composition.playbackEngine().previewFps(), 24.0);
+    EXPECT_EQ(composition.playbackEngine().timelineDuration(), palmier::Duration::zero());
+
+    // Requirement 5.6: the software-compositing notice is empty until a GPU
+    // compositing failure degrades the path at runtime.
+    EXPECT_TRUE(composition.softwareCompositingNotice().empty());
+
+    // The transport reads the project from the ONE session, so an edit applied
+    // through the session is visible to playback with no rewiring: adding a clip
+    // gives the previously empty timeline a positive duration.
+    EXPECT_EQ(composition.playbackEngine().timelineDuration(), palmier::Duration::zero());
+    EXPECT_EQ(composition.playbackEngine().timelineDuration(),
+              palmier::timelineDuration(composition.timeline().snapshot()));
 }
 
 TEST(ApplicationComposition, StartsMcpServerOnLaunchAndStopsOnClose) {

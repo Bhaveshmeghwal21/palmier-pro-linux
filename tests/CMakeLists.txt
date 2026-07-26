@@ -1360,9 +1360,18 @@ palmier_register_test(palmier_ui_preview_controller_tests)
 # Palmier::services library links. SecretStore.cpp is intentionally omitted
 # (InMemorySecretStore is header-only), keeping the binary free of libsecret.
 # ---------------------------------------------------------------------------
+#
+# Task 7.5 adds the Playback_Engine of Requirement 1.1 to the composition — the
+# single gpu::Compositor, media::DecoderTeardownQueue, media::DecoderClipFrameProvider
+# and ui::PreviewController — so the Qt-free PreviewController source joins the
+# compiled-in list and the target links Palmier::media (which brings in
+# Palmier::gpu and Palmier::core) for the decode side. Still no Qt, FFmpeg, GPU or
+# vendor SDK: the decode backend factory degrades to its stub and the compositor
+# runs the vendor-neutral software reference.
 add_executable(palmier_app_composition_tests
     app/application_composition_test.cpp
     "${PROJECT_SOURCE_DIR}/src/app/ApplicationComposition.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
@@ -1385,6 +1394,7 @@ target_include_directories(palmier_app_composition_tests PRIVATE
 target_link_libraries(palmier_app_composition_tests PRIVATE
     Palmier::core
     Palmier::gpu
+    Palmier::media
     Palmier::test_support)
 
 palmier_test_enable_openssl(palmier_app_composition_tests)
@@ -2080,3 +2090,79 @@ target_link_libraries(palmier_media_playback_tests PRIVATE
     Palmier::test_support)
 
 palmier_register_test(palmier_media_playback_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Audio engine tests (tasks 8.3, 8.4, 8.5; Requirements 6.2, 6.3, 6.4, 6.6, 6.7,
+# 6.8, 6.9, 6.11) — Properties 27-32 plus the unit tests for media::IAudioSink /
+# media::NullAudioSink and media::AudioEngine.
+#
+#   * Property 27 — mixing honours mute and gain and delivers without dropout.
+#   * Property 28 — audio and video stay within 40 milliseconds.
+#   * Property 29 — mute and gain changes take effect within 200 milliseconds.
+#   * Property 30 — an asset without audio contributes exactly silence.
+#   * Property 31 — export mix duration and sample range invariant.
+#   * Property 32 — an audio decode failure yields silence for the rest of the clip.
+#
+# Everything runs through IAudioSink fakes and an INJECTED steady clock: the
+# dropout bound (100 ms), the A/V skew bound (40 ms), the mute/gain latency bound
+# (200 ms) and the audio-unavailable notice budget (2 s) are all driven by a clock
+# the property advances by hand, so no test sleeps and no test needs a sound card
+# — which is precisely why NullAudioSink lands before the PipeWire/ALSA sinks
+# (design.md D7). Source audio comes from a synthetic DecodeBackendFactory emitting
+# constant-level blocks, so the correct mixed value is knowable in closed form; no
+# FFmpeg, GPU, media fixture or temporary file is involved.
+#
+# Links Palmier::media (which brings in Palmier::gpu and Palmier::core).
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_audio_engine_tests
+    media/audio_engine_property_test.cpp)
+target_link_libraries(palmier_media_audio_engine_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_audio_engine_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Preview playback transport + pacing property tests (task 7.6; Requirements
+# 5.2, 5.3, 5.4, 5.5, 5.7, 5.8, 5.9, 5.10) — Properties 21, 22, 23, 24, 25, 79
+# for the ui::PreviewController transport that task 7.5 completed and the
+# composition root now owns as the Requirement 1.1 Playback_Engine.
+#
+#   * Property 21 — presentation rate stays within bounds and drops stay under 5%.
+#   * Property 22 — playhead indicator cadence (>= 10 Hz, within 100 ms).
+#   * Property 23 — a decode failure pauses and retains the last good frame.
+#   * Property 24 — playback frame accounting matches the export planner.
+#   * Property 79 — each transport command reaches its specified resting state.
+#   * Property 25 — seek clamps to the timeline bounds.
+#
+# Every one of those is a TIMING property, and every one of them is driven by the
+# INJECTED ui::PlaybackClock: the test advances a manual clock, and composite
+# latency is injected by advancing that same clock from inside the render seam,
+# which is exactly what a slow GPU or decoder looks like to the transport. Nothing
+# in the file sleeps, so the 100 ms / 500 ms / 1-second-window bounds are asserted
+# exactly rather than measured against a loaded host's wall clock.
+#
+# The frame-accounting property compares against the REAL export planner
+# (media::ExportEngine::plannedFrameCount) rather than a reimplementation of the
+# arithmetic, which is what makes Requirement 5.7 a cross-check between the two
+# pipelines; that is why this target links Palmier::media (which brings in
+# Palmier::gpu and Palmier::core). The Qt-free PreviewController source is compiled
+# directly into the binary, as the preview-controller unit tests do, and the
+# compositor runs the vendor-neutral software reference on
+# gpu::GpuContext::softwareFallback() — so no Qt, Vulkan, GPU, FFmpeg, sound card,
+# media fixture or temporary file is involved.
+# ---------------------------------------------------------------------------
+add_executable(palmier_ui_preview_playback_tests
+    ui/preview_playback_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp")
+target_include_directories(palmier_ui_preview_playback_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_ui_preview_playback_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_ui_preview_playback_tests)

@@ -36,7 +36,14 @@
 #include "core/TimelineEngine.hpp"
 #include "core/Uuid.hpp"
 
+#include "gpu/Compositor.hpp"
 #include "gpu/GpuContext.hpp"
+
+#include "media/DecoderClipFrameProvider.hpp"
+#include "media/DecoderTeardownQueue.hpp"
+#include "media/MediaDecoder.hpp"
+
+#include "ui/PreviewController.hpp"
 
 #include "services/AgentOrchestrator.hpp"
 #include "services/AuthenticationService.hpp"
@@ -202,6 +209,22 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     // the documented defaults (Requirement 1.10). Every consumer below takes a
     // reference to those owned components rather than constructing its own.
     session_ = std::make_unique<services::ProjectSession>();
+
+    // --- Playback_Engine (task 7.5; Requirements 1.1, 5.2-5.10) ------------
+    // Exactly one Compositor over the one GpuContext; exactly one decoder
+    // teardown queue (shared with the audio decoder from stage 8 onward, upstream
+    // PR 405); exactly one decoder-backed clip frame provider installed as the
+    // compositor's source of pixels; exactly one PreviewController transport,
+    // reading the current project from the one session's engine snapshot so a
+    // project.create / project.open is picked up with no rewiring.
+    compositor_ = std::make_unique<gpu::Compositor>(*gpu_);
+    decoderTeardown_ = std::make_unique<media::DecoderTeardownQueue>();
+    clipFrameProvider_ = std::make_unique<media::DecoderClipFrameProvider>(
+        *decoderTeardown_, media::ffmpegDecodeBackendFactory());
+    compositor_->setFrameProvider(clipFrameProvider_->asProvider());
+    playbackEngine_ = std::make_unique<ui::PreviewController>(
+        *compositor_, *gpu_,
+        [session = session_.get()]() { return session->engine().snapshot(); });
 
     // --- Project I/O -------------------------------------------------------
     saveService_ = std::make_unique<services::ProjectSaveService>();
@@ -387,6 +410,11 @@ TimelineEngine& ApplicationComposition::timeline() noexcept {
 
 MediaManager& ApplicationComposition::mediaLibrary() noexcept {
     return session_->mediaLibrary();
+}
+
+const std::string& ApplicationComposition::softwareCompositingNotice() const noexcept {
+    static const std::string kEmpty;
+    return playbackEngine_ ? playbackEngine_->softwareCompositingNotice() : kEmpty;
 }
 
 std::string ApplicationComposition::gpuUnavailableNotice() const {

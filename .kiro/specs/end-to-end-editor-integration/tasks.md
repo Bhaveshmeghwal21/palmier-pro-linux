@@ -393,7 +393,7 @@ generated cases.
 
 ### Stage 7 — Playback
 
-- [ ] 7. Assemble the decode → composite → present pipeline
+- [x] 7. Assemble the decode → composite → present pipeline
   - [x] 7.1 Implement `media::DecoderTeardownQueue`
     - `src/media/DecoderTeardownQueue.{hpp,cpp}`: single dedicated thread; `MediaDecoder` objects
       are moved in as `unique_ptr` and the caller returns immediately; drain-to-empty is observable
@@ -425,7 +425,7 @@ generated cases.
       `palmier_media_playback_tests`
     - _Requirements: 5.1_
 
-  - [~] 7.5 Construct the playback engine in the composition root and complete the transport
+  - [x] 7.5 Construct the playback engine in the composition root and complete the transport
     - `ApplicationComposition` constructs the single `gpu::Compositor`, the provider and the
       `ui::PreviewController`, exposing `playbackEngine()` and `compositor()`
     - `src/ui/PreviewController.{hpp,cpp}`: play, pause, stop, seek-with-clamp, end-of-timeline
@@ -434,7 +434,7 @@ generated cases.
       compositing with a session-lifetime accessor and a status-bar notice
     - _Requirements: 1.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10_
 
-  - [ ]* 7.6 Write the playback transport and pacing property tests
+  - [x]* 7.6 Write the playback transport and pacing property tests
     - **Property 21: Presentation rate stays within bounds and drops stay under 5%** —
       **Validates: Requirements 5.2**
     - **Property 22: Playhead indicator cadence** — **Validates: Requirements 5.3**
@@ -467,14 +467,14 @@ generated cases.
     - File: `tests/media/audio_decode_property_test.cpp`
     - _Requirements: 6.1_
 
-  - [~] 8.3 Add `media::IAudioSink` and the always-compiled `NullAudioSink`
+  - [x] 8.3 Add `media::IAudioSink` and the always-compiled `NullAudioSink`
     - `src/media/AudioSink.{hpp,cpp}`: the sink interface plus `NullAudioSink`, which consumes and
       discards buffers while advancing a monotonic sample position from a steady clock
     - This makes "audio output unavailable" a normal code path and lets the audio tests run in CI
       with no sound card — it lands **before** the real sinks
     - _Requirements: 6.7_
 
-  - [~] 8.4 Implement `media::AudioEngine`
+  - [x] 8.4 Implement `media::AudioEngine`
     - `src/media/AudioEngine.{hpp,cpp}`: fixed output format 48 000 Hz / 2 interleaved channels /
       `SampleFormat::F32`; `start()`, `stop()`, `presentationPosition()` (the master clock),
       `outputAvailable()`, `notice()`, `renderRange()` for the export path
@@ -485,7 +485,7 @@ generated cases.
       output suppresses audio, keeps video running and raises a notice within 2 s
     - _Requirements: 6.2, 6.3, 6.4, 6.6, 6.7, 6.9_
 
-  - [ ]* 8.5 Write the audio-engine property tests
+  - [x]* 8.5 Write the audio-engine property tests
     - **Property 27: Mixing honours mute and gain and delivers without dropout** —
       **Validates: Requirements 6.2**
     - **Property 28: Audio and video stay within 40 milliseconds** —
@@ -1051,19 +1051,31 @@ Checkpoint tasks (4.8, 9.9, 11.12, 12.13) are intentionally excluded from the wa
 
 ## Progress
 
-**Complete:** stages 0–6 in full — every task of 6.1 through 6.6 has landed, so stage 6 itself is
-closed. Stage 7 has 7.1–7.4 done (`DecoderTeardownQueue` with Property 75, `DecodeWorkerPool` and
-`DecoderClipFrameProvider` with Property 20), with 7.5 and 7.6 remaining. Stage 8 has 8.1 and 8.2
-done (the `MediaDecoder` audio surface with Property 26), with 8.3–8.7 remaining. Stages 9–12 are
-untouched.
+**Complete:** stages 0–7 in full. Stage 7 closed with 7.5 and 7.6 — `ApplicationComposition` now
+constructs the single `Compositor`, `DecoderTeardownQueue`, `DecoderClipFrameProvider` and
+`ui::PreviewController` behind accessors, and the transport carries seek-with-clamp,
+end-of-timeline halt, drop accounting, the playhead indicator, decode-failure pause and the
+software-compositing notice, covered by Properties 21, 22, 23, 24, 25 and 79. Stage 8 has 8.1–8.5
+done (the `MediaDecoder` audio surface with Property 26, `IAudioSink`/`NullAudioSink`, and
+`AudioEngine` mixing through the existing `AudioGraph` with Properties 27–32), with **8.6** (the
+PipeWire and ALSA sinks) and **8.7** (composition-root wiring and the sink as master clock)
+remaining, so the stage-8 parent stays open. Stages 9–12 are untouched.
 
-**Test count:** 899 registered tests, all passing (`100% tests passed, 0 tests failed out of 899`,
-about 7 seconds of wall clock), confirmed over two consecutive runs of the same tree with no
-flakes — relevant because this batch added three concurrency-heavy components (the single-threaded
-teardown queue and the two-worker decode pool) on top of the remote-access integration tests that
-bind real loopback sockets. A full clean rebuild takes roughly 5 minutes on 8 cores. Against the
-871 recorded after stage 6: tasks 7.1/7.2 add the decoder-teardown target, tasks 7.3/7.4 add the
-playback target, and tasks 8.1/8.2 add the audio-decode target.
+**Test count:** 919 registered tests, all passing (`100% tests passed, 0 tests failed out of 919`,
+about 9 seconds of wall clock). Against the 899 recorded after tasks 7.1–7.4 and 8.1–8.2:
+task 7.6 adds `palmier_ui_preview_playback_tests`, task 8.5 adds
+`palmier_media_audio_engine_tests`, and 7.5/8.3/8.4 extend the existing composition and preview
+targets. Confirmed over **five** consecutive `build-nogui` runs and once in `build-ui` under
+`xvfb-run -a` — both trees report the same 919 — with no flakes.
+
+**Flake check on `PresentationRateWithinBoundsAndDropsUnderFivePercent` (Property 21):** not
+reproducible. Beyond the five full-suite runs, the property was run 15 times in isolation and then
+three times at `max_success=1000`, i.e. roughly 5 000 generated cases across independent seeds, all
+passing. The test is driven entirely by the injected `ManualClock` and never sleeps or reads a
+wall clock, so its outcome is a pure function of the RapidCheck seed; the earlier failures were on
+pre-convergence revisions of the test, before the latency profile became a deterministic periodic
+stall (`stallPeriod` of 30–60 composites, one dropped frame each) that keeps the drop ratio at or
+under 1/30 by construction rather than by luck. No bound was loosened.
 
 **One requirement conflict resolved in task 6.4:** the loopback fallback of Requirements 10.3 and
 10.12 binds `127.0.0.1:19789`, not the configured port. `RemoteAccessGate::computeDecision` was
