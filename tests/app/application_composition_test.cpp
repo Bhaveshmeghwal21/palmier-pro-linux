@@ -21,6 +21,8 @@
 #include "core/TimelineEngine.hpp"
 #include "gpu/Compositor.hpp"
 #include "gpu/GpuContext.hpp"
+#include "media/AudioEngine.hpp"
+#include "media/AudioSink.hpp"
 #include "ui/PreviewController.hpp"
 #include "services/AgentOrchestrator.hpp"
 #include "services/Json.hpp"
@@ -128,6 +130,76 @@ TEST(ApplicationComposition, ComposesOnePlaybackEngineOverTheOneSession) {
     EXPECT_EQ(composition.playbackEngine().timelineDuration(), palmier::Duration::zero());
     EXPECT_EQ(composition.playbackEngine().timelineDuration(),
               palmier::timelineDuration(composition.timeline().snapshot()));
+}
+
+// The Audio_Engine of Requirement 1.1 (task 8.7): exactly one media::AudioEngine,
+// constructed with the sink chosen at startup in the order PipeWire -> ALSA ->
+// Null, the SAME decoder teardown queue the video path uses, and a project
+// provider bound to the one session — and installed as the PreviewController's
+// audio master clock, which is what makes the sink the clock the whole
+// presentation pipeline slews to (Requirement 6.3).
+//
+// Every assertion here is host-independent: on a machine with an audio server a
+// real sink is selected, and on a machine with none (this project's CI, and every
+// container) selection falls through to the null sink with the Requirement 6.7
+// notice. The invariants below hold either way.
+TEST(ApplicationComposition, ComposesOneAudioEngineWhoseSinkIsTheMasterClock) {
+    ApplicationComposition composition{ephemeralConfig()};
+
+    // Same instance on every call (Requirement 1.1).
+    EXPECT_EQ(&composition.audioEngine(), &composition.audioEngine());
+
+    // The engine's output format is the documented fixed one (Requirement 6.2).
+    EXPECT_EQ(palmier::media::AudioEngine::kOutputSampleRate, 48'000);
+    EXPECT_EQ(palmier::media::AudioEngine::kOutputChannels, 2);
+
+    // The selected sink is one of the design's three, and the sink the engine
+    // reports is the one selection chose.
+    const std::string sinkName = composition.audioSinkName();
+    EXPECT_TRUE(sinkName == "pipewire" || sinkName == "alsa" || sinkName == "null")
+        << "unexpected sink name: " << sinkName;
+    EXPECT_EQ(std::string(composition.audioEngine().sinkName()), sinkName);
+
+    // The Requirement 6.7 notice is present exactly when no real device was opened,
+    // and it never appears alongside a real device.
+    EXPECT_EQ(composition.audioOutputAvailable(), sinkName != "null");
+    EXPECT_EQ(composition.audioUnavailableNotice().empty(), composition.audioOutputAvailable());
+    if (!composition.audioOutputAvailable()) {
+        EXPECT_NE(composition.audioUnavailableNotice().find("Audio output is unavailable"),
+                  std::string::npos);
+    }
+
+    // The quantum comes from the project frame rate: at most 512 frames above
+    // 48 fps, otherwise 1024 (design.md D7).
+    const double fps = composition.timeline().snapshot().timelineFps.toDouble();
+    EXPECT_EQ(composition.audioEngine().quantumFrames(),
+              palmier::media::preferredQuantumFrames(fps));
+
+    // The transport is halted, so the engine has not been started and the audio
+    // clock is not yet authoritative — video therefore paces off the wall clock,
+    // which is what keeps a session with no audio device behaving exactly as it did
+    // before this stage.
+    EXPECT_FALSE(composition.audioEngine().running());
+    EXPECT_TRUE(composition.playbackEngine().hasAudioMasterClock());
+    EXPECT_EQ(composition.playbackEngine().pump(), 0u);
+    EXPECT_FALSE(composition.playbackEngine().lastAudioPosition().has_value());
+
+    // Starting the engine makes its position the master clock, and it starts at the
+    // requested timeline position rather than jumping.
+    ASSERT_TRUE(composition.audioEngine().start(palmier::Duration::zero()).isOk());
+    EXPECT_TRUE(composition.audioEngine().running());
+    EXPECT_EQ(composition.audioEngine().presentationPosition(), palmier::Duration::zero());
+
+    // The engine mixes the ONE session's project: an empty default project yields a
+    // silent quantum with no contributions and no errors.
+    const palmier::Result<std::size_t> mixed = composition.audioEngine().pump();
+    ASSERT_TRUE(mixed.isOk());
+    EXPECT_EQ(mixed.value(), composition.audioEngine().quantumFrames());
+    EXPECT_TRUE(composition.audioEngine().lastQuantum().contributions.empty());
+    EXPECT_TRUE(composition.audioEngine().errors().empty());
+
+    composition.audioEngine().stop();
+    EXPECT_FALSE(composition.audioEngine().running());
 }
 
 TEST(ApplicationComposition, StartsMcpServerOnLaunchAndStopsOnClose) {

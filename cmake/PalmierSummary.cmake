@@ -57,6 +57,19 @@ else()
     set(_palmier_openssl_status "disabled (OpenSSL not found)")
 endif()
 
+# The two optional audio output sinks (task 8.6; Requirements 6.2, 6.7), in the
+# same three states, reusing the same helper so "enabled (SDK found)" /
+# "disabled (SDK not found)" / "disabled (option OFF)" mean exactly what they mean
+# for the vendor codec paths. The availability variables come from
+# cmake/PalmierDependencies.cmake; the pkg-config <prefix>_FOUND fallbacks are
+# LIBPIPEWIRE_FOUND / LIBASOUND_FOUND. NullAudioSink is always compiled in and is
+# therefore reported as a constant rather than a detected state — that is what
+# makes "audio output unavailable" a normal path instead of a build failure.
+palmier_vendor_path_status(_palmier_pipewire_status
+    PALMIER_ENABLE_PIPEWIRE PALMIER_PIPEWIRE_AVAILABLE LIBPIPEWIRE_FOUND)
+palmier_vendor_path_status(_palmier_alsa_status
+    PALMIER_ENABLE_ALSA PALMIER_ALSA_AVAILABLE LIBASOUND_FOUND)
+
 message(STATUS "")
 message(STATUS "==================== Palmier Pro Linux ====================")
 message(STATUS "  Version           : ${PROJECT_VERSION}")
@@ -72,5 +85,10 @@ message(STATUS "  HW codec: VAAPI   : ${_palmier_vaapi_status}")
 message(STATUS "  HW codec: NVENC   : ${_palmier_nvenc_status}")
 message(STATUS "  HW codec: QSV     : ${_palmier_qsv_status}")
 message(STATUS "  TLS (OpenSSL)     : ${_palmier_openssl_status}")
+message(STATUS "  ---------------------------------------------------------")
+message(STATUS "  Audio sink: PipeWire : ${_palmier_pipewire_status}")
+message(STATUS "  Audio sink: ALSA     : ${_palmier_alsa_status}")
+message(STATUS "  Audio sink: Null     : enabled (always compiled in)")
+message(STATUS "  Audio sink order     : PipeWire -> ALSA -> Null")
 message(STATUS "===========================================================")
 message(STATUS "")

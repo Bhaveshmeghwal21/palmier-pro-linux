@@ -86,6 +86,7 @@
 namespace palmier {
 class TimelineEngine;
 class MediaManager;
+struct Project;
 }  // namespace palmier
 
 namespace palmier::gpu {
@@ -96,6 +97,8 @@ class Compositor;
 namespace palmier::media {
 class DecoderTeardownQueue;
 class DecoderClipFrameProvider;
+class AudioEngine;
+class IAudioSink;
 }  // namespace palmier::media
 
 namespace palmier::ui {
@@ -274,6 +277,51 @@ public:
         return *decoderTeardown_;
     }
 
+    // --- Audio_Engine (task 8.7; Requirements 1.1, 6.3, 6.7) ---------------
+    //
+    // Exactly one `media::AudioEngine`, constructed with:
+    //
+    //   * the sink chosen at startup by `media::selectAudioSink()` in the design's
+    //     order PipeWire -> ALSA -> Null, so a host with no audio device gets the
+    //     null sink, audio is suppressed, video keeps running and
+    //     `audioUnavailableNotice()` is non-empty (Requirement 6.7);
+    //   * the SAME `media::DecoderTeardownQueue` the video path uses, so an audio
+    //     decoder close never blocks the mixing thread (Requirement 14.8, upstream
+    //     PR 405 — the reason that queue had to land before this stage);
+    //   * a `ProjectProvider` bound to the one session's project, re-read per
+    //     mixed quantum, which is what bounds the mute/gain latency of
+    //     Requirement 6.4 without moving the playhead.
+    //
+    // The engine's `presentationPosition()` is then installed as the
+    // `PreviewController`'s OPTIONAL audio master clock, making the sink the clock
+    // the whole presentation pipeline slews to (Requirement 6.3).
+
+    /// The one Audio_Engine of the application (Requirement 1.1).
+    [[nodiscard]] media::AudioEngine& audioEngine() noexcept { return *audioEngine_; }
+
+    /// The sink selected at startup: "pipewire", "alsa" or "null".
+    [[nodiscard]] const std::string& audioSinkName() const noexcept { return audioSinkName_; }
+
+    /// True when startup selection opened a real output device. False means the
+    /// null sink is in use — audio is suppressed and video is unaffected.
+    ///
+    /// This accessor, not `AudioEngine::outputAvailable()`, is the authority on
+    /// device availability for the shell. The engine reports whether the sink it
+    /// was GIVEN opened, which is necessarily true once selection has handed it a
+    /// working `NullAudioSink`; only the selection knows that the sink it chose was
+    /// the null fallback rather than a device. `AudioEngine::outputAvailable()`
+    /// remains the right answer to its own question — "did my sink open?" — which
+    /// is what makes its own runtime degradation path (Requirement 6.7) work.
+    [[nodiscard]] bool audioOutputAvailable() const noexcept { return audioOutputAvailable_; }
+
+    /// The status-bar notice for Requirement 6.7 ("audio output is unavailable"),
+    /// naming why each candidate sink was not used, or empty when a real device
+    /// was opened. Populated at construction — no transport start is needed for
+    /// the shell to show it.
+    [[nodiscard]] const std::string& audioUnavailableNotice() const noexcept {
+        return audioUnavailableNotice_;
+    }
+
     /// The status-bar notice stating that software compositing is in use after a
     /// runtime GPU compositing failure, or empty while the GPU path is in use
     /// (Requirement 5.6). Distinct from `gpuUnavailableNotice()`, which reports
@@ -335,6 +383,17 @@ private:
     std::unique_ptr<media::DecoderTeardownQueue>        decoderTeardown_;
     std::unique_ptr<media::DecoderClipFrameProvider>    clipFrameProvider_;
     std::unique_ptr<ui::PreviewController>              playbackEngine_;
+
+    // --- Audio_Engine: selected sink -> engine -> master clock (task 8.7) --
+    // `audioProject_` is the storage behind the engine's ProjectProvider: the
+    // provider refreshes it from the session's engine snapshot and returns a
+    // borrow, which is how the engine sees the current project without
+    // `Palmier::media` having to depend on `Palmier::services`.
+    std::unique_ptr<Project>                            audioProject_;
+    std::unique_ptr<media::AudioEngine>                 audioEngine_;
+    std::string                                         audioSinkName_;
+    bool                                                audioOutputAvailable_ = false;
+    std::string                                         audioUnavailableNotice_;
 
     // --- Project I/O -------------------------------------------------------
     std::unique_ptr<services::ProjectSaveService> saveService_;

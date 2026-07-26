@@ -250,6 +250,78 @@ set(PALMIER_OPENSSL_AVAILABLE ${_palmier_openssl_available} CACHE INTERNAL
     "The TLS transport is enabled AND OpenSSL 3.x was found")
 
 # ---------------------------------------------------------------------------
+# Audio output backends — OPTIONAL (task 8.6; Requirements 6.2, 6.7).
+#
+# The audio sink is selected at startup in the order PipeWire -> ALSA ->
+# NullAudioSink (design.md D7). Both real backends follow exactly the same
+# "ENABLE AND FOUND" contract as the vendor codec SDKs above:
+#
+#   PALMIER_PIPEWIRE_AVAILABLE  ON | OFF
+#   PALMIER_ALSA_AVAILABLE      ON | OFF
+#
+#   ON if and only if the corresponding PALMIER_ENABLE_* option is ON *and* the
+#   library was located at configure time. A miss is never fatal: it records OFF
+#   plus a status message, that sink is compiled out, and selection falls through
+#   to the next candidate and ultimately to the always-compiled NullAudioSink, so
+#   a host with neither library configures, builds and tests exactly as before
+#   (Requirement 6.7).
+#
+#   Both are stored as CACHE INTERNAL so they are readable from any directory or
+#   function scope and are recomputed on every configure run, and — as with the
+#   vendor SDKs — the pkg_check_modules lookups are performed at this file's
+#   TOP-LEVEL scope rather than inside a helper function, so LIBPIPEWIRE_FOUND and
+#   LIBASOUND_FOUND (and the imported targets PkgConfig::LIBPIPEWIRE /
+#   PkgConfig::LIBASOUND) are visible to the src/* subdirectories. A
+#   function-scoped lookup would leave <prefix>_FOUND invisible to callers, which
+#   is the exact defect stage 0 of this feature existed to remove.
+#
+#   The ALSA pkg-config prefix is deliberately LIBASOUND, not ALSA: CMake ships a
+#   FindALSA module that publishes ALSA_FOUND with different semantics, and
+#   colliding with it would make the gate below mean something other than what it
+#   says.
+# ---------------------------------------------------------------------------
+
+# --- PipeWire (the primary sink; MIT) ---------------------------------------
+set(_palmier_pipewire_available OFF)
+if(PALMIER_ENABLE_PIPEWIRE)
+    pkg_check_modules(LIBPIPEWIRE IMPORTED_TARGET libpipewire-0.3)
+    if(LIBPIPEWIRE_FOUND)
+        set(_palmier_pipewire_available ON)
+        message(STATUS "Palmier: PipeWire audio sink ENABLED — libpipewire-0.3 ${LIBPIPEWIRE_VERSION} found.")
+    else()
+        message(STATUS "Palmier: PipeWire audio sink DISABLED — libpipewire-0.3 not found "
+                       "(install: apt install libpipewire-0.3-dev | dnf install pipewire-devel, "
+                       "or configure with -DPALMIER_ENABLE_PIPEWIRE=OFF). "
+                       "Configuration continues; audio output selection falls through to ALSA "
+                       "and then to the null sink.")
+    endif()
+else()
+    message(STATUS "Palmier: PipeWire audio sink DISABLED — PALMIER_ENABLE_PIPEWIRE=OFF.")
+endif()
+set(PALMIER_PIPEWIRE_AVAILABLE ${_palmier_pipewire_available} CACHE INTERNAL
+    "The PipeWire audio sink is enabled AND libpipewire-0.3 was found")
+
+# --- ALSA (the fallback sink; LGPL-2.1-or-later) -----------------------------
+set(_palmier_alsa_available OFF)
+if(PALMIER_ENABLE_ALSA)
+    pkg_check_modules(LIBASOUND IMPORTED_TARGET alsa)
+    if(LIBASOUND_FOUND)
+        set(_palmier_alsa_available ON)
+        message(STATUS "Palmier: ALSA audio sink ENABLED — libasound2 ${LIBASOUND_VERSION} found.")
+    else()
+        message(STATUS "Palmier: ALSA audio sink DISABLED — libasound2 (pkg-config: alsa) not found "
+                       "(install: apt install libasound2-dev | dnf install alsa-lib-devel, "
+                       "or configure with -DPALMIER_ENABLE_ALSA=OFF). "
+                       "Configuration continues; audio output selection falls through to the "
+                       "null sink.")
+    endif()
+else()
+    message(STATUS "Palmier: ALSA audio sink DISABLED — PALMIER_ENABLE_ALSA=OFF.")
+endif()
+set(PALMIER_ALSA_AVAILABLE ${_palmier_alsa_available} CACHE INTERNAL
+    "The ALSA audio sink is enabled AND libasound2 was found")
+
+# ---------------------------------------------------------------------------
 # Report all missing dependencies at once and fail configuration clearly.
 # ---------------------------------------------------------------------------
 if(_PALMIER_MISSING_DEPS)
@@ -271,6 +343,10 @@ endif()
 message(STATUS "Palmier Pro Linux: all required dependencies located.")
 message(STATUS "Palmier Pro Linux: TLS transport (OpenSSL) — "
                "OPENSSL=${PALMIER_OPENSSL_AVAILABLE}")
+message(STATUS "Palmier Pro Linux: audio output sinks — "
+               "PIPEWIRE=${PALMIER_PIPEWIRE_AVAILABLE} "
+               "ALSA=${PALMIER_ALSA_AVAILABLE} "
+               "(NullAudioSink is always available)")
 message(STATUS "Palmier Pro Linux: hardware codec paths — "
                "VAAPI=${PALMIER_VAAPI_AVAILABLE} "
                "QSV=${PALMIER_QSV_AVAILABLE} "

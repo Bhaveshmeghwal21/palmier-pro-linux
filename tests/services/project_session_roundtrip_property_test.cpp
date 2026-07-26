@@ -473,6 +473,81 @@ std::vector<std::pair<std::size_t, std::size_t>> clipAddresses(const Project& pr
     return addresses;
 }
 
+// --- Legality of a clip-targeting invocation -------------------------------
+//
+// A generated track may legally carry overlapping clips: TimelineEngine's track
+// rule permits an incoming clip to overlap its predecessor by up to its own
+// transition region. That freedom means not every clip is a legal target for
+// every gesture, and this property is not about the engine's rejection paths —
+// it asserts that the drawn invocation SUCCEEDS and dirties the session. The
+// three predicates below restrict the drawn target to one for which the gesture
+// is legal, so a drawn invocation always succeeds by construction rather than by
+// luck of the generated layout.
+
+/// The overlap the track rule permits between a clip and its predecessor:
+/// exactly the incoming clip's transition region.
+Duration permittedOverlap(const Clip& incoming) {
+    return incoming.transitionIn.has_value() ? incoming.transitionIn->duration
+                                             : Duration::zero();
+}
+
+/// True iff taking clips[index] out of `track` — which `timeline.delete_clip`
+/// does, and `timeline.move_clip` does by relocating it past every other clip —
+/// leaves the track ordered and overlapping only inside transition regions. The
+/// only adjacent pair such a removal can invalidate is the one it creates,
+/// (index - 1, index + 1): a long predecessor may then overlap the successor by
+/// more than the successor's transition region allows.
+bool removalKeepsTrackValid(const Track& track, std::size_t index) {
+    if (index == 0 || index + 1 >= track.clips.size()) {
+        return true;
+    }
+    const Clip& before = track.clips[index - 1];
+    const Clip& after = track.clips[index + 1];
+    return (before.timelineEnd() - after.timelineStart) <= permittedOverlap(after);
+}
+
+/// The exclusive upper bound on a legal split point for clips[index]: strictly
+/// inside the clip, and never at or past the next clip's start, because the
+/// right half is inserted immediately after the left one and the track must stay
+/// ordered by timelineStart. Every other pairing is unaffected by a split — the
+/// left half keeps the original start and transition, the right half keeps the
+/// original end and carries no transition.
+Duration splitUpperBound(const Track& track, std::size_t index) {
+    Duration bound = track.clips[index].timelineEnd();
+    if (index + 1 < track.clips.size() && track.clips[index + 1].timelineStart < bound) {
+        bound = track.clips[index + 1].timelineStart;
+    }
+    return bound;
+}
+
+/// The split point this generator uses: the midpoint of the legal band, which is
+/// strictly interior whenever the band is at least two ticks wide.
+Duration splitPointFor(const Track& track, std::size_t index) {
+    const Clip&    target = track.clips[index];
+    const Duration bound = splitUpperBound(track, index);
+    return target.timelineStart +
+           Duration::fromNanoseconds((bound - target.timelineStart).ticks() / 2);
+}
+
+std::vector<std::pair<std::size_t, std::size_t>> addressesWhere(
+    const Project& project, bool (*predicate)(const Track&, std::size_t)) {
+    std::vector<std::pair<std::size_t, std::size_t>> addresses;
+    for (std::size_t t = 0; t < project.tracks.size(); ++t) {
+        for (std::size_t c = 0; c < project.tracks[t].clips.size(); ++c) {
+            if (predicate(project.tracks[t], c)) {
+                addresses.emplace_back(t, c);
+            }
+        }
+    }
+    return addresses;
+}
+
+bool isSplittable(const Track& track, std::size_t index) {
+    const Duration start = track.clips[index].timelineStart;
+    const Duration point = splitPointFor(track, index);
+    return point > start && point < track.clips[index].timelineEnd();
+}
+
 Duration trackEnd(const Track& track) {
     Duration end = Duration::zero();
     for (const Clip& clip : track.clips) {
@@ -487,11 +562,23 @@ EditInvocation drawEditInvocation(const Project& project) {
     const std::vector<std::pair<std::size_t, std::size_t>> clips = clipAddresses(project);
 
     // `timeline.add_track` and `timeline.add_clip` need no existing clip; the
-    // rest target one, so they only join the menu when the project has clips.
+    // rest target one, so they only join the menu when the project holds a clip
+    // for which that gesture is legal (see the predicates above).
+    const std::vector<std::pair<std::size_t, std::size_t>> removable =
+        addressesWhere(project, &removalKeepsTrackValid);
+    const std::vector<std::pair<std::size_t, std::size_t>> splittable =
+        addressesWhere(project, &isSplittable);
+
     enum Kind { AddTrack, AddClip, AddEffect, AddTransition, DeleteClip, MoveClip, SplitClip };
     std::vector<Kind> menu = {AddTrack, AddClip};
     if (!clips.empty()) {
-        menu.insert(menu.end(), {AddEffect, AddTransition, DeleteClip, MoveClip, SplitClip});
+        menu.insert(menu.end(), {AddEffect, AddTransition});
+    }
+    if (!removable.empty()) {
+        menu.insert(menu.end(), {DeleteClip, MoveClip});
+    }
+    if (!splittable.empty()) {
+        menu.push_back(SplitClip);
     }
     const Kind kind = menu[*rc::gen::inRange<std::size_t>(0, menu.size())];
 
@@ -539,12 +626,12 @@ EditInvocation drawEditInvocation(const Project& project) {
                     std::make_unique<SetTransitionCommand>(target.id, transition)};
         }
         case DeleteClip: {
-            const auto [t, c] = clips[*rc::gen::inRange<std::size_t>(0, clips.size())];
+            const auto [t, c] = removable[*rc::gen::inRange<std::size_t>(0, removable.size())];
             return {"timeline.delete_clip",
                     std::make_unique<DeleteClipCommand>(project.tracks[t].clips[c].id)};
         }
         case MoveClip: {
-            const auto [t, c] = clips[*rc::gen::inRange<std::size_t>(0, clips.size())];
+            const auto [t, c] = removable[*rc::gen::inRange<std::size_t>(0, removable.size())];
             const Track& track = project.tracks[t];
             // Moved clear of every other clip on its own track.
             const Duration destination = trackEnd(track) + Duration::fromMilliseconds(1'000);
@@ -553,14 +640,14 @@ EditInvocation drawEditInvocation(const Project& project) {
         }
         case SplitClip:
         default: {
-            // A split needs an interior playhead, so pick a clip long enough to
-            // have one; every generated clip is at least 20 ms long.
-            const auto [t, c] = clips[*rc::gen::inRange<std::size_t>(0, clips.size())];
-            const Clip&    target = project.tracks[t].clips[c];
-            const Duration playhead =
-                target.timelineStart + Duration::fromNanoseconds(target.duration().ticks() / 2);
+            // A split needs a playhead strictly inside the clip AND at or before
+            // the next clip's start, so the two halves stay ordered against a clip
+            // that legally overlaps this one.
+            const auto [t, c] = splittable[*rc::gen::inRange<std::size_t>(0, splittable.size())];
+            const Track&   track = project.tracks[t];
+            const Duration playhead = splitPointFor(track, c);
             return {"timeline.split_clip",
-                    std::make_unique<SplitClipCommand>(target.id, playhead)};
+                    std::make_unique<SplitClipCommand>(track.clips[c].id, playhead)};
         }
     }
 }

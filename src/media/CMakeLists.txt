@@ -172,3 +172,89 @@ target_sources(palmier_media PRIVATE AudioSink.cpp)
 # target_sources (append-only) so it composes with the sources declared in the
 # add_library() call above without editing that list.
 target_sources(palmier_media PRIVATE AudioEngine.cpp)
+
+
+
+# Encoder selection policy (task 9.1; Requirements 8.2, 8.3, 8.4, 8.8).
+#
+# media/EncoderSelector.{hpp,cpp} owns the export-time decision between a vendor
+# hardware encoder and the FFmpeg software encoder: the request/compiled-in/
+# capability gate, the capability probe run on a detached thread under a 3000 ms
+# deadline, the retry-hardware-initialization-exactly-once rule, and the single
+# EncoderSelection value that reports the outcome. That value has no public
+# constructor — only EncoderSelection::hardware() and EncoderSelection::software()
+# — so "hardware used" and "software fallback" cannot both be reported by any
+# expressible program (Requirement 8.8 as a type-level invariant).
+#
+# Standard library plus the existing gpu::CodecBridge / gpu::GpuTypes value types
+# only: no FFmpeg, no vendor SDK and no GPU. Device capabilities and the
+# compiled-in state arrive as VALUES (gpu::GpuCaps, gpu::BridgeAvailability), and
+# the probe, the probe-await strategy and hardware initialization are all
+# injectable, so the whole policy is exercisable on a host with neither a GPU nor
+# a vendor SDK and without any test sleeping. Added via target_sources
+# (append-only) so it composes with the sources declared in the add_library()
+# call above without editing that list.
+target_sources(palmier_media PRIVATE EncoderSelector.cpp)
+
+
+
+
+# Real audio output sinks + startup selection (task 8.6; Requirements 6.2, 6.7).
+#
+#   * media/PipeWireAudioSink — the primary sink (libpipewire-0.3, MIT): one
+#                               pw_thread_loop carrying one 48 kHz / 2-channel /
+#                               F32 playback stream, fed from a bounded FIFO by
+#                               the loop's process callback.
+#   * media/AlsaAudioSink     — the fallback sink (libasound2,
+#                               LGPL-2.1-or-later): the `default` PCM device
+#                               opened non-blocking, with xrun recovery and a
+#                               bounded write budget so submit() never blocks the
+#                               mixing thread.
+#   * media/AudioSinkSelector — the single place the design's startup order
+#                               PipeWire -> ALSA -> Null lives. A candidate is
+#                               selected only if it actually OPENS, so a build
+#                               with PipeWire compiled in but no daemon running
+#                               still falls through to ALSA and then to the
+#                               always-compiled NullAudioSink.
+#
+# Both sinks are compiled unconditionally, and both keep every third-party type
+# behind an opaque Impl, so nothing above this layer needs the backends' include
+# paths. Only the BACKEND CALLS are guarded: PALMIER_HAVE_PIPEWIRE /
+# PALMIER_HAVE_ALSA are defined, and PkgConfig::LIBPIPEWIRE / PkgConfig::LIBASOUND
+# linked, only when the corresponding PALMIER_ENABLE_* option is ON *and* the
+# library was actually located by cmake/PalmierDependencies.cmake (which records
+# PALMIER_PIPEWIRE_AVAILABLE / PALMIER_ALSA_AVAILABLE). Without a guard the class
+# still exists and its start() reports "not compiled in", which the selector
+# records as a skipped candidate — so leaving an option ON on a host without the
+# library degrades to the null sink instead of breaking configuration
+# (Requirements 6.7, 8.9). This is the same ENABLE AND FOUND form used above for
+# the vendor codec paths and in src/gpu/CMakeLists.txt; the `<pkg>_FOUND`
+# alternative keeps the gate correct with either spelling of the availability
+# variable.
+#
+# Added via target_sources (append-only) so they compose with the sources declared
+# in the add_library() call above without editing that list.
+target_sources(palmier_media PRIVATE
+    PipeWireAudioSink.cpp
+    AlsaAudioSink.cpp
+    AudioSinkSelector.cpp)
+
+if(PALMIER_ENABLE_PIPEWIRE AND (PALMIER_PIPEWIRE_AVAILABLE OR LIBPIPEWIRE_FOUND))
+    if(TARGET PkgConfig::LIBPIPEWIRE)
+        target_link_libraries(palmier_media PRIVATE PkgConfig::LIBPIPEWIRE)
+    endif()
+    # The imported target is PRIVATE — no header exposes a PipeWire type, so no
+    # consumer needs its include path (CMake still propagates the link
+    # requirement for a static library). The DEFINITION is PUBLIC, because
+    # PipeWireAudioSink::compiledIn() is a constexpr predicate in the header:
+    # were the definition private, a test translation unit would read "not
+    # compiled in" while the library had in fact compiled the real backend.
+    target_compile_definitions(palmier_media PUBLIC PALMIER_HAVE_PIPEWIRE=1)
+endif()
+
+if(PALMIER_ENABLE_ALSA AND (PALMIER_ALSA_AVAILABLE OR LIBASOUND_FOUND))
+    if(TARGET PkgConfig::LIBASOUND)
+        target_link_libraries(palmier_media PRIVATE PkgConfig::LIBASOUND)
+    endif()
+    target_compile_definitions(palmier_media PUBLIC PALMIER_HAVE_ALSA=1)
+endif()

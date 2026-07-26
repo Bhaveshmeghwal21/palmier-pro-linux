@@ -331,6 +331,51 @@ TEST(SplitClipCommand, PlayheadOutsideClipFailsWithoutMutation) {
     EXPECT_EQ(project.tracks[0].clips[0].duration(), ms(1000));
 }
 
+// A track may legally carry an overlap: an incoming clip may start before its
+// predecessor ends, by up to its own transition region. Splitting the
+// predecessor at a playhead that lies PAST the incoming clip's start would leave
+// the track unordered by timelineStart, because the right half is inserted
+// immediately after the left one. The engine rejects that split and rolls back,
+// so the track never becomes unordered; the same split before the incoming
+// clip's start is accepted.
+TEST(SplitClipCommand, SplitPastAnOverlappingSuccessorIsRejectedAndRolledBack) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);
+    const ClipId a = Uuid::generateV4();
+    const ClipId b = Uuid::generateV4();
+    Clip incoming = makeClip(b, ms(400), ms(0), ms(1000));  // starts inside a
+    Transition transition;
+    transition.id = Uuid::generateV4();
+    transition.kind = TransitionKind::Crossfade;
+    transition.duration = ms(600);  // exactly the 600 ms overlap it introduces
+    incoming.transitionIn = transition;
+    project.tracks[0].clips = {makeClip(a, ms(0), ms(0), ms(1000)), std::move(incoming)};
+
+    TimelineEngine engine(std::move(project));
+
+    // Playhead at 500 ms is inside clip a but past the successor's start.
+    const auto rejected = engine.apply(std::make_unique<SplitClipCommand>(a, ms(500)));
+    EXPECT_TRUE(rejected.isError());
+    EXPECT_FALSE(rejected.changed());
+    {
+        const Project snap = engine.snapshot();
+        ASSERT_EQ(snap.tracks[0].clips.size(), 2u);
+        EXPECT_EQ(snap.tracks[0].clips[0].id, a);
+        EXPECT_EQ(snap.tracks[0].clips[0].duration(), ms(1000));
+        EXPECT_EQ(snap.tracks[0].clips[1].id, b);
+    }
+    EXPECT_FALSE(engine.canUndo());
+
+    // The same clip splits cleanly before the successor's start.
+    const auto accepted = engine.apply(std::make_unique<SplitClipCommand>(a, ms(300)));
+    EXPECT_TRUE(accepted.changed());
+    const Project snap = engine.snapshot();
+    ASSERT_EQ(snap.tracks[0].clips.size(), 3u);
+    EXPECT_EQ(snap.tracks[0].clips[0].duration(), ms(300));
+    EXPECT_EQ(snap.tracks[0].clips[1].timelineStart, ms(300));
+    EXPECT_EQ(snap.tracks[0].clips[2].id, b);
+}
+
 TEST(SplitClipCommand, RedoReproducesSameRightId) {
     Uuid trackId;
     TimelineEngine engine(makeProjectWithOneTrack(trackId));

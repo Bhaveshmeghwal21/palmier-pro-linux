@@ -39,6 +39,10 @@
     "8.5 Write the audio-engine property tests": {
       "status": "passed",
       "lastRunTimestamp": 1785093406802
+    },
+    "9.2 Write the encoder-selection property tests": {
+      "status": "passed",
+      "lastRunTimestamp": 1785094273302
     }
   },
   "executionHistory": {

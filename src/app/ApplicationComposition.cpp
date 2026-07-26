@@ -32,6 +32,7 @@
 #include "core/Error.hpp"
 #include "core/MediaAssetRef.hpp"
 #include "core/MediaManager.hpp"
+#include "core/Project.hpp"
 #include "core/Result.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Uuid.hpp"
@@ -39,6 +40,8 @@
 #include "gpu/Compositor.hpp"
 #include "gpu/GpuContext.hpp"
 
+#include "media/AudioEngine.hpp"
+#include "media/AudioSinkSelector.hpp"
 #include "media/DecoderClipFrameProvider.hpp"
 #include "media/DecoderTeardownQueue.hpp"
 #include "media/MediaDecoder.hpp"
@@ -225,6 +228,49 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     playbackEngine_ = std::make_unique<ui::PreviewController>(
         *compositor_, *gpu_,
         [session = session_.get()]() { return session->engine().snapshot(); });
+
+    // --- Audio_Engine (task 8.7; Requirements 1.1, 6.3, 6.7) ---------------
+    // Startup sink selection in the design's order PipeWire -> ALSA -> Null. A
+    // candidate is selected only if it actually opens, so a build with PipeWire
+    // compiled in on a host with no daemon still falls through to ALSA and then to
+    // the null sink; the notice explains which and why, and is non-empty exactly
+    // when no real device was opened (Requirement 6.7).
+    const double audioFps = session_->engine().snapshot().timelineFps.toDouble();
+    media::AudioSinkSelectorOptions sinkOptions;
+    sinkOptions.projectFrameRateFps = audioFps;
+    media::AudioSinkSelection sinkSelection = media::selectAudioSink(std::move(sinkOptions));
+
+    audioSinkName_ = sinkSelection.name;
+    audioOutputAvailable_ = sinkSelection.realDevice;
+    audioUnavailableNotice_ = sinkSelection.notice.value_or(std::string{});
+
+    // The engine's ProjectProvider is a BORROW of the current project, refreshed
+    // from the one session on every read. It is a callable rather than a
+    // `ProjectSession&` on purpose: `Palmier::services` links `Palmier::media`, so
+    // taking the session type inside the audio engine would invert that dependency
+    // (see media/AudioEngine.hpp). Re-reading per mixed quantum is what bounds the
+    // mute/gain latency of Requirement 6.4 without moving the playhead.
+    audioProject_ = std::make_unique<Project>();
+    media::AudioEngineOptions audioOptions;
+    audioOptions.quantumFrames = sinkSelection.config.quantumFrames;
+    audioEngine_ = std::make_unique<media::AudioEngine>(
+        [session = session_.get(), project = audioProject_.get()]() -> const Project* {
+            *project = session->engine().snapshot();
+            return project;
+        },
+        std::move(sinkSelection.sink), *decoderTeardown_, media::ffmpegDecodeBackendFactory(),
+        audioOptions);
+
+    // The sink is the master clock (design.md D7; Requirement 6.3). The clock is
+    // installed as an OPTIONAL seam and reports a position only while the engine is
+    // running, so a halted transport — and a session where audio output was
+    // unavailable and the engine was never started — paces video off the wall clock
+    // exactly as it did before this stage.
+    playbackEngine_->setAudioMasterClock(
+        [engine = audioEngine_.get()]() -> std::optional<Duration> {
+            if (!engine->running()) return std::nullopt;
+            return engine->presentationPosition();
+        });
 
     // --- Project I/O -------------------------------------------------------
     saveService_ = std::make_unique<services::ProjectSaveService>();

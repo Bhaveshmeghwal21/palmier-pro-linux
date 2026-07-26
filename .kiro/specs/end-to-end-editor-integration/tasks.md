@@ -451,7 +451,7 @@ generated cases.
 
 ### Stage 8 — Audio (`NullAudioSink` first, real sinks additive behind optional detection)
 
-- [ ] 8. Build the audio decode → mix → output pipeline
+- [x] 8. Build the audio decode → mix → output pipeline
   - [x] 8.1 Add the audio surface to `MediaDecoder`
     - `src/media/MediaDecoder.{hpp,cpp}`: `AudioFrame`, `openAudioStream(int)`, `nextAudioFrame()`,
       `seekAudio(Duration)`, `hasAudio()`; `IDecodeBackend` gains `decodeAudio()` and
@@ -502,7 +502,7 @@ generated cases.
       `palmier_media_audio_engine_tests` using `IAudioSink` fakes
     - _Requirements: 6.2, 6.3, 6.4, 6.6, 6.8, 6.9, 6.11_
 
-  - [~] 8.6 Add the PipeWire and ALSA sinks behind optional detection
+  - [x] 8.6 Add the PipeWire and ALSA sinks behind optional detection
     - PipeWire sink (`libpipewire-0.3`, MIT) behind `PALMIER_ENABLE_PIPEWIRE` /
       `PALMIER_HAVE_PIPEWIRE`; ALSA sink (`libasound2`, LGPL-2.1-or-later) behind
       `PALMIER_ENABLE_ALSA` / `PALMIER_HAVE_ALSA`; startup selection order PipeWire → ALSA → Null
@@ -510,7 +510,7 @@ generated cases.
     - Install `libpipewire-0.3-dev` and `libasound2-dev` in `.github/workflows/ci.yml`
     - _Requirements: 6.2, 6.7_
 
-  - [~] 8.7 Wire the audio engine into the composition root and make the sink the clock
+  - [x] 8.7 Wire the audio engine into the composition root and make the sink the clock
     - `ApplicationComposition` constructs the single `AudioEngine` with the selected sink and the
       `DecoderTeardownQueue`, exposing `audioEngine()`
     - `PreviewController::pump` reads `AudioEngine::presentationPosition()` each pump: a frame more
@@ -521,7 +521,7 @@ generated cases.
 ### Stage 9 — Export
 
 - [ ] 9. Complete encode, mux and the export coordinator
-  - [~] 9.1 Implement `media::EncoderSelector` and the hardware-skip helper
+  - [x] 9.1 Implement `media::EncoderSelector` and the hardware-skip helper
     - `src/media/EncoderSelector.{hpp,cpp}`: `EncoderSelection` with only the
       `EncoderSelection::hardware(...)` and `EncoderSelection::software(codec, reason)`
       constructors, so no path can report both hardware use and software fallback
@@ -536,7 +536,7 @@ generated cases.
       with a reason naming the missing SDK or device
     - _Requirements: 8.2, 8.3, 8.4, 8.8, 15.5_
 
-  - [ ]* 9.2 Write the encoder-selection property tests
+  - [x]* 9.2 Write the encoder-selection property tests
     - **Property 40: Exactly one encoder selection with consistent flags** —
       **Validates: Requirements 8.2, 8.8**
     - **Property 41: Hardware init failure retries once then falls back with parameters intact** —
@@ -1049,33 +1049,89 @@ Checkpoint tasks (4.8, 9.9, 11.12, 12.13) are intentionally excluded from the wa
 
 ---
 
+
 ## Progress
 
-**Complete:** stages 0–7 in full. Stage 7 closed with 7.5 and 7.6 — `ApplicationComposition` now
-constructs the single `Compositor`, `DecoderTeardownQueue`, `DecoderClipFrameProvider` and
-`ui::PreviewController` behind accessors, and the transport carries seek-with-clamp,
-end-of-timeline halt, drop accounting, the playhead indicator, decode-failure pause and the
-software-compositing notice, covered by Properties 21, 22, 23, 24, 25 and 79. Stage 8 has 8.1–8.5
-done (the `MediaDecoder` audio surface with Property 26, `IAudioSink`/`NullAudioSink`, and
-`AudioEngine` mixing through the existing `AudioGraph` with Properties 27–32), with **8.6** (the
-PipeWire and ALSA sinks) and **8.7** (composition-root wiring and the sink as master clock)
-remaining, so the stage-8 parent stays open. Stages 9–12 are untouched.
+**Complete:** stages 0–8 in full. Stage 8 closed with 8.6 and 8.7: `PipeWireAudioSink` and
+`AlsaAudioSink` land behind `PALMIER_ENABLE_PIPEWIRE` / `PALMIER_HAVE_PIPEWIRE` and
+`PALMIER_ENABLE_ALSA` / `PALMIER_HAVE_ALSA`, `AudioSinkSelector` performs the startup
+PipeWire → ALSA → Null selection (requesting a ≤512-frame quantum above 48 fps), and
+`ApplicationComposition` now constructs the single `AudioEngine` behind
+`audioEngine()` / `audioSinkName()` / `audioOutputAvailable()` / `audioUnavailableNotice()`, with
+the sink offered to `PreviewController` as an optional injectable `AudioMasterClock` so a frame
+more than one interval behind the audio position is dropped and one more than an interval ahead
+waits. `.github/workflows/ci.yml` installs the two dev packages, and the configuration summary
+reports each sink.
 
-**Test count:** 919 registered tests, all passing (`100% tests passed, 0 tests failed out of 919`,
-about 9 seconds of wall clock). Against the 899 recorded after tasks 7.1–7.4 and 8.1–8.2:
-task 7.6 adds `palmier_ui_preview_playback_tests`, task 8.5 adds
-`palmier_media_audio_engine_tests`, and 7.5/8.3/8.4 extend the existing composition and preview
-targets. Confirmed over **five** consecutive `build-nogui` runs and once in `build-ui` under
-`xvfb-run -a` — both trees report the same 919 — with no flakes.
+**Stage 9 in progress:** 9.1 and 9.2 are done — `media::EncoderSelector` with the
+`hardware(...)` / `software(codec, reason)` constructor pair (so no selection can report both
+hardware use and software fallback), the 3000 ms probe deadline, the single initialization retry
+before the documented software fallback, and `tests/support/HardwareSkip.hpp`
+(`PALMIER_SKIP_WITHOUT_HW`), covered by Properties 40, 41 and 42 on
+`palmier_media_encoder_selector_tests`. **9.3–9.9 remain**, so the stage-9 parent stays open.
+Stages 10–12 are untouched.
 
-**Flake check on `PresentationRateWithinBoundsAndDropsUnderFivePercent` (Property 21):** not
-reproducible. Beyond the five full-suite runs, the property was run 15 times in isolation and then
-three times at `max_success=1000`, i.e. roughly 5 000 generated cases across independent seeds, all
-passing. The test is driven entirely by the injected `ManualClock` and never sleeps or reads a
-wall clock, so its outcome is a pure function of the RapidCheck seed; the earlier failures were on
-pre-convergence revisions of the test, before the latency profile became a deterministic periodic
-stall (`stallPeriod` of 30–60 composites, one dropped frame each) that keeps the drop ratio at or
-under 1/30 by construction rather than by luck. No bound was loosened.
+**Test count:** 952 registered tests, all passing in both trees
+(`100% tests passed, 0 tests failed out of 952`, about 10 seconds of wall clock) — 951 from
+tasks 8.6/8.7 (`palmier_media_audio_sink_tests`) and 9.1/9.2
+(`palmier_media_encoder_selector_tests`) plus the one unit test added with the Property 19 fix
+below. Confirmed over **five** consecutive `build-nogui` runs and once in `build-ui` under
+`xvfb-run -a`, with no flakes.
+
+**Property 19 flake fixed — root cause was the test's generator, not `ProjectSession`.**
+`ProjectSessionPersistenceProperties.UnmodifiedAfterSaveUntilTheNextToolAppliedEdit` (task 2.3)
+failed on a minority of seeds. Replaying the reported seed with shrinking disabled showed the real
+failing assertion is the *pre-save* edit, `RC_ASSERT(...apply(before.command).changed())`, with the
+engine reporting `clips must be ordered by timelineStart` — **not** anything about `modified()`,
+the save thread or the revision guard. The generator draws tracks that legally overlap (an incoming
+clip may overlap its predecessor by up to its own transition region), and `drawEditInvocation`
+then offered `timeline.split_clip` at the target clip's midpoint. When the following clip starts
+before that midpoint, `SplitClipCommand` inserts the right half after the left one and the track
+would no longer be ordered by `timelineStart`, so `TimelineEngine` correctly refuses the command
+and rolls back — the property, which asserts the drawn invocation succeeds, then failed. The
+`std::jthread` save of task 2.2 was ruled out: the property observes completion deterministically
+through `awaitSaveCompletions()`, which waits on the in-flight counter that each worker decrements
+under the same mutex that publishes its completion record, so no ordering is left to chance.
+The fix constrains the generator to invocations that are legal for the drawn project — the split
+point is capped at the next clip's start, and `delete_clip` / `move_clip` only target clips whose
+removal cannot leave the predecessor overlapping the successor beyond its transition region. No
+property was weakened, no bound loosened, no sleep, retry or skip added, and `max_success` is
+unchanged. The product behaviour the diagnosis relies on is now pinned by a new unit test,
+`SplitClipCommand.SplitPastAnOverlappingSuccessorIsRejectedAndRolledBack` in
+`tests/core/edit_commands_test.cpp` (the +1 in the test count).
+Verification after the fix: the reported seed passes; the single property passed **30/30**
+consecutive `ctest` runs (`--repeat until-fail:30`, each with a fresh random seed); ten independent
+runs at `RC_PARAMS=max_success=1000` passed (about 10 000 generated cases); and the whole
+`palmier_services_project_session_tests` file at `max_success=1000` passed.
+
+**Earlier flake check on `PresentationRateWithinBoundsAndDropsUnderFivePercent` (Property 21):**
+not reproducible, and still passing here. It was run 15 times in isolation and three times at
+`max_success=1000` (roughly 5 000 generated cases across independent seeds), all passing; the test
+is driven entirely by the injected `ManualClock`, so its outcome is a pure function of the
+RapidCheck seed and the earlier failures were on pre-convergence revisions of the test. No bound
+was loosened.
+
+**Verification configuration:** Qt 6.8.3 is installed at `/usr/local` via `aqtinstall`, and
+**PipeWire and ALSA development packages (`pipewire-devel`, `alsa-lib-devel`) are now installed on
+this host**, so both audio sinks compile and are enabled in both trees.
+
+- `build-nogui/` (`-DPALMIER_BUILD_UI=OFF`) remains the primary verification tree and covers the
+  headless surface of core, gpu, media, services and app composition.
+- `build-ui/` (`-DPALMIER_BUILD_UI=ON`) builds `src/ui` and the `palmier-pro` executable, and runs
+  the same suite under `xvfb-run -a`. This keeps stage 11 unblocked.
+
+`PKG_CONFIG_PATH=/usr/local/lib/pkgconfig` is required when configuring either tree, because
+FFmpeg is a from-source install under `/usr/local` and is discovered through `pkg-config`.
+
+```
+cmake --build build-nogui -j$(nproc)
+ctest --test-dir build-nogui --output-on-failure
+PKG_CONFIG_PATH=/usr/local/lib/pkgconfig cmake --build build-ui -j$(nproc)
+xvfb-run -a ctest --test-dir build-ui --output-on-failure
+```
+
+`build-nogui/`, `build-ui/`, `build/` and any other `build-*/` directory are local artifacts and
+are not committed.
 
 **One requirement conflict resolved in task 6.4:** the loopback fallback of Requirements 10.3 and
 10.12 binds `127.0.0.1:19789`, not the configured port. `RemoteAccessGate::computeDecision` was
@@ -1083,25 +1139,3 @@ carrying the configured port through the fallback; the requirement text and desi
 name 19789, so the implementation was corrected. A configuration that never enabled remote access
 still honours its configured port (Requirements 10.1, 16.3) — that is a different antecedent, and
 both branches are asserted by Property 52.
-
-**Verification configuration:** Qt 6.8.3 is now installed at `/usr/local` via `aqtinstall`, so both
-trees are available:
-
-- `build-nogui/` (`-DPALMIER_BUILD_UI=OFF`) remains the primary verification tree — it is what the
-  test counts above are measured on, and it covers the headless surface of core, gpu, media,
-  services and app composition.
-- `build-ui/` configures and builds with `-DPALMIER_BUILD_UI=ON`, so `src/ui` and the `palmier-pro`
-  executable compile and link. This unblocks stage 11 (mounting the editor shell).
-
-`PKG_CONFIG_PATH=/usr/local/lib/pkgconfig` is required when configuring either tree, because
-FFmpeg is a from-source install under `/usr/local` and is discovered through `pkg-config`.
-
-**Working build tree:** `build-nogui/` is the configured tree used for all of the above:
-
-```
-cmake --build build-nogui -j$(nproc)
-ctest --test-dir build-nogui --output-on-failure
-```
-
-`build-nogui/`, `build/` and any other `build-*/` directory are local artifacts and are not
-committed.

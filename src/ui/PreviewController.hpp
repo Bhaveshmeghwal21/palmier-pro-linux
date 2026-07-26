@@ -59,6 +59,16 @@
 //     frame count for the same timeline and rate (Requirements 5.2, 5.7). A late
 //     *caller* (one big clock jump between pumps) is a catch-up, not a drop: the
 //     drop test is the time the composite itself consumed.
+//   * **The audio clock is the master clock when there is one** (task 8.7;
+//     design.md D7, Requirement 6.3). An OPTIONAL `AudioMasterClock` may be
+//     installed. When it is installed and yields a position, `pump()` paces
+//     against that position instead of the wall clock: a frame more than one
+//     interval BEHIND it is counted dropped and skipped, a frame more than one
+//     interval AHEAD of it waits, and anything in between is presented. With no
+//     audio clock installed — or when it yields `nullopt` because the engine is
+//     stopped or audio output was unavailable — pacing is exactly the wall-clock
+//     behaviour described above, which is what keeps video running at the project
+//     frame rate with no audio device (Requirement 6.7).
 //   * **Playhead indicator.** Every presented frame notifies the
 //     `PlayheadIndicatorSink` with that frame's position, as do seek, pause and
 //     stop. Since the preview cadence is at least 24 fps, the indicator is
@@ -174,6 +184,32 @@ using PreviewRenderFn =
 /// Optional consumer of each presented frame (e.g. the Qt surface uploads the
 /// pixels to a texture). Receives the frame and the path it was rendered on.
 using PreviewFrameSink = std::function<void(const gpu::RenderedFrame&, RenderPath)>;
+
+/// The OPTIONAL audio master clock (task 8.7; Requirements 6.3, 6.7).
+///
+/// design.md D7 "Decision — A/V sync" makes the audio sink the clock: video slews
+/// to audio, audio is never resampled to chase video. The composition root binds
+/// this to `media::AudioEngine::presentationPosition()`; `pump()` reads it once
+/// per call and paces against it instead of the wall clock.
+///
+/// It is a `std::function` returning an `optional` for two reasons, and both are
+/// load-bearing:
+///
+///   * **Optional by absence.** A controller with no audio clock installed — the
+///     default, and what every transport/pacing test uses — paces exactly as it
+///     did before task 8.7, off the injected `PlaybackClock`. Adding audio to the
+///     application therefore cannot change the meaning of the stage-7 pacing
+///     contract for callers that have no audio engine.
+///   * **Optional by value.** Returning `nullopt` means "the audio clock is not
+///     currently authoritative": the engine is stopped, or no output device could
+///     be opened and audio is suppressed. `pump()` then falls back to wall-clock
+///     pacing for that call, which is what keeps video running at the project
+///     frame rate when audio is unavailable (Requirement 6.7).
+///
+/// It is a plain callable rather than a reference to the engine so that
+/// `PreviewController` keeps depending on nothing from `media` — and stays
+/// Qt-free and testable in both build trees.
+using AudioMasterClock = std::function<std::optional<Duration>()>;
 
 /// Optional consumer of playhead-indicator updates (Requirement 5.3): the
 /// timeline panel's playhead marker. Called with the position of the frame just
@@ -336,6 +372,28 @@ public:
     /// Passing an empty function restores the default (Compositor::renderAt).
     void setRenderFn(PreviewRenderFn fn);
 
+    /// Install (or, with an empty function, remove) the audio master clock
+    /// (task 8.7; Requirement 6.3). While installed AND yielding a position,
+    /// `pump()` paces video against the audio position rather than the wall
+    /// clock: a frame more than one interval behind it is counted dropped and
+    /// skipped, a frame more than one interval ahead of it waits, and anything in
+    /// between is presented. The composition root binds this to the one
+    /// `media::AudioEngine`.
+    void setAudioMasterClock(AudioMasterClock clock) { audioClock_ = std::move(clock); }
+
+    /// True when an audio master clock has been installed. It may still yield
+    /// `nullopt` per call, in which case that pump paces off the wall clock.
+    [[nodiscard]] bool hasAudioMasterClock() const noexcept {
+        return static_cast<bool>(audioClock_);
+    }
+
+    /// The audio position the most recent `pump()` paced against, or empty when
+    /// that pump used the wall clock (no clock installed, or the clock yielded
+    /// `nullopt`). Observability for the A/V skew bound of Requirement 6.3.
+    [[nodiscard]] const std::optional<Duration>& lastAudioPosition() const noexcept {
+        return lastAudioPosition_;
+    }
+
 private:
     [[nodiscard]] RenderPath computePreferredPath(const gpu::GpuContext& context) const noexcept;
     [[nodiscard]] FrameRate computePreviewRate(const Project& project) const noexcept;
@@ -374,6 +432,8 @@ private:
     PreviewRenderFn      renderFn_{};
     PreviewFrameSink     sink_{};
     PlayheadIndicatorSink indicator_{};
+    AudioMasterClock     audioClock_{};
+    std::optional<Duration> lastAudioPosition_{};
 
     RenderPath    preferredPath_{RenderPath::CpuFallback};
     bool          degradedToCpu_{false};

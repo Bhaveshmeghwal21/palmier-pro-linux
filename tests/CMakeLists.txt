@@ -2166,3 +2166,78 @@ target_link_libraries(palmier_ui_preview_playback_tests PRIVATE
     Palmier::test_support)
 
 palmier_register_test(palmier_ui_preview_playback_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Encoder-selection property tests (task 9.2; Requirements 8.2, 8.3, 8.4, 8.8)
+# — Properties 40, 41 and 42 for the media::EncoderSelector that task 9.1 added,
+# plus the unit companions for the 3000 ms probe deadline, the real detached-thread
+# awaiter, the exhaustive 3-codecs x 8-compiled-in-states enumeration design.md D8
+# calls for, and the tests/support/HardwareSkip.hpp reason text.
+#
+#   * Property 40 — exactly one encoder selection with consistent flags.
+#   * Property 41 — hardware init failure retries once then falls back with the
+#                   requested resolution, frame rate and bit rate intact.
+#   * Property 42 — software selection uses the documented encoder per codec.
+#
+# These tests ALWAYS RUN — they never skip. The selector takes the device
+# capabilities and the compiled-in vendor paths as VALUES (gpu::GpuCaps,
+# gpu::BridgeAvailability), so the generator synthesizes all three codecs, all
+# eight compiled-in states and arbitrary capability sets, and every hardware
+# branch is exercised on a host with no GPU and no vendor SDK (this sandbox, and
+# the SDK-free CI configure job). Nothing consults fromBuildConfig() or a live
+# device for the properties.
+#
+# No test sleeps and none waits out the 3000 ms deadline: the properties inject a
+# virtual-time awaiter that compares a generated probe delay against the deadline
+# arithmetically, and the two unit tests that drive the REAL detached-thread
+# awaiter use a short injected deadline with a probe blocked on a gate the test
+# owns, so a wedged probe surfaces as a bounded failure rather than a hang.
+#
+# The include path adds ${PROJECT_SOURCE_DIR}/tests so the shared
+# support/HardwareSkip.hpp helper resolves; links Palmier::media (which brings in
+# Palmier::gpu and Palmier::core). No FFmpeg, GPU, vendor SDK, media fixture or
+# temporary file is involved.
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_encoder_selector_tests
+    media/encoder_selector_property_test.cpp)
+target_include_directories(palmier_media_encoder_selector_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/tests")
+target_link_libraries(palmier_media_encoder_selector_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_encoder_selector_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Audio output sink set + startup selection tests (task 8.6; Requirements 6.2,
+# 6.7) — the PipeWire and ALSA sinks and the design's selection order
+# PipeWire -> ALSA -> Null.
+#
+# The order is asserted through INJECTED candidate factories, so every branch —
+# PipeWire chosen, PipeWire unopenable so ALSA chosen, neither openable so the
+# null sink chosen with the Requirement 6.7 notice, and a backend simply not
+# compiled into this build — is exercised identically on a developer desktop with
+# a sound server and on a CI runner with no sound card. Two further tests drive
+# the REAL PipeWireAudioSink / AlsaAudioSink on whatever host is running and
+# assert the host-independent contract: start() either opens the device or reports
+# an error naming the backend, and selection always ends with a usable sink. On a
+# machine with no audio device — this project's CI, and every container — that is
+# exactly the fall-through to NullAudioSink.
+#
+# No sound card, no audio daemon, no FFmpeg, no GPU and no sleeping are required:
+# the null fallback's position comes from an injected steady clock the test
+# advances by hand. Links Palmier::media (which brings in Palmier::gpu and
+# Palmier::core).
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_audio_sink_tests
+    media/audio_sink_selection_test.cpp)
+target_link_libraries(palmier_media_audio_sink_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_audio_sink_tests)

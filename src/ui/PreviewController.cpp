@@ -286,9 +286,30 @@ std::size_t PreviewController::pump() {
         return 0;
     }
 
+    // The audio master clock, read ONCE per pump (task 8.7; design.md D7): the
+    // sink is the clock, and every frame considered in this pump is paced against
+    // the same audio position, so the decision is consistent within the call.
+    // Absent (no clock installed) or empty (the engine is stopped, or audio output
+    // was unavailable and audio is suppressed) means "pace off the wall clock",
+    // which is exactly the pre-audio behaviour — that is what keeps the stage-7
+    // pacing contract intact for callers with no audio engine (Requirement 6.7).
+    lastAudioPosition_.reset();
+    if (audioClock_) {
+        lastAudioPosition_ = audioClock_();
+    }
+    const std::optional<Duration> audioPosition = lastAudioPosition_;
+
     std::size_t rendered = 0;
     std::size_t steps = 0;
-    while (steps < options_.maxFramesPerPump && clock_->now() >= deadlineFor(frameIndex_)) {
+    while (steps < options_.maxFramesPerPump) {
+        if (audioPosition.has_value()) {
+            // Video slews to audio: a frame more than one interval AHEAD of the
+            // audio position waits (Requirement 6.3).
+            if (positionFor(frameIndex_) > *audioPosition + interval_) break;
+        } else if (!(clock_->now() >= deadlineFor(frameIndex_))) {
+            break;
+        }
+
         // End of a bounded timeline: halt within this call, keep the last
         // presented frame on the surface, rest the playhead on the duration, and
         // report Stopped (Requirement 5.10).
@@ -298,6 +319,19 @@ std::size_t PreviewController::pump() {
             endOfTimeline_ = true;
             notifyIndicator(playhead_);
             break;
+        }
+
+        // A frame more than one interval BEHIND the audio position is counted
+        // dropped and skipped rather than presented late (design.md D7; the drop
+        // accounting of Requirements 5.2 and 5.7). Under the audio clock this
+        // REPLACES the composite-cost measure below: the authority on whether a
+        // frame is late is the audio the user is already hearing, and counting
+        // both would count the same lateness twice.
+        if (audioPosition.has_value() && positionFor(frameIndex_) + interval_ < *audioPosition) {
+            ++dropped_;
+            ++steps;
+            ++frameIndex_;
+            continue;
         }
 
         const Duration position = positionFor(frameIndex_);
@@ -333,6 +367,11 @@ std::size_t PreviewController::pump() {
         // is exactly how a Qt timer behaves after the event loop stalls, and how the
         // cadence tests drive a whole second at once) is a catch-up the engine
         // presents in full — not a drop the engine caused.
+        //
+        // Skipped entirely when an audio master clock is pacing this pump: the
+        // audio position above is then the authority on lateness (task 8.7).
+        if (audioPosition.has_value()) continue;
+
         const Duration cost = clock_->now() - startedAt;
         std::int64_t skips = 0;
         while (cost > interval_ * (skips + 1)) ++skips;

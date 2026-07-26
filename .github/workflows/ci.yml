@@ -100,7 +100,9 @@ jobs:
             libvpl-dev \
             liblcms2-dev \
             libsecret-1-dev \
-            libssl-dev
+            libssl-dev \
+            libpipewire-0.3-dev \
+            libasound2-dev
 
       - name: Verify toolchain versions
         run: |
@@ -157,6 +159,29 @@ jobs:
           else
             echo "::error::configuration summary does not report the TLS transport as 'enabled (OpenSSL found)'"
             grep -E "TLS \(OpenSSL\)" configure.log || true
+            exit 1
+          fi
+
+      # Requirements 6.2 / 6.7: with the options ON and both libraries present, the
+      # summary must report each audio sink as enabled with the SDK found, so
+      # PALMIER_HAVE_PIPEWIRE and PALMIER_HAVE_ALSA really are defined and both
+      # backends are compiled and type-checked here. The runners have no sound card,
+      # so at RUN time selection still falls through to NullAudioSink — which is the
+      # point of Requirement 6.7 and is what the audio tests assert.
+      - name: Assert both audio sinks are enabled in the configuration summary
+        run: |
+          status=0
+          for sink in PipeWire ALSA; do
+            if grep -Eq "Audio sink: ${sink}[^:]*:[[:space:]]*enabled \(SDK found\)" configure.log; then
+              echo "OK: ${sink} audio sink reported as 'enabled (SDK found)'"
+            else
+              echo "::error::configuration summary does not report the ${sink} audio sink as 'enabled (SDK found)'"
+              status=1
+            fi
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "--- audio sink summary lines ---"
+            grep -E "Audio sink" configure.log || true
             exit 1
           fi
 
@@ -223,24 +248,29 @@ jobs:
       # Hide any that did so this job really exercises the "SDK not found" path;
       # renaming the pkg-config file (rather than purging the package) keeps the
       # mandatory dependencies installed and intact.
-      - name: Hide any vendor codec SDKs from pkg-config
+      #
+      # The two OPTIONAL audio backends (libpipewire-0.3, alsa) are hidden here for
+      # the same reason: this job is what proves that a host with neither library
+      # still configures with the options left ON, with each sink reported disabled
+      # and selection degrading to NullAudioSink (Requirements 6.7, 8.9).
+      - name: Hide any vendor codec SDKs and optional audio backends from pkg-config
         run: |
-          for module in libva libva-drm vpl libmfx ffnvcodec; do
+          for module in libva libva-drm vpl libmfx ffnvcodec libpipewire-0.3 alsa; do
             if pkg-config --exists "$module"; then
               pcdir=$(pkg-config --variable=pcfiledir "$module")
               echo "Hiding transitively installed ${module}.pc from ${pcdir}"
               sudo mv "${pcdir}/${module}.pc" "${pcdir}/${module}.pc.ci-hidden"
             fi
           done
-          for module in libva libva-drm vpl libmfx ffnvcodec; do
+          for module in libva libva-drm vpl libmfx ffnvcodec libpipewire-0.3 alsa; do
             if pkg-config --exists "$module"; then
-              echo "::error::${module} is still visible to pkg-config; this job requires no vendor SDKs"
+              echo "::error::${module} is still visible to pkg-config; this job requires none of them"
               exit 1
             fi
           done
-          echo "No vendor codec SDKs are visible to pkg-config."
+          echo "No vendor codec SDKs and no optional audio backends are visible to pkg-config."
 
-      - name: Configure with every vendor path ON and no vendor SDKs
+      - name: Configure with every vendor path and audio sink ON and none present
         run: |
           set -o pipefail
           cmake -S . -B build-no-sdk -G Ninja \
@@ -250,6 +280,8 @@ jobs:
             -DPALMIER_ENABLE_VAAPI=ON \
             -DPALMIER_ENABLE_NVENC=ON \
             -DPALMIER_ENABLE_QSV=ON \
+            -DPALMIER_ENABLE_PIPEWIRE=ON \
+            -DPALMIER_ENABLE_ALSA=ON \
             2>&1 | tee configure-no-sdk.log
 
       - name: Assert vendor hardware paths are disabled in the configuration summary
@@ -266,5 +298,30 @@ jobs:
           if [ "$status" -ne 0 ]; then
             echo "--- hardware codec summary lines ---"
             grep -E "VAAPI|NVENC|QSV" configure-no-sdk.log || true
+            exit 1
+          fi
+
+      # Requirements 6.7 / 8.9 for the audio sinks: both options are ON and neither
+      # library is present, so configuration must still succeed with each sink
+      # reported disabled. The always-compiled NullAudioSink is what the code behind
+      # the absent guards degrades to.
+      - name: Assert both audio sinks are disabled in the configuration summary
+        run: |
+          status=0
+          for sink in PipeWire ALSA; do
+            if grep -Eq "Audio sink: ${sink}[^:]*:[[:space:]]*disabled \(SDK not found\)" configure-no-sdk.log; then
+              echo "OK: ${sink} audio sink reported as 'disabled (SDK not found)'"
+            else
+              echo "::error::configuration summary does not report the ${sink} audio sink as 'disabled (SDK not found)'"
+              status=1
+            fi
+          done
+          if ! grep -Eq "Audio sink: Null[^:]*:[[:space:]]*enabled \(always compiled in\)" configure-no-sdk.log; then
+            echo "::error::configuration summary does not report the null audio sink as always compiled in"
+            status=1
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo "--- audio sink summary lines ---"
+            grep -E "Audio sink" configure-no-sdk.log || true
             exit 1
           fi
