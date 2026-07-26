@@ -977,9 +977,20 @@ palmier_register_test(palmier_services_agent_orchestrator_tests)
 # dependencies that the full Palmier::services library links. The whole stack uses
 # only POSIX sockets + the standard library and depends only on Palmier::core.
 # ---------------------------------------------------------------------------
+#
+# Task 5.3 extends this suite with the JSON-RPC 2.0 handshake driven over the same
+# real loopback socket — initialize -> notifications/initialized -> tools/list ->
+# tools/call — asserting Requirement 15.3's envelope invariants on every response
+# (valid JSON, "jsonrpc":"2.0", the request id echoed unchanged, exactly one of
+# result/error) plus name/description/inputSchema on every tools/list entry, the
+# Mcp-Session-Id emission, the 202-with-empty-body notification answer and the
+# 1 MiB body cap yielding -32700. The protocol handler and the session registry
+# join the compiled-in source list for that.
 add_executable(palmier_services_mcp_http_integration_tests
     services/mcp_http_integration_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
@@ -1706,3 +1717,123 @@ target_link_libraries(palmier_services_project_tools_tests PRIVATE
     Palmier::test_support)
 
 palmier_register_test(palmier_services_project_tools_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Application settings unit tests (task 6.1; Requirements 10.2, 16.3).
+#
+# Exercise app::AppSettings' four-layer resolution — built-in defaults, the
+# key=value file at $XDG_CONFIG_HOME/palmier-pro/config, environment variables,
+# command-line flags — with each layer shown overriding the one below it, plus the
+# ignore-and-report behaviour for an absent file, a malformed line, an unknown key
+# or flag and an out-of-range value, and the secure default that remote access
+# stays off (and the endpoint on loopback) unless configuration opts in explicitly.
+#
+# The environment is driven entirely through the injected lookup seam, so the
+# process environment is never mutated; where a file is needed, XDG_CONFIG_HOME is
+# pointed at a pid-qualified scratch directory under the system temp path, so no
+# real user configuration directory is touched.
+#
+# Following the neighbouring suites' isolated-source pattern, AppSettings.cpp is
+# compiled directly into the test binary; the AppConfig it produces is a value
+# type, so the binary needs no service library and links neither Qt nor
+# FFmpeg/libsecret/lcms2.
+# ---------------------------------------------------------------------------
+add_executable(palmier_app_settings_tests
+    app/app_settings_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/app/AppSettings.cpp")
+target_include_directories(palmier_app_settings_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_app_settings_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_app_settings_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# MCP session-registry tests (task 5.1; Requirements 9.10, 9.11, 9.14, 9.15,
+# 10.9, 10.11). Exercise services::McpSessionRegistry — the MCP endpoint's
+# identity store — in isolation: a minted identifier is 64 lowercase hex
+# characters (256 bits from std::random_device, well above Requirement 9.11's
+# 32-character floor); identifiers are never reissued even after their sessions
+# are closed, because every issued id is retained in a never-pruned set while only
+# live records expire; touch() reports NotFound for an unrecognised identifier and
+# Timeout for one whose session went idle, in both cases telling the client to
+# repeat initialize (9.15); markInitialized() is what makes tools/list and
+# tools/call admissible (9.10, 9.14); expireIdle() closes exactly the idle
+# sessions (10.11); the concurrent maximum refuses only the excess session while
+# every established one stays active, and a slot freed by an expiry is immediately
+# reusable (10.9); and out-of-range options are clamped to the permitted 1..32 /
+# 30..3600 s bounds. The clock is injected, so the expiry boundary is asserted
+# exactly — at the timeout the session is still live, past it the session is
+# closed — without any test sleeping.
+#
+# The registry depends only on Palmier::core (Result/Error) and the standard
+# library, so it is compiled directly into the test binary, following the
+# neighbouring service suites' isolated-source pattern. Tasks 5.5 and 6.5 add
+# services/mcp_session_property_test.cpp to this target (Properties 49, 51, 55,
+# 57).
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_mcp_session_tests
+    services/mcp_session_registry_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp")
+target_include_directories(palmier_services_mcp_session_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_mcp_session_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_mcp_session_tests)
+
+
+# ---------------------------------------------------------------------------
+# MCP protocol-handler tests (task 5.2; Requirements 9.1-9.10, 9.14, 9.15, 9.16).
+# Exercise services::McpProtocolHandler — the JSON-RPC 2.0 half of design.md D3 —
+# directly, with no socket: initialize negotiating the client's requested version
+# when supported and the highest supported version otherwise, reporting the server
+# name, version and a capabilities object declaring `tools`, and minting the
+# session identifier the transport emits (9.2, 9.11); notifications/initialized
+# answering HTTP 202 with a zero-byte body and marking the session initialized
+# (9.10); tools/list returning one entry per registered tool with name,
+# description and an object inputSchema (9.3); tools/call returning a content
+# array whose first entry is a text entry with isError false and the edit landing
+# in the project (9.4), or isError true naming the failing tool and reason while
+# leaving the project and the undo history exactly as they were (9.5); the fixed
+# fault order — parse (-32700), envelope (-32600), method (-32601), session state,
+# arguments (-32602) — with none of those paths creating an edit command (9.6-9.9,
+# 9.14, 9.15); and a budget overrun reported as an isError result naming the tool
+# and the limit, with the 60-second budget observably handed to the
+# MainThreadInvoker (9.16). Both invoker directions are covered: the inline
+# invoker headless builds and tests use, and a scripted one that reports a Timeout
+# without running the work.
+#
+# Following the neighbouring service suites' isolated-source pattern, the handler,
+# the session registry, the executor, the tool surface, the project session and
+# the project store are compiled directly into the test binary alongside
+# Palmier::core (which supplies the real TimelineEngine and EditCommands), so the
+# binary links no libav*, libsecret or lcms2 — `tools/call` still runs the real
+# production execution policy. Task 5.4 adds
+# services/mcp_protocol_property_test.cpp to this target (Properties 43-48).
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_mcp_protocol_tests
+    services/mcp_protocol_handler_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_mcp_protocol_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_mcp_protocol_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_mcp_protocol_tests)

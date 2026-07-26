@@ -194,3 +194,40 @@ target_sources(palmier_services PRIVATE
 # here. Appended so the existing source list above is preserved verbatim.
 target_sources(palmier_services PRIVATE
     MediaImportService.cpp)
+
+
+
+# --- Tasks 5.1 / 5.2 / 5.3: the MCP protocol layer --------------------------
+#
+# design.md D3 splits the endpoint into three separated concerns, of which two
+# are new here and the third (McpServer, already in this target) is extended in
+# place:
+#
+#   * services::McpSessionRegistry (task 5.1) — session identity, the
+#     concurrent-session maximum and the idle timeout. A session id is a 256-bit
+#     std::random_device value rendered as 64 lowercase hex characters, unique for
+#     the whole process lifetime because every issued id is retained in a
+#     never-pruned set while only live records expire (Requirements 9.10, 9.11,
+#     9.14, 9.15, 10.9, 10.11). Its clock is injectable, so expiry is testable
+#     without sleeping.
+#   * services::McpProtocolHandler (task 5.2) — JSON-RPC 2.0 dispatch:
+#     envelope validation, initialize / notifications/initialized / tools/list /
+#     tools/call, the parse (-32700) -> envelope (-32600) -> method (-32601) ->
+#     session state -> ToolSchema::validate (-32602) -> execute order, and the
+#     MainThreadInvoker seam carrying Requirement 9.16's 60-second budget
+#     (Requirements 9.1-9.16). It holds the ToolRegistry, the McpToolExecutor and
+#     the session registry, and knows nothing about sockets.
+#   * services::McpServer (task 5.3) — gains start(const BindDecision&), header
+#     capture into McpRequestContext, Mcp-Session-Id emission, the 202-with-empty-
+#     body answer and the 1 MiB body cap yielding -32700, delegating to the
+#     protocol handler through the McpProtocolDelegate seam while dispatch() keeps
+#     its pure, socket-free shape.
+#
+# services/RemoteAccessTypes.hpp (header-only) carries BindDecision so the
+# transport needs no dependency on the remote-access gate; task 6.2 extends that
+# struct in place rather than declaring a second one. All of this depends only on
+# Palmier::core and the service-layer Json/ToolSchema/ToolRegistry surface.
+# Appended here so the existing source list above is preserved verbatim.
+target_sources(palmier_services PRIVATE
+    McpSessionRegistry.cpp
+    McpProtocolHandler.cpp)

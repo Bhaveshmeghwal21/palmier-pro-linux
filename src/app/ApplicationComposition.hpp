@@ -74,7 +74,9 @@
 #include "services/ByokCredentials.hpp"          // ByokProviderValidator
 #include "services/GenerativeClient.hpp"         // IGenerativeBackend
 #include "services/LocalizationManager.hpp"      // Catalog, SystemLanguageProvider
+#include "services/McpProtocolHandler.hpp"        // MainThreadInvoker (design.md D5)
 #include "services/McpServer.hpp"                // kDefaultHost/kDefaultPort
+#include "services/RemoteAccessGate.hpp"         // RemoteAccessConfig (task 6.1)
 #include "services/SecretStore.hpp"              // SecretStore
 
 // Forward declarations for the concrete components the composition root owns by
@@ -150,6 +152,21 @@ struct AppConfig {
     /// BYOK provider ids that authorize the generative / agent features in
     /// addition to an active subscription (used by the auth gates).
     std::vector<std::string> byokProviders;
+
+    /// Remote MCP access (task 6.1; Requirements 10.1-10.3, 16.3). Default
+    /// constructed = disabled, i.e. loopback only. Resolved from configuration by
+    /// `app::AppSettings`; validated and enforced by `services::RemoteAccessGate`
+    /// (task 6.2). Nothing here binds a non-loopback address on its own.
+    services::RemoteAccessConfig remote;
+
+    /// How work is marshalled onto the thread that owns the project session
+    /// (design.md D5; Requirement 9.16) — the seam declared alongside
+    /// `McpProtocolHandler`, which is what consumes it. Left empty it means "use
+    /// `services::inlineMainThreadInvoker()`", i.e. run the work on the calling
+    /// thread, which is what headless drivers and tests want; the Qt shell
+    /// supplies an invoker that posts to the main thread and waits with the 60 s
+    /// budget. The substitution happens where the protocol handler is constructed.
+    services::MainThreadInvoker mainThreadInvoker;
 };
 
 // ---------------------------------------------------------------------------

@@ -93,8 +93,14 @@ endif()
 # Qt entry glue (behind PALMIER_HAVE_QT). Declared with a UNIQUE target name and
 # APPENDED here so the palmier_app_platform and palmier-pro targets defined above
 # are preserved verbatim.
+#
+# AppSettings.cpp (task 6.1; Requirements 10.2, 16.3) joins the same library: it
+# resolves the AppConfig this library consumes from built-in defaults, the
+# key=value file at $XDG_CONFIG_HOME/palmier-pro/config, the environment and the
+# command line, and has no dependency the composition root does not already have.
 add_library(palmier_app_composition STATIC
-    ApplicationComposition.cpp)
+    ApplicationComposition.cpp
+    AppSettings.cpp)
 add_library(Palmier::app_composition ALIAS palmier_app_composition)
 
 target_include_directories(palmier_app_composition PUBLIC

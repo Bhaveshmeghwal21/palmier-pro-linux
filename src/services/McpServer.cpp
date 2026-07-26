@@ -89,8 +89,9 @@ bool parseRequestLine(std::string_view line, HttpRequest& out) {
     return !out.method.empty() && !out.target.empty();
 }
 
-// Read one complete request off `fd`. On success fills `req`; on failure returns
-// false (caller closes the connection).
+// Read one complete request off `fd`. On success fills `req` (including its
+// headers, with lower-case names); on failure returns false (caller closes the
+// connection).
 bool readHttpRequest(int fd, HttpRequest& req) {
     std::string buf;
     buf.reserve(1024);
@@ -138,6 +139,7 @@ bool readHttpRequest(int fd, HttpRequest& req) {
                         return false;
                     }
                 }
+                req.headers.emplace_back(name, value);
             }
         }
         if (nl == std::string::npos) break;
@@ -171,6 +173,31 @@ std::string HttpRequest::path() const {
     return q == std::string::npos ? target : target.substr(0, q);
 }
 
+const std::string* HttpRequest::header(std::string_view name) const {
+    const std::string wanted = toLowerCopy(name);
+    for (const auto& [key, value] : headers) {
+        if (key == wanted) return &value;
+    }
+    return nullptr;
+}
+
+std::string_view httpReasonPhrase(int status) noexcept {
+    switch (status) {
+        case 200: return "OK";
+        case 202: return "Accepted";
+        case 400: return "Bad Request";
+        case 401: return "Unauthorized";
+        case 403: return "Forbidden";
+        case 404: return "Not Found";
+        case 405: return "Method Not Allowed";
+        case 413: return "Content Too Large";
+        case 500: return "Internal Server Error";
+        case 503: return "Service Unavailable";
+        default:  break;
+    }
+    return status >= 400 ? "Error" : "OK";
+}
+
 std::string HttpResponse::toWire() const {
     std::string out;
     out.reserve(body.size() + 128);
@@ -179,9 +206,17 @@ std::string HttpResponse::toWire() const {
     out += ' ';
     out += reason;
     out += "\r\n";
-    out += "Content-Type: ";
-    out += contentType;
-    out += "\r\n";
+    if (!contentType.empty()) {
+        out += "Content-Type: ";
+        out += contentType;
+        out += "\r\n";
+    }
+    for (const auto& [name, value] : headers) {
+        out += name;
+        out += ": ";
+        out += value;
+        out += "\r\n";
+    }
     out += "Content-Length: ";
     out += std::to_string(body.size());
     out += "\r\n";
@@ -208,6 +243,88 @@ McpServer::McpServer(McpRequestHandler handler) : handler_(std::move(handler)) {
 McpServer::~McpServer() { stop(); }
 
 void McpServer::setHandler(McpRequestHandler handler) { handler_ = std::move(handler); }
+
+void McpServer::setProtocolDelegate(McpProtocolDelegate delegate) {
+    protocol_ = std::move(delegate);
+}
+
+std::string McpServer::boundHost() const { return running_.load() ? boundHost_ : std::string{}; }
+
+McpRequestContext McpServer::contextFor(const HttpRequest& request, std::string sourceAddress,
+                                        bool secureTransport) {
+    McpRequestContext context;
+    context.sourceAddress = std::move(sourceAddress);
+    context.bodyBytes = request.body.size();
+    context.secureTransport = secureTransport;
+
+    if (const std::string* session = request.header(kSessionHeader); session != nullptr) {
+        context.sessionId = *session;
+    }
+    if (const std::string* authorization = request.header("authorization");
+        authorization != nullptr) {
+        context.authorization = *authorization;
+    }
+    if (const std::string* origin = request.header("origin"); origin != nullptr) {
+        context.origin = *origin;
+    }
+    return context;
+}
+
+HttpResponse McpServer::dispatchWithContext(const HttpRequest& request,
+                                            const McpRequestContext& context) const {
+    if (request.path() != kPath) {
+        HttpResponse r;
+        r.status = 404;
+        r.reason = std::string(httpReasonPhrase(404));
+        r.body = Json::object({{"error", Json("not found")}}).dump();
+        return r;
+    }
+    if (request.method != "POST") {
+        HttpResponse r;
+        r.status = 405;
+        r.reason = std::string(httpReasonPhrase(405));
+        r.body = Json::object({{"error", Json("method not allowed")}}).dump();
+        return r;
+    }
+
+    // Requirements 9.1/9.6: a body above the 1 MiB cap is a parse error, and it is
+    // refused here so no protocol or execution work is ever started for it.
+    if (request.body.size() > kMaxRequestBodyBytes) {
+        Json err = Json::object();
+        err.set("jsonrpc", Json("2.0"));
+        err.set("id", Json(nullptr));
+        err.set("error",
+                Json::object({{"code", Json(std::int64_t{-32700})},
+                              {"message", Json("Parse error: request body of " +
+                                               std::to_string(request.body.size()) +
+                                               " bytes exceeds the " +
+                                               std::to_string(kMaxRequestBodyBytes) +
+                                               "-byte limit")}}));
+        HttpResponse r;
+        r.status = 400;
+        r.reason = std::string(httpReasonPhrase(400));
+        r.body = err.dump();
+        return r;
+    }
+
+    // No JSON-RPC layer wired: keep answering through the original bespoke path so
+    // pre-task-5.3 compositions and their tests behave exactly as before.
+    if (!protocol_) return dispatch(request);
+
+    const McpReply reply = protocol_(context, request.body);
+
+    HttpResponse r;
+    r.status = reply.httpStatus;
+    r.reason = std::string(httpReasonPhrase(reply.httpStatus));
+    r.body = reply.body;
+    // A zero-byte body carries no media type: Requirement 9.10's 202 answer is
+    // exactly `Content-Length: 0` with no content.
+    if (r.body.empty()) r.contentType.clear();
+    if (reply.newSessionId.has_value()) {
+        r.headers.emplace_back(std::string(kSessionHeader), *reply.newSessionId);
+    }
+    return r;
+}
 
 bool McpServer::isLoopbackHost(std::string_view host) {
     if (host == "localhost" || host == "ip6-localhost") return true;
@@ -291,25 +408,52 @@ HttpResponse McpServer::dispatch(const HttpRequest& request) const {
 }
 
 Result<void> McpServer::start(std::string_view host, std::uint16_t port) {
+    // The two-argument form is the loopback-only decision of Requirement 10.1.
+    BindDecision decision;
+    decision.host = std::string(host);
+    decision.port = port;
+    decision.loopbackOnly = true;
+    decision.tlsEnabled = false;
+    return start(decision);
+}
+
+Result<void> McpServer::start(const BindDecision& decision) {
+    const std::string_view host = decision.host;
+    const std::uint16_t    port = decision.port;
+
     if (running_.load()) {
         return err(failedPrecondition("MCP server is already running"));
     }
-    if (!isLoopbackHost(host)) {
+    if (decision.tlsEnabled) {
+        // Refused rather than silently downgraded: a caller that asked for TLS must
+        // never be served plaintext. services::TlsTransport (task 6.3) supplies it.
+        return err(unsupported(
+            "MCP server cannot serve TLS on '" + std::string(host) +
+            "': the TLS transport is not compiled in, so this bind was refused "
+            "rather than served as plaintext"));
+    }
+    if (decision.loopbackOnly && !isLoopbackHost(host)) {
         return err(invalidArgument(
             "MCP server refuses to bind a non-loopback host '" + std::string(host) +
             "'; the endpoint is loopback-only"));
     }
 
-    // Resolve the loopback host into a sockaddr_in. isLoopbackHost has already
-    // admitted only loopback forms; map the textual aliases onto 127.0.0.1.
+    // Resolve the host into a sockaddr_in. Loopback textual aliases map onto
+    // 127.0.0.1; anything else must be an IPv4 literal this listener can bind.
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     std::string h(host);
-    if (h == "localhost") h = "127.0.0.1";
+    if (h == "localhost" || h == "ip6-localhost") h = "127.0.0.1";
     if (::inet_pton(AF_INET, h.c_str(), &addr.sin_addr) != 1) {
-        // IPv6 loopback aliases fall back to IPv4 127.0.0.1 for this listener.
-        ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+        if (isLoopbackHost(host)) {
+            // IPv6 loopback aliases fall back to IPv4 127.0.0.1 for this listener.
+            ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+        } else {
+            return err(invalidArgument(
+                "MCP server cannot bind '" + std::string(host) +
+                "': the listener accepts an IPv4 literal or a loopback alias"));
+        }
     }
 
     const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -365,6 +509,8 @@ Result<void> McpServer::start(std::string_view host, std::uint16_t port) {
     listenFd_ = fd;
     wakeReadFd_ = pipefds[0];
     wakeWriteFd_ = pipefds[1];
+    boundHost_ = h;
+    secureTransport_ = decision.tlsEnabled;
     boundPort_.store(actualPort);
     stopRequested_.store(false);
     running_.store(true);
@@ -393,16 +539,27 @@ void McpServer::acceptLoop() {
         }
         if (!(fds[0].revents & POLLIN)) continue;
 
-        const int conn = ::accept(listenFd_, nullptr, nullptr);
+        sockaddr_in peer{};
+        socklen_t   peerLen = sizeof(peer);
+        const int conn = ::accept(listenFd_, reinterpret_cast<sockaddr*>(&peer), &peerLen);
         if (conn < 0) {
             if (errno == EINTR) continue;
             if (errno == EMFILE || errno == ENFILE) continue;  // transient
             break;
         }
 
+        // The peer address is the source address every admission decision and every
+        // rejection record is keyed by (Requirements 10.4, 10.8, 10.13).
+        char peerText[INET_ADDRSTRLEN] = {0};
+        std::string sourceAddress;
+        if (::inet_ntop(AF_INET, &peer.sin_addr, peerText, sizeof(peerText)) != nullptr) {
+            sourceAddress = peerText;
+        }
+
         HttpRequest req;
         if (readHttpRequest(conn, req)) {
-            const HttpResponse resp = dispatch(req);
+            const HttpResponse resp =
+                dispatchWithContext(req, contextFor(req, sourceAddress, secureTransport_));
             const std::string wire = resp.toWire();
             sendAll(conn, wire.data(), wire.size());
         } else {
@@ -440,6 +597,8 @@ void McpServer::stop() {
     if (wakeWriteFd_ >= 0) { ::close(wakeWriteFd_); wakeWriteFd_ = -1; }
 
     boundPort_.store(0);
+    boundHost_.clear();
+    secureTransport_ = false;
     running_.store(false);
     stopRequested_.store(false);
 }
