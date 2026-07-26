@@ -21,7 +21,7 @@
 //                    through TimelineEngine::apply (core/EditCommands.*,
 //                    core/TimelineEngine.*). This is what the Qt views do.
 //   * "MCP" path    — McpToolExecutor::executeTool(name, args) over the shared
-//                    buildDefaultToolRegistry(engine) surface
+//                    buildDefaultToolRegistry(session) surface
 //                    (services/McpToolExecutor.*, services/ToolRegistry.*).
 //   * "agent" path  — AgentOrchestrator::sendMessage(msg) with an interpreter
 //                    that maps the message to the identical tool call, driven
@@ -96,6 +96,7 @@
 #include "core/Uuid.hpp"
 #include "services/Json.hpp"
 #include "services/McpToolExecutor.hpp"
+#include "services/ProjectSession.hpp"
 #include "services/ToolRegistry.hpp"
 
 namespace palmier::services {
@@ -440,19 +441,26 @@ RC_GTEST_PROP(EditEquivalenceProperties,
     const int numCommands = *rc::gen::inRange(1, 25);  // arbitrary edit sequence
     const FrameRate fps = FrameRate::fps30();
 
-    // One seed project, copied into three independent engines — one per path.
+    // One seed project, copied into three independent engines — one per path. The
+    // two tool-driven paths reach their engine through a ProjectSession, which is
+    // how the surface is wired since task 3.4 (design.md D1); the UI path still
+    // applies EditCommands to a bare engine, which is exactly the comparison.
     const Project seed = makeSeedProject(videoTracks);
     TimelineEngine uiEngine(seed);
-    TimelineEngine mcpEngine(seed);
-    TimelineEngine agentEngine(seed);
+    ProjectSession mcpSession;
+    (void)mcpSession.engine().reset(seed);
+    TimelineEngine& mcpEngine = mcpSession.engine();
+    ProjectSession agentSession;
+    (void)agentSession.engine().reset(seed);
+    TimelineEngine& agentEngine = agentSession.engine();
 
     // "MCP" path: the shared executor over the default tool surface.
-    ToolRegistry mcpRegistry = buildDefaultToolRegistry(mcpEngine);
-    McpToolExecutor mcpExecutor(mcpRegistry, &mcpEngine);
+    ToolRegistry mcpRegistry = buildDefaultToolRegistry(mcpSession);
+    McpToolExecutor mcpExecutor(mcpRegistry, &mcpSession);
 
     // "agent" path: the SAME executor + registry, driven by the orchestrator.
-    ToolRegistry agentRegistry = buildDefaultToolRegistry(agentEngine);
-    McpToolExecutor agentExecutor(agentRegistry, &agentEngine);
+    ToolRegistry agentRegistry = buildDefaultToolRegistry(agentSession);
+    McpToolExecutor agentExecutor(agentRegistry, &agentSession);
     AlwaysAllowGate gate;
     auto intentSlot = std::make_shared<AgentIntent>();
     IntentInterpreter interpreter =

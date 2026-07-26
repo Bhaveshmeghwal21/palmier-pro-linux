@@ -1,0 +1,481 @@
+{
+  "pbtResults": {
+    "2.3 Write persistence property tests for the session": {
+      "status": "passed",
+      "lastRunTimestamp": 1785068054326
+    },
+    "3.3 Write the schema/handler conformance property test": {
+      "status": "passed",
+      "lastRunTimestamp": 1785070334180
+    },
+    "4.7 Write the track-tool property tests": {
+      "status": "passed",
+      "lastRunTimestamp": 1785071618553
+    }
+  },
+  "executionHistory": {
+    "0.1 Make vendor SDK detection optional": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153524
+      },
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057165205
+      },
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057438165
+      }
+    ],
+    "0.2 Gate the `PALMIER_HAVE_*` definitions on `ENABLE AND FOUND`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153530
+      },
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057165587
+      },
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057439591
+      }
+    ],
+    "0.3 Report each vendor path in the configuration summary": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153535
+      },
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057167029
+      },
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057440624
+      }
+    ],
+    "0.4 Configure the hardware paths ON in CI and add an SDK-free configure job": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153540
+      },
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057168049
+      },
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057441848
+      }
+    ],
+    "0.5 Enforce the per-test time limit and property iteration floor in the test harness": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153547
+      },
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057169055
+      },
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057443062
+      }
+    ],
+    "1.1 Add `ChangeOrigin::Reset` and `TimelineEngine::reset`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153552
+      }
+    ],
+    "1.2 Add track commands and promote `SetTransitionCommand` into the core": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153557
+      }
+    ],
+    "1.3 Add the invert-colors effect (upstream PR 408, ported here)": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153563
+      }
+    ],
+    "1.5 Move the document schema to 1.1 with optional reads": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153568
+      }
+    ],
+    "2.1 Implement `services::ProjectSession`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153574
+      }
+    ],
+    "2.2 Move saving off the UI thread with a revision guard": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153581
+      }
+    ],
+    "3.1 Implement `services::ToolSchema`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153586
+      }
+    ],
+    "3.2 Convert each existing tool to `ToolSchema`, one tool at a time": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153592
+      }
+    ],
+    "3.4 Switch the tool surface from `TimelineEngine&` to `ProjectSession&` in one commit": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153597
+      }
+    ],
+    "4.1 Implement `services::MediaImportService`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153603
+      }
+    ],
+    "4.3 Add the `project.*` tools": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153612
+      }
+    ],
+    "4.4 Add the `media.*` tools": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153622
+      }
+    ],
+    "4.5 Add the track tools": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153638
+      }
+    ],
+    "4.8 Checkpoint": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153643
+      }
+    ],
+    "5.1 Implement `services::McpSessionRegistry`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153648
+      }
+    ],
+    "5.2 Implement `services::McpProtocolHandler`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153656
+      }
+    ],
+    "5.3 Extend the `McpServer` transport and update its contract test in the same commit": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153663
+      }
+    ],
+    "6.1 Implement `app::AppSettings` and extend `AppConfig`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153668
+      }
+    ],
+    "6.2 Implement `services::RemoteAccessGate` and `RejectionLog`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153673
+      }
+    ],
+    "6.3 Add the optional TLS transport and the non-loopback bind": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153678
+      }
+    ],
+    "7.1 Implement `media::DecoderTeardownQueue`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153686
+      }
+    ],
+    "7.3 Implement `DecodeWorkerPool` and `media::DecoderClipFrameProvider`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153691
+      }
+    ],
+    "7.5 Construct the playback engine in the composition root and complete the transport": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153696
+      }
+    ],
+    "8.1 Add the audio surface to `MediaDecoder`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153701
+      }
+    ],
+    "8.3 Add `media::IAudioSink` and the always-compiled `NullAudioSink`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153706
+      }
+    ],
+    "8.4 Implement `media::AudioEngine`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153712
+      }
+    ],
+    "8.6 Add the PipeWire and ALSA sinks behind optional detection": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153716
+      }
+    ],
+    "8.7 Wire the audio engine into the composition root and make the sink the clock": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153721
+      }
+    ],
+    "9.1 Implement `media::EncoderSelector` and the hardware-skip helper": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153728
+      }
+    ],
+    "9.3 Add the audio stream to the encoder and the export engine": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153733
+      }
+    ],
+    "9.4 Implement `services::ExportCoordinator`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153738
+      }
+    ],
+    "9.7 Wire export into the tool surface and the composition root": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153743
+      }
+    ],
+    "9.9 Checkpoint": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153748
+      }
+    ],
+    "10.1 Implement the offline interpreter and the interpreter registry": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153753
+      }
+    ],
+    "10.5 Implement the generative backend registry and its clients": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153758
+      }
+    ],
+    "11.1 Implement `ui::GuiToolGateway`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153764
+      }
+    ],
+    "11.2 Build the docked shell, the menu bar and the status bar": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153769
+      }
+    ],
+    "11.3 Add the timeline panel and the timer-driven preview view": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153774
+      }
+    ],
+    "11.4 Re-point view-model gesture methods at the gateway": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153779
+      }
+    ],
+    "11.5 Implement `ui::ProjectFileActions` and the file dialogs": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153784
+      }
+    ],
+    "11.6 Implement `ui::ExportDialog` and the export progress surface": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153790
+      }
+    ],
+    "11.7 Guard startup construction and finish the accessor set": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153795
+      }
+    ],
+    "11.12 Checkpoint": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153802
+      }
+    ],
+    "12.1 Author `docs/UPSTREAM_PARITY.md`": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153807
+      }
+    ],
+    "12.2 Author `docs/PORT_BACKLOG.md` for all ten identified upstream changes": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153812
+      }
+    ],
+    "12.3 Implement `tests/support/ReportParser` and the two report checkers": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153817
+      }
+    ],
+    "12.6 Author the operator and agent-user documentation set": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153822
+      }
+    ],
+    "12.7 Implement the documentation consistency checker": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153827
+      }
+    ],
+    "12.9 Delete the placeholder test and add the suite-hygiene property in the same task": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153832
+      }
+    ],
+    "12.10 Write the end-to-end test and the fixture generator": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153837
+      }
+    ],
+    "12.11 Publish the CI test log, summary and skip reasons": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153846
+      }
+    ],
+    "12.12 Add the separate `l4-validation` CI job": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153851
+      }
+    ],
+    "12.13 Final checkpoint": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057153856
+      }
+    ],
+    "0. Make vendor hardware-codec paths compile in CI": [
+      {
+        "executionId": "b0a7aa98-d489-481e-9236-aa7821a68455",
+        "chatSessionId": "e8df9a2c-65b9-46ba-8595-7c89285f6e31",
+        "timestamp": 1785057443068
+      }
+    ]
+  }
+}

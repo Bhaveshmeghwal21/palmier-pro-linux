@@ -7,8 +7,9 @@
 //   secret store -> BYOK manager -> auth service
 //   auth service -> generation gate + agent gate
 //   generative backend -> generative client -> generation runner
-//   timeline engine -> timeline placer -> generative coordinator
-//   timeline engine (+ generate hook) -> shared ToolRegistry
+//   project session (engine + media library) -> timeline placer -> generative
+//     coordinator
+//   project session (+ generate hook) -> shared ToolRegistry
 //   ToolRegistry -> McpToolExecutor -> McpServer (handler) and AgentOrchestrator
 //
 // Network-facing backends absent from the config get an OFFLINE default that
@@ -47,6 +48,7 @@
 #include "services/McpToolExecutor.hpp"
 #include "services/MentionResolver.hpp"
 #include "services/ProjectSaveService.hpp"
+#include "services/ProjectSession.hpp"
 #include "services/SecretStore.hpp"
 #include "services/ToolRegistry.hpp"
 
@@ -191,9 +193,12 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
         gpu_ = std::make_unique<gpu::GpuContext>(std::move(gpuResult).value());
     }
 
-    // --- Domain core -------------------------------------------------------
-    timeline_ = std::make_unique<TimelineEngine>();
-    mediaLibrary_ = std::make_unique<MediaManager>();
+    // --- The one project session (Requirement 1.1; design.md D1) -----------
+    // It owns the single TimelineEngine and the current project's MediaManager
+    // library for the application's lifetime, and starts on an empty project at
+    // the documented defaults (Requirement 1.10). Every consumer below takes a
+    // reference to those owned components rather than constructing its own.
+    session_ = std::make_unique<services::ProjectSession>();
 
     // --- Project I/O -------------------------------------------------------
     saveService_ = std::make_unique<services::ProjectSaveService>();
@@ -237,9 +242,9 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     genClient_ = std::make_unique<services::GenerativeClient>(*generativeBackend_);
     genGate_ = std::make_unique<services::AuthServiceGenerationGate>(*auth_);
     genRunner_ = std::make_unique<services::GenerativeClientRunner>(*genClient_);
-    placer_ = std::make_unique<services::TimelineEnginePlacer>(*timeline_);
+    placer_ = std::make_unique<services::TimelineEnginePlacer>(session_->engine());
     genCoordinator_ = std::make_unique<services::GenerativeMediaCoordinator>(
-        *genGate_, *genRunner_, *mediaLibrary_, *placer_);
+        *genGate_, *genRunner_, session_->mediaLibrary(), *placer_);
 
     // --- Shared tool surface (UI == MCP == agent path; Property P4) --------
     // The generate tool is wired to the composed coordinator; the export tool is
@@ -249,10 +254,12 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     services::ToolRegistryHooks hooks;
     hooks.generate = makeGenerateHook(*genCoordinator_);
     toolRegistry_ = std::make_unique<services::ToolRegistry>(
-        services::buildDefaultToolRegistry(*timeline_, std::move(hooks)));
+        services::buildDefaultToolRegistry(*session_, std::move(hooks)));
 
     // --- MCP execution policy + HTTP transport -----------------------------
-    executor_ = std::make_unique<services::McpToolExecutor>(*toolRegistry_, timeline_.get());
+    // The executor is pointed at the SAME session the registry's handlers resolve
+    // their engine from, so both always act on the current project (design.md D1).
+    executor_ = std::make_unique<services::McpToolExecutor>(*toolRegistry_, session_.get());
 
     // The server delegates each well-formed request to the executor's JSON
     // envelope entry point; the executor enforces the timeout/rollback policy.
@@ -265,7 +272,7 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     agent_ = std::make_unique<services::AgentOrchestrator>(
         *executor_, *agentGate_,
         config.agentInterpreter ? config.agentInterpreter : makeUnconfiguredInterpreter(),
-        services::makeMentionPreprocessor(*mediaLibrary_));
+        services::makeMentionPreprocessor(session_->mediaLibrary()));
 
     // --- Localization ------------------------------------------------------
     services::LocalizationManager::Config locConfig;
@@ -305,6 +312,23 @@ bool ApplicationComposition::running() const noexcept {
 
 std::uint16_t ApplicationComposition::mcpBoundPort() const noexcept {
     return mcpServer_ ? mcpServer_->boundPort() : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Component accessors that reach into the session (out of line so the header
+// needs no ProjectSession definition).
+// ---------------------------------------------------------------------------
+
+services::ProjectSession& ApplicationComposition::projectSession() noexcept {
+    return *session_;
+}
+
+TimelineEngine& ApplicationComposition::timeline() noexcept {
+    return session_->engine();
+}
+
+MediaManager& ApplicationComposition::mediaLibrary() noexcept {
+    return session_->mediaLibrary();
 }
 
 std::string ApplicationComposition::gpuUnavailableNotice() const {

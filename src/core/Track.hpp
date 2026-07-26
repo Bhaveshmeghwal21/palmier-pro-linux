@@ -12,6 +12,7 @@
 #ifndef PALMIER_CORE_TRACK_HPP
 #define PALMIER_CORE_TRACK_HPP
 
+#include <string>
 #include <vector>
 
 #include "core/Clip.hpp"
@@ -28,6 +29,10 @@ enum class TrackKind {
 struct Track {
     Uuid              id;
     TrackKind         kind = TrackKind::Video;
+    /// Human-readable lane label shown in the timeline panel. Empty means "no
+    /// explicit label"; the panel then falls back to a kind-and-index caption.
+    /// Persisted from schema 1.1 onward and optional on read (default "").
+    std::string       name;
     bool              muted = false;
     bool              locked = false;
     std::vector<Clip> clips; ///< Sorted by timelineStart, non-overlapping.

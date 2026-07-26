@@ -9,6 +9,13 @@
 // major.minor with the standard semantic-versioning compatibility rule: a reader
 // supports a stored version iff the major numbers match and the reader's minor is
 // >= the stored minor.
+//
+// The current version is 1.1. Its additions over 1.0 are all *minor*: every field
+// 1.1 introduced (`tracks[].name`, the project-level `clipGroups` array, and the
+// `invert_colors` effect key) is optional on read with a documented default, so a
+// 1.1 build reads every 1.0 document unchanged. In the other direction the rule
+// bites as intended: a 1.0 build rejects a 1.1 document as unsupported rather than
+// silently dropping the fields it does not know about.
 
 #ifndef PALMIER_CORE_SCHEMAVERSION_HPP
 #define PALMIER_CORE_SCHEMAVERSION_HPP
@@ -30,7 +37,7 @@ struct SchemaVersion {
 
     /// The schema version this build writes and can fully round-trip.
     [[nodiscard]] static constexpr SchemaVersion current() noexcept {
-        return SchemaVersion{1, 0};
+        return SchemaVersion{1, 1};
     }
 
     /// Can a reader at `reader` load data written at `stored`?

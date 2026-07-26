@@ -34,6 +34,17 @@
 //                           permutation, repacking them contiguously while
 //                           preserving the track's clip count (Requirement 2.7).
 //   * AddEffectCommand    — append an effect to a clip's effect chain.
+//   * AddTrackCommand     — append a track after the last existing track of the
+//                           same kind, capped at 64 tracks per kind
+//                           (Requirements 3.3, 3.8).
+//   * RemoveTrackCommand  — remove a track and every clip on it, preserving the
+//                           relative order of the remaining tracks
+//                           (Requirement 3.10).
+//   * SetTransitionCommand— set a clip's incoming transition. Promoted here from
+//                           a registry-local command in
+//                           services/ToolRegistry.cpp so `timeline.add_transition`
+//                           runs through the same core command path as every
+//                           other edit (audit finding).
 //
 // Atomicity / invariants: the TimelineEngine snapshots the project before every
 // apply() and rolls back on failure or on any timeline-invariant violation (no
@@ -57,6 +68,8 @@
 #include "core/Effect.hpp"
 #include "core/FrameRate.hpp"
 #include "core/Result.hpp"
+#include "core/Track.hpp"
+#include "core/Transition.hpp"
 #include "core/Uuid.hpp"
 
 namespace palmier {
@@ -256,6 +269,110 @@ public:
 private:
     ClipId clipId_;
     Effect effect_;
+};
+
+// ---------------------------------------------------------------------------
+// AddTrackCommand — append a track of a given kind.
+// ---------------------------------------------------------------------------
+//
+// The new track is inserted immediately after the last existing track of the
+// same kind, so the project's video and audio lanes each grow at their own tail
+// while every existing track — and every clip on it — is left untouched
+// (Requirement 3.3). When the project holds no track of that kind yet, the new
+// track is appended at the end of the track list.
+//
+// A project may hold at most `kMaxTracksPerKind` tracks of one kind; a request
+// that would exceed the cap is rejected without mutating the project and names
+// the offending `kind` argument (Requirement 3.8).
+//
+// The track's identifier is fixed at construction, so it is available to the
+// caller before apply() and an undo/redo cycle reproduces the identical track
+// (`trackId()`). revert() removes that track again; because the command only
+// ever appends an empty track, revert() cannot lose clip data.
+class AddTrackCommand final : public EditCommand {
+public:
+    /// Maximum number of tracks of one kind a project may hold (Requirement 3.3).
+    static constexpr std::size_t kMaxTracksPerKind = 64;
+
+    /// Appends a track of `kind` carrying a freshly generated identifier.
+    explicit AddTrackCommand(TrackKind kind);
+
+    /// Appends a track of `kind` carrying the caller-supplied identifier, which
+    /// must not already be present in the project.
+    AddTrackCommand(TrackKind kind, Uuid trackId);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "AddTrack"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+    /// The identifier the added track carries (stable from construction).
+    [[nodiscard]] Uuid trackId() const noexcept { return trackId_; }
+
+    /// The kind of track this command appends.
+    [[nodiscard]] TrackKind kind() const noexcept { return kind_; }
+
+    /// The index the track was inserted at, or std::nullopt before the first
+    /// successful apply().
+    [[nodiscard]] std::optional<std::size_t> insertedIndex() const noexcept { return index_; }
+
+private:
+    TrackKind                  kind_;
+    Uuid                       trackId_;
+    std::optional<std::size_t> index_;  // set on apply; also the revert anchor
+};
+
+// ---------------------------------------------------------------------------
+// RemoveTrackCommand — remove a track and every clip on it.
+// ---------------------------------------------------------------------------
+//
+// Erases the track carrying `trackId` together with all of its clips. The
+// remaining tracks keep their relative order (Requirement 3.10). The removed
+// track is captured whole — clips, mute and lock state — together with its
+// index, so revert() reinserts it verbatim at its former position. An unknown
+// track identifier is rejected without mutating the project (Requirement 3.8).
+class RemoveTrackCommand final : public EditCommand {
+public:
+    explicit RemoveTrackCommand(Uuid trackId);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "RemoveTrack"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+    /// The number of clips removed with the track, or std::nullopt before the
+    /// first successful apply().
+    [[nodiscard]] std::optional<std::size_t> removedClipCount() const noexcept;
+
+private:
+    Uuid                 trackId_;
+    std::size_t          index_ = 0;
+    std::optional<Track> removed_;  // captured on apply for an exact revert
+};
+
+// ---------------------------------------------------------------------------
+// SetTransitionCommand — set a clip's incoming transition.
+// ---------------------------------------------------------------------------
+//
+// Replaces the target clip's `transitionIn` with `transition`, capturing the
+// prior value (which may be absent) so revert() restores it exactly. This is the
+// command behind the `timeline.add_transition` tool; it lives in the core so that
+// transitions are applied through the same command path — atomic, undoable,
+// observable, invariant-checked — as every other edit.
+class SetTransitionCommand final : public EditCommand {
+public:
+    SetTransitionCommand(ClipId clipId, Transition transition);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "AddTransition"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+    /// The identifier of the transition this command installs.
+    [[nodiscard]] Uuid transitionId() const noexcept { return transition_.id; }
+
+private:
+    ClipId                    clipId_;
+    Transition                transition_;
+    std::optional<Transition> prior_;      // captured on apply for an exact revert
+    bool                      captured_ = false;
 };
 
 }  // namespace palmier

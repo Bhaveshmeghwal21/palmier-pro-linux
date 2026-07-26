@@ -46,6 +46,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <utility>
 
 #include <gtest/gtest.h>
 
@@ -62,11 +63,20 @@
 #include "services/ByokCredentials.hpp"
 #include "services/Json.hpp"
 #include "services/McpToolExecutor.hpp"
+#include "services/ProjectSession.hpp"
 #include "services/SecretStore.hpp"
 #include "services/ToolRegistry.hpp"
 
 namespace palmier::services {
 namespace {
+
+// The tool surface and the executor act on a ProjectSession (task 3.4; design.md
+// D1): the session owns one TimelineEngine for its lifetime and the handlers
+// resolve it at invocation time. Tests seed their fixture project into that one
+// engine the way `project.open` will.
+void seedSession(ProjectSession& session, Project project) {
+    (void)session.engine().reset(std::move(project));
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures / helpers
@@ -146,9 +156,10 @@ struct TracingPreprocessor {
 
 TEST(MentionAuthGating, SingleMatchResolvesAndReachesInterpreterAuthorized) {
     MediaAssetRef intro = makeAsset("/media/intro.mp4");
-    TimelineEngine engine(makeProject(intro));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(intro));
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
     MockGate gate;  // authorized by default
 
     std::string seen;
@@ -172,9 +183,11 @@ TEST(MentionAuthGating, SingleMatchResolvesAndReachesInterpreterAuthorized) {
 
 TEST(MentionAuthGating, NoMatchRejectedBeforeSubmissionAuthorized) {
     MediaAssetRef intro = makeAsset("/media/intro.mp4");
-    TimelineEngine engine(makeProject(intro));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(intro));
+    TimelineEngine& engine = session.engine();
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
     MockGate gate;
 
     std::string seen;
@@ -203,9 +216,10 @@ TEST(MentionAuthGating, NoMatchRejectedBeforeSubmissionAuthorized) {
 TEST(MentionAuthGating, MultiMatchPromptsBeforeSubmissionAuthorized) {
     MediaAssetRef clipA = makeAsset("/a/clip.mp4");
     MediaAssetRef clipB = makeAsset("/b/clip.mp4");
-    TimelineEngine engine(makeProject(clipA));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(clipA));
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
     MockGate gate;
 
     std::string seen;
@@ -237,9 +251,11 @@ TEST(MentionAuthGating, MultiMatchPromptsBeforeSubmissionAuthorized) {
 
 TEST(MentionAuthGating, UnauthenticatedSendRejectedAndMessagePreserved) {
     MediaAssetRef intro = makeAsset("/media/intro.mp4");
-    TimelineEngine engine(makeProject(intro));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(intro));
+    TimelineEngine& engine = session.engine();
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
 
     MockGate gate;
     gate.verdict = err(makeError(ErrorCode::Unauthenticated,
@@ -268,9 +284,10 @@ TEST(MentionAuthGating, UnauthenticatedSendRejectedAndMessagePreserved) {
 
 TEST(MentionAuthGating, AuthGateRunsBeforeMentionResolution) {
     MediaAssetRef intro = makeAsset("/media/intro.mp4");
-    TimelineEngine engine(makeProject(intro));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(intro));
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
 
     MockGate gate;
     gate.verdict = err(makeError(ErrorCode::Unauthenticated, "authenticate first"));
@@ -300,9 +317,10 @@ TEST(MentionAuthGating, AuthGateRunsBeforeMentionResolution) {
 
 TEST(MentionAuthGating, PreservedMentionMessageResolvesAfterAuthenticating) {
     MediaAssetRef intro = makeAsset("/media/intro.mp4");
-    TimelineEngine engine(makeProject(intro));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(intro));
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
 
     MockGate gate;
     gate.verdict = err(makeError(ErrorCode::Unauthenticated, "authenticate first"));
@@ -349,9 +367,10 @@ private:
 
 TEST(MentionAuthGating, RealGateGatesThenMentionResolvesEndToEnd) {
     MediaAssetRef intro = makeAsset("/media/intro.mp4");
-    TimelineEngine engine(makeProject(intro));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(intro));
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
 
     ScriptedAuthBackend backend(EntitlementStatus::Active);
     AuthenticationService auth(backend);
@@ -388,9 +407,10 @@ public:
 
 TEST(MentionAuthGating, RealGateAuthorizesViaByokThenMentionResolves) {
     MediaAssetRef intro = makeAsset("/media/intro.mp4");
-    TimelineEngine engine(makeProject(intro));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(intro));
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
 
     // No subscription, but a validated BYOK credential authorizes the agent.
     ScriptedAuthBackend backend(EntitlementStatus::None);

@@ -22,6 +22,8 @@
 #   * Each property test runs a MINIMUM of 100 iterations. RapidCheck's default
 #     max_success is 100; we also set RC_PARAMS in the test environment so the
 #     floor is explicit and cannot silently regress.
+#   * Every registered test runs under a per-test time limit of 600 seconds;
+#     CTest fails a test that exceeds it and names the limit in the report.
 #   * Each property test is tagged, in the form:
 #         Feature: palmier-pro-linux, Property {n}: {text}
 #     and references the requirement clause(s) it validates.
@@ -39,6 +41,23 @@ include(FetchContent)
 # ---------------------------------------------------------------------------
 set(PALMIER_PBT_MIN_SUCCESS 100 CACHE STRING
     "Minimum successful iterations per RapidCheck property test (>= 100)")
+
+# The 100-case floor is a hard requirement (Requirement 15.2), so a lower value
+# — however it was supplied — is raised back to the floor rather than honoured.
+if(PALMIER_PBT_MIN_SUCCESS LESS 100)
+    message(WARNING
+        "PALMIER_PBT_MIN_SUCCESS=${PALMIER_PBT_MIN_SUCCESS} is below the required "
+        "floor of 100 generated cases per property test; using 100 instead.")
+    set(PALMIER_PBT_MIN_SUCCESS 100 CACHE STRING
+        "Minimum successful iterations per RapidCheck property test (>= 100)" FORCE)
+endif()
+
+# ---------------------------------------------------------------------------
+# Per-test wall-clock limit in seconds (Requirement 15.8). Applied to every
+# test registered through palmier_register_test(); CTest reports a test that
+# exceeds it as failed, naming the limit it exceeded.
+# ---------------------------------------------------------------------------
+set(PALMIER_TEST_TIMEOUT_SECONDS 600)
 
 # ---------------------------------------------------------------------------
 # GoogleTest — example-based unit tests.
@@ -89,13 +108,20 @@ target_compile_features(palmier_test_support INTERFACE cxx_std_20)
 # palmier_register_test(<target>)
 #
 # Registers a GoogleTest/RapidCheck binary with CTest via test discovery and
-# pins the property-test iteration floor into the test environment so every
-# RapidCheck property runs at least PALMIER_PBT_MIN_SUCCESS (>= 100) cases.
+# pins the project-wide test conventions onto every discovered test case:
+#
+#   * ENVIRONMENT RC_PARAMS=max_success=${PALMIER_PBT_MIN_SUCCESS} — the
+#     property-test iteration floor, so every RapidCheck property runs at least
+#     PALMIER_PBT_MIN_SUCCESS (>= 100) generated cases (Requirement 15.2).
+#   * TIMEOUT ${PALMIER_TEST_TIMEOUT_SECONDS} — the per-test time limit of 600
+#     seconds; CTest terminates and fails any test that exceeds it, reporting
+#     the timeout together with the limit that was exceeded (Requirement 15.8).
 # ---------------------------------------------------------------------------
 function(palmier_register_test target)
     gtest_discover_tests(${target}
         PROPERTIES
             LABELS "palmier"
+            TIMEOUT ${PALMIER_TEST_TIMEOUT_SECONDS}
             ENVIRONMENT "RC_PARAMS=max_success=${PALMIER_PBT_MIN_SUCCESS}")
 endfunction()
 
@@ -843,7 +869,9 @@ palmier_register_test(palmier_services_mcp_server_tests)
 # project unchanged (7.5), execution-failure rollback (7.6), timeout abort +
 # rollback driven through an injected clock (7.7), the no-project-open error
 # (7.10), and schema validation rejecting malformed input before any command is
-# created (7.10). The executor, tool surface, and JSON value sources are compiled
+# created (7.10). The executor, tool surface, project session (with the save
+# service and `.palmier` store it owns — task 3.4 retargeted both the executor and
+# the tool surface at services::ProjectSession) and JSON value sources are compiled
 # directly into the test binary alongside Palmier::core (which supplies the real
 # TimelineEngine and EditCommands), without the media/FFmpeg, libsecret, or lcms2
 # dependencies that the full Palmier::services library links.
@@ -852,6 +880,10 @@ add_executable(palmier_services_mcp_executor_tests
     services/mcp_tool_executor_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_mcp_executor_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -909,6 +941,10 @@ add_executable(palmier_services_agent_orchestrator_tests
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
@@ -946,6 +982,10 @@ add_executable(palmier_services_mcp_http_integration_tests
     "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_mcp_http_integration_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -980,6 +1020,10 @@ add_executable(palmier_services_edit_equivalence_property_tests
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
@@ -1014,6 +1058,10 @@ add_executable(palmier_services_mention_resolver_tests
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
@@ -1078,6 +1126,10 @@ add_executable(palmier_services_mention_auth_gating_tests
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
@@ -1204,6 +1256,10 @@ add_executable(palmier_ui_agent_chat_viewmodel_tests
     "${PROJECT_SOURCE_DIR}/src/services/MentionResolver.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
@@ -1249,9 +1305,10 @@ palmier_register_test(palmier_ui_preview_controller_tests)
 # ---------------------------------------------------------------------------
 # Application composition-root unit tests (task 21.1; Requirements 1.6, 7.1,
 # 7.2, 7.9, 13.3). Exercise the Qt-free ApplicationComposition headlessly: every
-# component is composed and cross-wired (the executor is bound to the composed
-# TimelineEngine, the shared ToolRegistry backs both the MCP server and the
-# agent); the MCP server starts on launch and stops on close within its
+# component is composed and cross-wired (the one ProjectSession owns the single
+# TimelineEngine and media library the executor, the tool surface and the
+# generative coordinator all act on, and the shared ToolRegistry backs both the
+# MCP server and the agent); the MCP server starts on launch and stops on close within its
 # lifecycle (idempotent stop, restart, and destructor-stops-a-running-server);
 # a tools/call routed through the composed server reaches the same engine; the
 # offline auth gate rejects an agent send while preserving the unsent text; and
@@ -1269,6 +1326,7 @@ palmier_register_test(palmier_ui_preview_controller_tests)
 add_executable(palmier_app_composition_tests
     app/application_composition_test.cpp
     "${PROJECT_SOURCE_DIR}/src/app/ApplicationComposition.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
@@ -1276,6 +1334,7 @@ add_executable(palmier_app_composition_tests
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
@@ -1290,3 +1349,360 @@ target_link_libraries(palmier_app_composition_tests PRIVATE
     Palmier::test_support)
 
 palmier_register_test(palmier_app_composition_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Invert-colors effect property tests (task 1.4; Requirements 14.4, 14.5).
+# RapidCheck properties 73 and 74 for the ported invert-colors effect (upstream
+# PR 408): the per-channel arithmetic over generated RGBA images (1x1 .. 256x256,
+# with 0 / 255 / mid-range values in every channel) against the production
+# software reference, and the playback-vs-export agreement within 1 of 255 per
+# channel. The playback lane is driven through the real ui::PreviewController
+# (whose source is compiled directly into the binary, as the preview-controller
+# unit tests do) and the export lane through media::ExportEngine with a recording
+# encode backend behind the IEncodeBackend seam — so both production compositing
+# pipelines run headlessly, without Qt, FFmpeg, Vulkan, or a GPU. Links
+# Palmier::media (which brings in Palmier::gpu and Palmier::core) alongside the
+# shared GoogleTest/RapidCheck support target. The example-based unit tests for
+# this effect live in gpu_effect_kernels_test.cpp (task 1.3).
+# ---------------------------------------------------------------------------
+add_executable(palmier_gpu_invert_colors_tests
+    gpu/invert_colors_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp")
+target_include_directories(palmier_gpu_invert_colors_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_gpu_invert_colors_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_gpu_invert_colors_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# ToolSchema unit tests (task 3.1; Requirements 9.3, 9.9). Exercise the single
+# tool argument specification from which BOTH the JSON Schema published by
+# `tools/list` and the pre-execution validator are generated (design.md D3,
+# "Schema/handler agreement"): every JsonKind's rendered "type" and accepted
+# payload, required vs optional arguments, every bound (integer/number
+# minimum-maximum, string minLength/maxLength, array minItems/maxItems), closed
+# enum value sets, the canonical-UUID format, unknown-key rejection under
+# "additionalProperties": false, and the stability of the rendered schema. The
+# ToolSchema and Json sources are compiled directly into the test binary
+# alongside Palmier::core (which supplies Result/Error and the real Uuid parser),
+# as the other standalone service tests do, so these run without the
+# media/FFmpeg, libsecret, or lcms2 dependencies the full Palmier::services
+# library links.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_tool_schema_tests
+    services/tool_schema_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_tool_schema_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_tool_schema_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_tool_schema_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Tool-surface argument declaration tests (task 3.2; Requirements 3.1, 9.3, 9.9,
+# 9.12, 14.4). Every tool in the default surface now declares its arguments once
+# as a ToolSchema, from which `Tool::inputSchema()` renders the schema
+# `tools/list` publishes. These tests pin the conversion: each tool still
+# advertises exactly the arguments, order, types and required set it advertised
+# when the schemas were hand-written; `additionalProperties` is now false so an
+# undeclared key is rejected instead of ignored; the acceptance rules that used
+# to live privately inside the handlers (canonical UUIDs, the edge/kind/type
+# closed value sets, non-negative positions and durations, opacity/gain bounds,
+# the 1..2000-character generation prompt) are published and enforced; and
+# `timeline.add_effect` carries the ported invert-colors effect end to end. The
+# tool surface, ToolSchema and Json sources are compiled directly into the test
+# binary alongside Palmier::core (which supplies the real TimelineEngine and
+# EditCommands), as the other standalone service tests do.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_tool_registry_schema_tests
+    services/tool_registry_schema_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_tool_registry_schema_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_tool_registry_schema_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_tool_registry_schema_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Schema/handler conformance property test (task 3.3; Requirement 9.12).
+# Property 50: for every tool the registry contains, the schema `tools/list`
+# publishes accepts an argument object exactly when the tool's own handler
+# accepts it. The property builds argument objects from each tool's own ArgSpec
+# list and perturbs them (omitted required keys, wrong JSON types, values just
+# inside and just outside every declared bound, out-of-enum strings, malformed
+# UUIDs, extra unknown keys, fractional integers, garbage array items,
+# non-numeric object members), then compares ToolSchema::validate against the
+# handler's outcome in both directions — excluding, by name and with a reason,
+# the five rule classes task 3.2 documented as inexpressible in the ArgSpec
+# vocabulary (cross-field relations, array item shape, object member value
+# types, state-dependent rules, open backend-defined sets). It iterates whatever
+# tools buildDefaultToolRegistry registers rather than a hard-coded list, so
+# tools added by later tasks are covered automatically. Sources are compiled in
+# directly, as for the neighbouring tool-surface suites, so the binary needs
+# neither FFmpeg, libsecret nor lcms2.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_tool_schema_conformance_tests
+    services/tool_schema_conformance_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_tool_schema_conformance_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_tool_schema_conformance_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_tool_schema_conformance_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Project_Session unit tests (tasks 2.1, 2.2; Requirements 1.10, 3.2, 3.4, 3.8,
+# 3.9, 4.1, 4.4, 4.6, 4.10, 14.6, 14.7). Exercise services::ProjectSession over
+# the real TimelineEngine, MediaManager and `.palmier` store: the default empty
+# project at the documented defaults, createProject's exact-settings and
+# out-of-range-argument behaviour, openProject replacing the current project and
+# rebuilding the media library while a FAILED open leaves the previous project,
+# its path, its modified flag and its undo history untouched, the session-level
+# view of TimelineEngine::reset (one stable engine, both history stacks cleared,
+# ChangeOrigin::Reset broadcast), the monotonic revision counter that the
+# modified flag derives from, and the off-thread save with its revision guard —
+# returning immediately while the write is still running, clearing the dirty flag
+# only when the revision has not advanced, and leaving the project, its modified
+# state and any previously saved file untouched on failure. Save failures and the
+# in-flight window are injected through the services::RawFileWriter seam, so no
+# test needs a full disk, elevated privileges or a sleep. Following the
+# neighbouring service suites' isolated-source pattern, ProjectSession,
+# ProjectSaveService and ProjectStore are compiled directly into the test binary
+# alongside Palmier::core (which supplies the real TimelineEngine, EditCommands
+# and MediaManager), without the media/FFmpeg, libsecret or lcms2 dependencies
+# that the full Palmier::services library links. The persistence property tests
+# 16-19 of tasks 2.3/2.4 join this target. Task 2.3's
+# services/project_session_roundtrip_property_test.cpp adds Property 16 (a
+# save/open round-trip preserves the project across the Requirement 4.7 bounds),
+# Property 17 (saving a loaded project is idempotent) and Property 19 (a
+# successful save reports the project unmodified until the next tool-applied
+# edit); a generated project reaches the session the way `project.open` does,
+# through a `.palmier` seed document, and each edit is issued as the concrete
+# EditCommand the corresponding editing tool builds, applied through
+# ProjectSession::engine(). Task 2.4's
+# services/project_save_failure_property_test.cpp adds Property 18 — the
+# universally quantified "a failed save preserves the previously saved file
+# byte-for-byte, the in-memory project, and the modified flag" over generated
+# projects x pre-existing destination bytes x the three injected failure kinds.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_project_session_tests
+    services/project_session_test.cpp
+    services/project_session_roundtrip_property_test.cpp
+    services/project_save_failure_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp")
+target_include_directories(palmier_services_project_session_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_project_session_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_project_session_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Media import service tests (task 4.1; Requirements 2.1-2.5, 2.7-2.9).
+# Exercise services::MediaImportService end to end through the
+# media::MediaProbeBackend seam: the accept path registering EXACTLY one asset in
+# the current project's media library and reporting the asset id, resolved
+# absolute path, container format and duration (2.1, 2.2); resolution and frame
+# rate reported only for an asset carrying a decodable video stream (2.2); an
+# unrecognised container and a wholly undecodable one rejected with the container
+# format and the rejected codecs named, leaving the library unchanged (2.3); the
+# empty / missing / unopenable / undecodable classifications each naming the path
+# and the condition (2.4); duplicate convergence over path spellings and symlinks
+# on one entry with the existing asset id returned (2.5); "no project is open"
+# registering nothing (2.7); a probe that outruns the configured limit abandoned
+# with the library untouched (2.8); and the path reported pending — with no
+# library entry yet — for exactly the probe/validate/register window (2.9).
+#
+# Following the neighbouring service suites' isolated-source pattern,
+# MediaImportService, ProjectSession, ProjectSaveService and ProjectStore are
+# compiled directly into the test binary alongside Palmier::core (which supplies
+# the real TimelineEngine and MediaManager). MediaProbe.cpp and
+# ImportValidation.cpp are compiled in WITHOUT PALMIER_HAVE_FFMPEG, so the binary
+# links no libav*, libsecret or lcms2: the default probe backend is the
+# FailedPrecondition stub and every test injects its own backend instead.
+#
+# services/media_import_property_test.cpp (task 4.2) adds the universally
+# quantified counterparts to the same target: Property 4 (result completeness plus
+# the "resolution and frame rate exactly when a decodable video stream exists"
+# rule, 2.2), Property 5 (format rejections name the container and every rejected
+# codec and leave the library byte-identical, 2.3), Property 78 (each of the four
+# rejection classes named, nothing changed, 2.4), Property 6 (idempotence over
+# equivalent path spellings through both entry points, 2.5) and Property 7 (the
+# entry-count invariant over arbitrary request sequences, 2.6).
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_media_import_tests
+    services/media_import_service_test.cpp
+    services/media_import_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/MediaImportService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/media/MediaProbe.cpp"
+    "${PROJECT_SOURCE_DIR}/src/media/ImportValidation.cpp")
+target_include_directories(palmier_services_media_import_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_media_import_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_media_import_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Session, media-library and track tool unit tests (tasks 4.3, 4.4, 4.5;
+# Requirements 2.2, 3.1-3.5, 3.7-3.10). Exercise the eight tools stage 4 adds to
+# the shared tool surface against a real ProjectSession:
+#
+#   * `project.create` carrying exactly the requested name, frame rate (including
+#     the exact NTSC rational a fractional rate denotes), canvas and colour space,
+#     rejecting every out-of-range argument without touching the project, and
+#     recording no undo history — a session operation is not an EditCommand;
+#   * `project.save` / `project.open` round-tripping a document, `project.save`
+#     defaulting to the recorded document path and refusing when there is none,
+#     and a failed open leaving the previous project, its path, its modified flag
+#     and its undo history untouched;
+#   * `project.info` reporting the settings, the track/clip/asset counts, the
+#     timeline duration, the modified flag, the document path and the undo depth;
+#   * Requirement 3.5 — with no project current every tool other than
+#     `project.create` and `project.open` refuses with "no project is open",
+#     before any argument is parsed and before any hook can run;
+#   * `media.import` reporting Requirement 2.2's fields through a REAL
+#     MediaImportService over MediaProbe's injectable backend seam (resolution and
+#     frame rate absent for an audio-only asset, the duplicate flag on a
+#     re-import), and `media.list` agreeing with `project.info` on the asset count;
+#   * `timeline.add_track` appending after the last track of its kind and
+#     `timeline.remove_track` dropping its clips while preserving the remaining
+#     order, both undoable through the ordinary engine path, both refusing bad
+#     arguments and the 64-tracks-per-kind cap without changing anything.
+#
+# Following the neighbouring service suites' isolated-source pattern, the tool
+# surface, ProjectSession, the project store and MediaImportService are compiled
+# directly into the test binary alongside Palmier::core (which supplies the real
+# TimelineEngine, EditCommands and MediaManager). MediaProbe.cpp and
+# ImportValidation.cpp are compiled in WITHOUT PALMIER_HAVE_FFMPEG, so the binary
+# links no libav*, libsecret or lcms2.
+#
+# services/timeline_track_tools_property_test.cpp (task 4.7) adds the universally
+# quantified counterparts for the two track tools to the same target: Property 9
+# (for any project and any sequence of `timeline.add_track` calls, each new track
+# lands immediately after the last pre-existing track of its kind, every
+# pre-existing track and clip compares equal before and after, and each returned
+# identifier is unique within the project — Requirement 3.3) and Property 15 (for
+# any project and any track identifier present in it, `timeline.remove_track`
+# drops that track and its clips, preserves the relative order of the rest, and
+# reports the resulting track and clip counts — Requirement 3.10). A generated
+# project becomes current through TimelineEngine::reset, the same commit path
+# `project.open` uses, so every generated project is validated and legal.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_session_tools_tests
+    services/session_media_track_tools_test.cpp
+    services/timeline_track_tools_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/MediaImportService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
+    "${PROJECT_SOURCE_DIR}/src/media/MediaProbe.cpp"
+    "${PROJECT_SOURCE_DIR}/src/media/ImportValidation.cpp")
+target_include_directories(palmier_services_session_tools_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_session_tools_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_session_tools_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Project-tool property tests (task 4.6; Requirements 3.2, 3.4, 3.5, 3.7, 3.8,
+# 3.9, 4.10). The universally quantified counterparts of the session-tool unit
+# tests above, over a REAL ProjectSession and the shared tool surface:
+#
+#   * Property 8  — `project.create` carries exactly the requested name, frame
+#                   rate, canvas and colour space, is reported unmodified with no
+#                   document path, and returns a session-unique identifier (3.2);
+#   * Property 10 — `project.save` then `project.open` makes the loaded project
+#                   current and reports its identifier, track count, clip count,
+#                   unmodified state and document path accurately (3.4);
+#   * Property 11 — with no project current (the null-session overload), every
+#                   tool the registry carries other than `project.create` and
+#                   `project.open` refuses with "no project is open" for arguments
+#                   generated from that tool's own ToolSchema, valid or not,
+#                   running no hook and writing no file (3.5);
+#   * Property 12 — `project.info`'s track and clip counts equal the number of
+#                   SUCCESSFUL add_track / add_clip calls over interleaved
+#                   sequences that deliberately include calls that fail (3.7);
+#   * Property 13 — an object violating exactly one declared bound of
+#                   `project.create` / `timeline.add_track` / `timeline.remove_track`
+#                   is rejected naming the argument, leaving the project
+#                   byte-identical with no edit command created (3.8);
+#   * Property 14 — a failed `project.open` (missing, unreadable, not a `.palmier`
+#                   document, unsupported schema version) preserves the previous
+#                   project bytes, document path, modified flag and undo history,
+#                   and names the path and the reason (3.9, 4.10).
+#
+# Following the neighbouring service suites' isolated-source pattern, the tool
+# surface, ProjectSession and the project store are compiled directly into the
+# test binary alongside Palmier::core (which supplies the real TimelineEngine,
+# EditCommands and MediaManager), so the binary links no libav*, libsecret or
+# lcms2.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_project_tools_tests
+    services/project_tools_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_project_tools_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_project_tools_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_project_tools_tests)

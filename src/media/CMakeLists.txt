@@ -44,17 +44,31 @@ endif()
 
 # Vendor hardware-codec paths are conditionally compiled in. Each define lets
 # the media engine select the appropriate FFmpeg hwaccel/encoder at runtime.
-if(PALMIER_ENABLE_VAAPI)
-    target_link_libraries(palmier_media PUBLIC PkgConfig::LIBVA)
+#
+# A path is compiled in only when the corresponding PALMIER_ENABLE_* option is ON
+# *and* its SDK was actually located during dependency discovery (see
+# cmake/PalmierDependencies.cmake, which records PALMIER_<PATH>_AVAILABLE); the
+# vendor imported target is linked only inside that same branch. Leaving an
+# option ON on a host without the SDK therefore degrades to the software path
+# instead of breaking configuration (Requirements 8.1, 8.9). This mirrors the
+# ENABLE AND FOUND form used by src/gpu/CMakeLists.txt. The `<pkg>_FOUND`
+# alternative keeps the gate correct with either spelling of the availability
+# variable.
+if(PALMIER_ENABLE_VAAPI AND (PALMIER_VAAPI_AVAILABLE OR LIBVA_FOUND))
+    if(TARGET PkgConfig::LIBVA)
+        target_link_libraries(palmier_media PUBLIC PkgConfig::LIBVA)
+    endif()
     target_compile_definitions(palmier_media PUBLIC PALMIER_HAVE_VAAPI=1)
 endif()
 
-if(PALMIER_ENABLE_QSV)
-    target_link_libraries(palmier_media PUBLIC PkgConfig::LIBVPL)
+if(PALMIER_ENABLE_QSV AND (PALMIER_QSV_AVAILABLE OR LIBVPL_FOUND))
+    if(TARGET PkgConfig::LIBVPL)
+        target_link_libraries(palmier_media PUBLIC PkgConfig::LIBVPL)
+    endif()
     target_compile_definitions(palmier_media PUBLIC PALMIER_HAVE_QSV=1)
 endif()
 
-if(PALMIER_ENABLE_NVENC)
+if(PALMIER_ENABLE_NVENC AND (PALMIER_NVENC_AVAILABLE OR FFNVCODEC_FOUND))
     if(TARGET PkgConfig::FFNVCODEC)
         target_link_libraries(palmier_media PUBLIC PkgConfig::FFNVCODEC)
     endif()

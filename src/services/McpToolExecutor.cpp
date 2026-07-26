@@ -12,7 +12,6 @@
 #include "services/McpToolExecutor.hpp"
 
 #include <chrono>
-#include <cmath>
 #include <string>
 #include <utility>
 
@@ -21,138 +20,99 @@
 #include "core/Error.hpp"
 #include "core/Subscription.hpp"
 #include "core/TimelineEngine.hpp"
+#include "services/ProjectSession.hpp"
 #include "services/ToolRegistry.hpp"
+#include "services/ToolSchema.hpp"
 
 namespace palmier::services {
 
-namespace {
-
-// True iff the JSON value `v` satisfies a JSON-Schema primitive `type` name.
-// "number" accepts any numeric; "integer" accepts an integer payload or a double
-// with an exact integral value (JSON has no separate integer literal, so 5.0 is a
-// legitimate integer). An unrecognized type constraint is treated permissively.
-bool matchesJsonType(const Json& v, std::string_view type) {
-    if (type == "object")  return v.isObject();
-    if (type == "array")   return v.isArray();
-    if (type == "string")  return v.isString();
-    if (type == "boolean") return v.isBool();
-    if (type == "null")    return v.isNull();
-    if (type == "number")  return v.isNumber();
-    if (type == "integer") {
-        if (v.isInt()) return true;
-        if (v.isDouble()) {
-            const double d = v.asDouble();
-            return std::isfinite(d) && d == std::floor(d);
-        }
-        return false;
+std::string_view invocationSourceName(InvocationSource source) noexcept {
+    switch (source) {
+        case InvocationSource::Gui:   return "gui";
+        case InvocationSource::Mcp:   return "mcp";
+        case InvocationSource::Agent: return "agent";
     }
-    return true;  // unknown constraint -> do not reject
+    return "mcp";
 }
 
-}  // namespace
+McpToolExecutor::McpToolExecutor(const ToolRegistry& registry, ProjectSession* session)
+    : McpToolExecutor(registry, session, Options{}) {}
 
-McpToolExecutor::McpToolExecutor(const ToolRegistry& registry, TimelineEngine* engine)
-    : McpToolExecutor(registry, engine, Options{}) {}
-
-McpToolExecutor::McpToolExecutor(const ToolRegistry& registry, TimelineEngine* engine,
+McpToolExecutor::McpToolExecutor(const ToolRegistry& registry, ProjectSession* session,
                                  Options options)
     : registry_(&registry),
-      engine_(engine),
+      session_(session),
       budget_(options.timeBudget),
       clock_(options.clock ? std::move(options.clock)
-                           : Clock([] { return std::chrono::steady_clock::now(); })) {}
+                           : Clock([] { return std::chrono::steady_clock::now(); })),
+      invocationLog_(std::move(options.invocationLog)) {}
 
-Result<void> McpToolExecutor::validateAgainstSchema(const Json& input, const Json& schema) {
-    // A non-object schema declares no constraints we understand -> accept.
-    if (!schema.isObject()) {
-        return ok();
-    }
-
-    // Root type: an "object" schema requires an object input.
-    if (const Json* type = schema.find("type");
-        type != nullptr && type->isString() && type->asString() == "object") {
-        if (!input.isObject()) {
-            return err(invalidArgument("tool input must be a JSON object"));
-        }
-    }
-
-    // Required members must all be present.
-    if (const Json* required = schema.find("required");
-        required != nullptr && required->isArray()) {
-        for (const Json& entry : required->asArray()) {
-            if (!entry.isString()) {
-                continue;
-            }
-            if (!input.contains(entry.asString())) {
-                return err(invalidArgument("missing required field '" + entry.asString() +
-                                           "'"));
-            }
-        }
-    }
-
-    // Declared property types must match for any supplied property.
-    if (const Json* props = schema.find("properties");
-        props != nullptr && props->isObject()) {
-        for (const auto& [propName, propSchema] : props->asObject()) {
-            const Json* value = input.find(propName);
-            if (value == nullptr || !propSchema.isObject()) {
-                continue;  // absence is covered by "required"; nothing to check
-            }
-            const Json* propType = propSchema.find("type");
-            if (propType == nullptr || !propType->isString()) {
-                continue;
-            }
-            if (!matchesJsonType(*value, propType->asString())) {
-                return err(invalidArgument("field '" + propName + "' must be of type " +
-                                           propType->asString()));
-            }
-        }
-    }
-
-    return ok();
+Result<void> McpToolExecutor::validateAgainstSchema(const Json& input,
+                                                    const ToolSchema& schema) {
+    // One declaration, one validator: the constraints enforced here are exactly
+    // the ones `toJsonSchema()` publishes (design.md D3; Requirements 9.9, 9.12).
+    return schema.validate(input);
 }
 
 void McpToolExecutor::rollback(int appliedCount) {
-    if (engine_ == nullptr) {
+    if (session_ == nullptr) {
         return;
     }
     // Undo exactly the commands this invocation applied, restoring the
     // pre-invocation project state and removing them from the undo history.
     for (int i = 0; i < appliedCount; ++i) {
-        const CommandResult result = engine_->undo();
+        const CommandResult result = session_->engine().undo();
         if (!result.changed()) {
             break;  // nothing left to undo (defensive)
         }
     }
 }
 
-Result<Json> McpToolExecutor::executeTool(std::string_view name, const Json& input) {
+Result<Json> McpToolExecutor::executeTool(std::string_view name, const Json& input,
+                                          InvocationSource source) {
+    // Logging only (task 3.4): `source` names the surface that issued the call and
+    // never influences any decision below.
+    const auto record = [this, name, source](bool succeeded,
+                                             std::chrono::milliseconds elapsed) {
+        if (invocationLog_) {
+            invocationLog_(source, name, succeeded, elapsed);
+        }
+    };
+
     // 7.5 — an unrecognized tool name leaves the project unchanged and reports an
     // unknown-tool error. Checked first: the tool surface exists independently of
     // whether a project is open, and no mutation or command creation happens here.
     const Tool* tool = registry_->find(name);
     if (tool == nullptr) {
+        record(false, std::chrono::milliseconds::zero());
         return err<Json>(notFound("unknown tool '" + std::string(name) + "'"));
     }
 
     // 7.10 — a project operation while no project is open returns a no-project
     // error. The registry (and its handlers) are never invoked in this state.
-    if (engine_ == nullptr) {
+    if (session_ == nullptr) {
+        record(false, std::chrono::milliseconds::zero());
         return err<Json>(failedPrecondition(
             "no project is open: cannot execute tool '" + std::string(name) + "'"));
     }
 
     // 7.10 — validate inputs against the tool's declared schema BEFORE any
     // EditCommand is created. A rejection leaves the project untouched.
-    if (Result<void> validation = validateAgainstSchema(input, tool->inputSchema);
+    if (Result<void> validation = validateAgainstSchema(input, tool->schema);
         validation.isError()) {
+        record(false, std::chrono::milliseconds::zero());
         return err<Json>(std::move(validation).error());
     }
+
+    // The engine is resolved HERE, per invocation, exactly as the registry's
+    // handlers resolve it (design.md D1), so both observe the same object even
+    // when the session loaded its project after this executor was constructed.
+    TimelineEngine& engine = session_->engine();
 
     // Observe how many commands this invocation applies, so an abort can undo
     // exactly those and restore the pre-invocation state.
     int appliedCount = 0;
-    Subscription observing = engine_->observe([&appliedCount](const ChangeSet& change) {
+    Subscription observing = engine.observe([&appliedCount](const ChangeSet& change) {
         if (change.origin == ChangeOrigin::Apply) {
             ++appliedCount;
         }
@@ -174,6 +134,7 @@ Result<Json> McpToolExecutor::executeTool(std::string_view name, const Json& inp
     // late is discarded rather than returned.
     if (elapsed > budget_) {
         rollback(appliedCount);
+        record(false, elapsed);
         return err<Json>(makeError(
             ErrorCode::Timeout,
             "tool '" + std::string(name) + "' execution timed out after " +
@@ -185,25 +146,27 @@ Result<Json> McpToolExecutor::executeTool(std::string_view name, const Json& inp
     // surface the failure verbatim.
     if (result.isError()) {
         rollback(appliedCount);
+        record(false, elapsed);
         return result;
     }
 
     // 7.4 — success within budget: return the tool's payload.
+    record(true, elapsed);
     return result;
 }
 
-Json McpToolExecutor::execute(const Json& request) {
+Json McpToolExecutor::execute(const Json& request, InvocationSource source) {
     // Accept the tool name/arguments either at the top level or nested under
     // "params" (JSON-RPC-style MCP tools/call). Prefer the nested form when both
     // a "params" object and a top-level field are present.
-    const Json* source = &request;
+    const Json* fields = &request;
     if (const Json* params = request.find("params");
         params != nullptr && params->isObject()) {
-        source = params;
+        fields = params;
     }
 
-    std::string name = source->stringOr("name");
-    if (name.empty() && source != &request) {
+    std::string name = fields->stringOr("name");
+    if (name.empty() && fields != &request) {
         name = request.stringOr("name");
     }
 
@@ -218,13 +181,13 @@ Json McpToolExecutor::execute(const Json& request) {
     }
 
     Json arguments = Json::object();
-    if (const Json* args = source->find("arguments"); args != nullptr) {
+    if (const Json* args = fields->find("arguments"); args != nullptr) {
         arguments = *args;
     } else if (const Json* topArgs = request.find("arguments"); topArgs != nullptr) {
         arguments = *topArgs;
     }
 
-    Result<Json> result = executeTool(name, arguments);
+    Result<Json> result = executeTool(name, arguments, source);
     if (result.isError()) {
         Json error = Json::object();
         error.set("code", std::string(toStringView(result.error().code())));

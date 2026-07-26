@@ -52,7 +52,7 @@ namespace palmier::gpu {
 
 /// The set of built-in effect compute kernels.
 ///
-/// The first five map one-to-one onto the core EffectType kinds and are what a
+/// The first six map one-to-one onto the core EffectType kinds and are what a
 /// clip's effects dispatch to. `Transition` is a two-input cross-dissolve used
 /// by the compositor's transition stage; it has no EffectType (the core model
 /// represents transitions with the separate Transition type on a clip).
@@ -62,13 +62,16 @@ enum class EffectKernel {
     Blur,
     CropTransform,
     ColorGrade,
+    InvertColors,
     Transition,
 };
 
 /// All kernels, in a stable order (handy for iterating / registering).
-[[nodiscard]] constexpr std::array<EffectKernel, 6> allEffectKernels() noexcept {
-    return {EffectKernel::Brightness, EffectKernel::Contrast, EffectKernel::Blur,
-            EffectKernel::CropTransform, EffectKernel::ColorGrade, EffectKernel::Transition};
+[[nodiscard]] constexpr std::array<EffectKernel, 7> allEffectKernels() noexcept {
+    return {EffectKernel::Brightness,   EffectKernel::Contrast,
+            EffectKernel::Blur,         EffectKernel::CropTransform,
+            EffectKernel::ColorGrade,   EffectKernel::InvertColors,
+            EffectKernel::Transition};
 }
 
 /// Stable, human-readable kernel name (for logs / diagnostics / the shaderc
@@ -86,7 +89,9 @@ enum class EffectKernel {
 
 /// The GLSL (compute) source for a kernel. Never empty; each source declares
 /// `#version 450`, a compute `local_size`, an input image at binding 0, an
-/// output image at the last binding, and a push-constant parameter block. The
+/// output image at the last binding, and a push-constant parameter block (the
+/// invert-colors kernel takes no parameters, so its block is a reserved
+/// placeholder that keeps the dispatch signature uniform). The
 /// transition kernel additionally reads a second input at binding 1. Exposed so
 /// the sources can be inspected/validated even in builds without shaderc.
 [[nodiscard]] std::string_view effectKernelSource(EffectKernel kernel) noexcept;
@@ -126,7 +131,7 @@ public:
         return module(EffectKernel::Transition);
     }
 
-    /// Number of compiled kernels held (6 on a successful build()).
+    /// Number of compiled kernels held (7 on a successful build()).
     [[nodiscard]] std::size_t size() const noexcept { return modules_.size(); }
 
     /// Register every EffectType-mapped kernel (all but Transition) with

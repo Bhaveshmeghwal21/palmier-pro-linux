@@ -6,7 +6,7 @@
 // These tests exercise the Qt-free composition root headlessly: that every
 // component is composed and cross-wired, that the MCP server starts on launch
 // and stops on close within its lifecycle, that a request served through the
-// composed server reaches the SAME TimelineEngine the tool executor drives, and
+// composed server reaches the SAME project session the tool executor drives, and
 // that the offline defaults keep the editor + MCP endpoint fully functional with
 // no network connection (13.3). They bind the MCP endpoint on an ephemeral port
 // (mcpPort == 0) so they never contend for the well-known 19789.
@@ -24,6 +24,7 @@
 #include "services/LocalizationManager.hpp"
 #include "services/McpServer.hpp"
 #include "services/McpToolExecutor.hpp"
+#include "services/ProjectSession.hpp"
 #include "services/ToolRegistry.hpp"
 
 namespace {
@@ -46,6 +47,7 @@ TEST(ApplicationComposition, ComposesAllComponentsWithoutStarting) {
     // Every component is constructed and reachable.
     // (Accessors return references; a crash/UB here would fail the test.)
     (void)composition.gpuContext();
+    (void)composition.projectSession();
     (void)composition.timeline();
     (void)composition.mediaLibrary();
     (void)composition.projectSaveService();
@@ -57,10 +59,24 @@ TEST(ApplicationComposition, ComposesAllComponentsWithoutStarting) {
     (void)composition.agent();
     (void)composition.localization();
 
-    // The executor is bound to a project (the composed TimelineEngine), so MCP
-    // tool calls operate on the current project rather than reporting "no
-    // project open" (Requirement 7.10 is about the null case).
+    // Requirement 1.1 / design.md D1: there is exactly ONE Project_Session, and
+    // it is the owner of the single timeline engine and the single media library —
+    // `timeline()` and `mediaLibrary()` are views onto that same session, not
+    // separately constructed components.
+    EXPECT_EQ(&composition.projectSession(), &composition.projectSession());
+    EXPECT_EQ(&composition.timeline(), &composition.projectSession().engine());
+    EXPECT_EQ(&composition.mediaLibrary(), &composition.projectSession().mediaLibrary());
+
+    // Requirement 1.10: with no project path supplied the session starts on an
+    // empty project, unmodified and with no known on-disk location.
+    EXPECT_FALSE(composition.projectSession().modified());
+    EXPECT_FALSE(composition.projectSession().documentPath().has_value());
+
+    // The executor is bound to that session, so MCP tool calls operate on the
+    // current project rather than reporting "no project open" (Requirement 7.10 is
+    // about the null case).
     EXPECT_TRUE(composition.executor().hasProject());
+    EXPECT_EQ(composition.executor().session(), &composition.projectSession());
 
     // The MCP endpoint is not accepting connections until start() is called.
     EXPECT_FALSE(composition.running());
@@ -99,7 +115,7 @@ TEST(ApplicationComposition, McpServerServesToolCallsAgainstTheComposedTimeline)
 
     // Route a well-formed MCP tool call through the composed server's pure
     // request-routing core (no sockets): POST /mcp with a tools/call for the
-    // read tool. This exercises server -> executor -> ToolRegistry -> engine.
+    // read tool. This exercises server -> executor -> ToolRegistry -> session.
     Json call = Json::object();
     call.set("name", "timeline.read");
     call.set("arguments", Json::object());
@@ -116,6 +132,13 @@ TEST(ApplicationComposition, McpServerServesToolCallsAgainstTheComposedTimeline)
     const palmier::Result<Json> parsed = Json::parse(response.body);
     ASSERT_TRUE(parsed.isOk()) << parsed.error().toString();
     EXPECT_TRUE(parsed.value().boolOr("ok", false));
+
+    // The project the tool read is the composed session's project, so the request
+    // really did reach the one current project (Requirements 1.1, 9.4).
+    const Json* result = parsed.value().find("result");
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->stringOr("id"),
+              composition.projectSession().status().projectId.toString());
 
     composition.stop();
 }

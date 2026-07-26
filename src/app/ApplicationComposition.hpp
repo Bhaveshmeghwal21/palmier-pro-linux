@@ -12,11 +12,16 @@
 //                             software fallback guarantee (never fails for "no
 //                             GPU"; Requirement 13.3 keeps the editor fully
 //                             functional on the CPU path).
-//   * TimelineEngine        — the authoritative in-memory project the UI, the
-//                             MCP server, and the in-app agent all mutate
-//                             through the SAME atomic/undoable command path.
-//   * MediaManager          — the Media Engine's project media library and
-//                             per-clip version history.
+//   * ProjectSession        — the single owner of the current project
+//                             (Requirement 1.1): one TimelineEngine, whose
+//                             project the UI, the MCP server and the in-app agent
+//                             all mutate through the SAME atomic/undoable command
+//                             path, plus the project's MediaManager media
+//                             library, its document path and its dirty flag. The
+//                             `timeline()` and `mediaLibrary()` accessors are
+//                             views onto that one session, so there is exactly one
+//                             engine and one library in the process (design.md
+//                             decision D1).
 //   * ProjectSaveService    — Project I/O: crash-safe `.palmier` persistence.
 //   * AuthenticationService — login / subscription entitlement + BYOK, backing
 //                             the generative and agent auth gates.
@@ -86,6 +91,7 @@ class GpuContext;
 }  // namespace palmier::gpu
 
 namespace palmier::services {
+class ProjectSession;
 class ProjectSaveService;
 class ByokCredentialManager;
 class GenerativeClient;
@@ -192,8 +198,20 @@ public:
     // --- Component accessors (for the Qt UI shell and headless drivers) ----
 
     [[nodiscard]] gpu::GpuContext&               gpuContext() noexcept { return *gpu_; }
-    [[nodiscard]] TimelineEngine&                timeline() noexcept { return *timeline_; }
-    [[nodiscard]] MediaManager&                  mediaLibrary() noexcept { return *mediaLibrary_; }
+
+    /// The one Project_Session of the application (Requirement 1.1): the current
+    /// project, its engine, its media library, its document path and its dirty
+    /// flag. The reference is stable for the application's lifetime, including
+    /// across a project create/open (design.md decision D1).
+    [[nodiscard]] services::ProjectSession&      projectSession() noexcept;
+
+    /// The session's timeline engine — the same object for the whole application
+    /// lifetime. Defined out of line because the session's definition lives in the
+    /// .cpp (this header stays free of the core/service headers it would need).
+    [[nodiscard]] TimelineEngine&                timeline() noexcept;
+
+    /// The current project's media library, owned by the same session.
+    [[nodiscard]] MediaManager&                  mediaLibrary() noexcept;
     [[nodiscard]] services::ProjectSaveService&  projectSaveService() noexcept { return *saveService_; }
     [[nodiscard]] services::AuthenticationService& auth() noexcept { return *auth_; }
     [[nodiscard]] services::ByokCredentialManager& byokManager() noexcept { return *byokManager_; }
@@ -217,10 +235,9 @@ private:
     std::string   mcpHost_;
     std::uint16_t mcpPort_;
 
-    // --- GPU + domain core -------------------------------------------------
-    std::unique_ptr<gpu::GpuContext> gpu_;
-    std::unique_ptr<TimelineEngine>  timeline_;
-    std::unique_ptr<MediaManager>    mediaLibrary_;
+    // --- GPU + the one project session (engine + media library) ------------
+    std::unique_ptr<gpu::GpuContext>            gpu_;
+    std::unique_ptr<services::ProjectSession>   session_;
 
     // --- Project I/O -------------------------------------------------------
     std::unique_ptr<services::ProjectSaveService> saveService_;

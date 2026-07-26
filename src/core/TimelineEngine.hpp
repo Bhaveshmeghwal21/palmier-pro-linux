@@ -16,6 +16,7 @@
 //       CommandResult apply(std::unique_ptr<EditCommand>);
 //       CommandResult undo();
 //       CommandResult redo();
+//       CommandResult reset(Project);                 — replace the whole project
 //   * Change notification
 //       Subscription observe(std::function<void(const ChangeSet&)>);
 //
@@ -112,10 +113,38 @@ public:
     /// emitted.
     [[nodiscard]] CommandResult redo();
 
+    /// Replace the whole project value in place (project create / open).
+    ///
+    /// The engine object identity is preserved: every observer registered via
+    /// observe() and every reference held by the views stays valid, which is what
+    /// lets a project load refresh the UI through the ordinary ChangeSet
+    /// broadcast rather than through a rebind protocol.
+    ///
+    ///   * `initial` violates the timeline invariants -> the current project,
+    ///     its undo history and its redo history are left unchanged and
+    ///     CommandResult::failed (FailedPrecondition) is returned; no ChangeSet
+    ///     is emitted.
+    ///   * success -> the project value is swapped in, BOTH the undo and the
+    ///     redo history are cleared (the new project has no editing history),
+    ///     and a ChangeSet with origin ChangeOrigin::Reset is emitted (always,
+    ///     even when the new project happens to hold the same clips).
+    ///
+    /// A reset is NOT an undoable edit: it emits ChangeOrigin::Reset rather than
+    /// ChangeOrigin::Apply, so consumers that count applied commands to drive
+    /// rollback never count a project load.
+    [[nodiscard]] CommandResult reset(Project initial);
+
     // --- Introspection (convenience for UI enablement) ---------------------
 
     [[nodiscard]] bool canUndo() const noexcept { return undoStack_.canUndo(); }
     [[nodiscard]] bool canRedo() const noexcept { return undoStack_.canRedo(); }
+
+    /// How many applied commands the undo history currently holds, and how many
+    /// undone commands can be redone. Reported by `project.info`'s `undoDepth`
+    /// field and used by consumers that must observe that an operation recorded no
+    /// history at all (a rejected edit, or a project load, which clears both).
+    [[nodiscard]] std::size_t undoDepth() const noexcept { return undoStack_.undoDepth(); }
+    [[nodiscard]] std::size_t redoDepth() const noexcept { return undoStack_.redoDepth(); }
 
     // --- Change notification ----------------------------------------------
 

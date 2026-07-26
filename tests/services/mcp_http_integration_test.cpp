@@ -43,6 +43,7 @@
 
 #include "services/McpServer.hpp"
 #include "services/McpToolExecutor.hpp"
+#include "services/ProjectSession.hpp"
 #include "services/ToolRegistry.hpp"
 
 #include <arpa/inet.h>
@@ -193,7 +194,8 @@ HttpReply httpRequest(std::uint16_t port, const std::string& method,
 }
 
 // ---------------------------------------------------------------------------
-// A wired MCP stack: engine + default tool registry + executor + HTTP server,
+// A wired MCP stack: project session + default tool registry + executor + HTTP
+// server,
 // started on an ephemeral loopback port. Allows registering extra tools BEFORE
 // building the executor (used for the failure-rollback case).
 // ---------------------------------------------------------------------------
@@ -201,11 +203,12 @@ HttpReply httpRequest(std::uint16_t port, const std::string& method,
 class McpStack {
 public:
     // `withProject == false` models "no project open": the executor is given a
-    // null engine, while the registry is still built over the (untouched) engine
+    // null session, while the registry is still built over the (untouched) session
     // so the tool surface is identical.
     explicit McpStack(bool withProject = true) {
-        engine_ = std::make_unique<TimelineEngine>(makeProject(trackId_, assetId_));
-        registry_ = buildDefaultToolRegistry(*engine_);
+        session_ = std::make_unique<ProjectSession>();
+        (void)session_->engine().reset(makeProject(trackId_, assetId_));
+        registry_ = buildDefaultToolRegistry(*session_);
     }
 
     // Register an extra tool into the surface before starting. Must be called
@@ -215,7 +218,7 @@ public:
     // Build the executor + server and bind an ephemeral loopback port.
     void start(bool withProject = true) {
         executor_ = std::make_unique<McpToolExecutor>(
-            registry_, withProject ? engine_.get() : nullptr);
+            registry_, withProject ? session_.get() : nullptr);
         server_ = std::make_unique<McpServer>(
             [this](const Json& request) { return executor_->execute(request); });
         const Result<void> r = server_->start("127.0.0.1", 0);
@@ -235,7 +238,8 @@ public:
         return httpRequest(port_, method, path, body);
     }
 
-    TimelineEngine& engine() { return *engine_; }
+    ProjectSession& session() { return *session_; }
+    TimelineEngine& engine() { return session_->engine(); }
     const Uuid& trackId() const { return trackId_; }
     const Uuid& assetId() const { return assetId_; }
     bool started() const { return started_; }
@@ -244,7 +248,7 @@ public:
 private:
     Uuid                             trackId_;
     Uuid                             assetId_;
-    std::unique_ptr<TimelineEngine>  engine_;
+    std::unique_ptr<ProjectSession>  session_;
     ToolRegistry                     registry_;
     std::unique_ptr<McpToolExecutor> executor_;
     std::unique_ptr<McpServer>       server_;
@@ -347,7 +351,7 @@ TEST(McpHttpIntegration, FailingToolRollsBackAndReturnsErrorOverHttp) {
     Tool failing;
     failing.name = "test.apply_then_fail";
     failing.description = "Applies a clip and then reports failure.";
-    failing.inputSchema = Json::object();  // no declared constraints
+    // No declared arguments: the default ToolSchema accepts an empty object.
     TimelineEngine* enginePtr = &stack.engine();
     const Uuid trackId = stack.trackId();
     const Uuid assetId = stack.assetId();

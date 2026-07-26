@@ -217,6 +217,21 @@ void applyCropTransform(std::uint8_t* rgba, std::uint32_t width, std::uint32_t h
     }
 }
 
+/// Invert colors: each 8-bit RGB channel becomes 255 - value; alpha untouched
+/// (upstream PR 408; Requirements 14.4). Exact integer arithmetic — no clamping
+/// or rounding is needed because 255 - v is representable for every v in
+/// [0,255] — so the GLSL kernel's normalized form (1.0 - n, stored back with
+/// round-to-nearest) reproduces it bit-for-bit.
+void applyInvertColors(std::uint8_t* rgba, std::size_t pixels) noexcept {
+    for (std::size_t i = 0; i < pixels; ++i) {
+        const std::size_t o = i * 4u;
+        for (int c = 0; c < 3; ++c) {
+            rgba[o + c] = static_cast<std::uint8_t>(255u - rgba[o + c]);
+        }
+        // alpha (o+3) preserved.
+    }
+}
+
 /// Color grade: per-channel gain, an additive lift (lift*255), and a saturation
 /// mix toward Rec.601 luma. Order: gain -> lift -> saturation. Alpha preserved.
 void applyColorGrade(std::uint8_t* rgba, std::size_t pixels,
@@ -271,6 +286,9 @@ void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba,
                                paramOr(effect, "cropTop", 0.0),
                                paramOr(effect, "cropRight", 1.0),
                                paramOr(effect, "cropBottom", 1.0));
+            break;
+        case EffectType::InvertColors:
+            applyInvertColors(rgba, pixels);
             break;
         case EffectType::ColorGrade:
             applyColorGrade(rgba, pixels,

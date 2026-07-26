@@ -15,7 +15,8 @@
 // fresh apply(), an undo(), or a redo().
 //
 // Granularity carried:
-//   * origin            — whether the change came from apply / undo / redo.
+//   * origin            — whether the change came from apply / undo / redo, or
+//                          from a whole-project replacement (Reset).
 //   * description        — the human-readable command name (e.g. "MoveClip").
 //   * previousDuration / currentDuration — the total timeline length before and
 //                          after, so a ruler/scrollbar can resize without a full
@@ -42,7 +43,13 @@ enum class ChangeOrigin {
     Apply, ///< A fresh command was applied.
     Undo,  ///< A previously applied command was reverted.
     Redo,  ///< A previously undone command was re-applied.
+    Reset, ///< The whole project value was replaced (project create/open).
 };
+
+// Reset is deliberately distinct from Apply: a project load/create is not an
+// undoable edit, so consumers that count applied commands (e.g. the MCP tool
+// executor, which counts Apply emissions to know how much to roll back) must not
+// treat it as one, while views still get a full refresh notification.
 
 /// A granular description of how the project changed as a result of one
 /// state-changing engine operation. Emitted to every observer registered via

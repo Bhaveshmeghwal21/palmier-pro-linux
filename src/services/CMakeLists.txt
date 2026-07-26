@@ -127,3 +127,70 @@ target_sources(palmier_services PRIVATE
 # Appended here so the existing source list above is preserved verbatim.
 target_sources(palmier_services PRIVATE
     MentionResolver.cpp)
+
+
+
+# --- Task 3.1: one argument specification per tool (ToolSchema) -------------
+#
+# The single declaration of a tool's accepted arguments (design.md D3,
+# "Schema/handler agreement"; Requirements 9.3, 9.9, 9.12). Both the JSON Schema
+# published by `tools/list` and the validator McpToolExecutor runs before any
+# EditCommand is created are generated from the same ArgSpec list, so the
+# advertised schema and the handler cannot drift. Depends only on Palmier::core
+# (Result/Error/Uuid) and the service-layer Json value. Appended here so the
+# existing source list above is preserved verbatim.
+target_sources(palmier_services PRIVATE
+    ToolSchema.cpp)
+
+
+
+
+# --- Tasks 2.1 / 2.2: Project_Session ---------------------------------------
+#
+# services::ProjectSession is the central new abstraction of the end-to-end
+# editor integration (design.md D1): the single owner of the currently open
+# project — exactly one TimelineEngine for its whole lifetime, the MediaManager
+# media library, the project identity, the optional on-disk document path, a
+# monotonically increasing revision counter and the modified flag derived from
+# it. createProject/openProject are not EditCommands and are not undoable: they
+# build a complete Project value locally and commit through
+# TimelineEngine::reset only on full success, so a failed open leaves the
+# previous project, its path, its modified flag and its undo history unchanged
+# (Requirements 1.10, 3.2, 3.4, 3.9, 4.10).
+#
+# Task 2.2 adds the off-thread save with the revision guard (design.md D6, the
+# Linux adaptation of upstream PR 403): requestSave captures
+# (Project snapshot, revision) and hands them to a std::jthread running
+# ProjectSaveService::save, returning immediately so a slow or failing write
+# never blocks the UI thread (Requirements 4.1, 4.4, 4.6, 14.6, 14.7). It
+# therefore builds on ProjectSaveService/ProjectStore (already in this target)
+# and depends only on Palmier::core beyond them. Appended here so the existing
+# source list above is preserved verbatim.
+target_sources(palmier_services PRIVATE
+    ProjectSession.cpp)
+
+
+
+# --- Task 4.1: Media_Import_Service ----------------------------------------
+#
+# services::MediaImportService is the single probe -> validate -> register path by
+# which a file on disk becomes an asset of the current project's media library
+# (design.md "services::MediaImportService"; Requirements 2.1-2.9). Every
+# importer — the media-browser action, the `media.import` tool and the agent —
+# funnels through it, which is what makes "exactly one entry per distinct
+# filesystem location" true regardless of who asked: requests are canonicalised
+# with std::filesystem::weakly_canonical and compared against the library
+# (Requirements 2.5, 2.6). Nothing is registered until the probe, the validation
+# and the decode check have all succeeded, so every rejection — unrecognised
+# container or wholly undecodable codecs (2.3), an empty / missing / unreadable /
+# undecodable target (2.4), no open project (2.7), or a probe that exceeds the
+# 30 s limit (2.8) — leaves the library's entry count and contents unchanged, and
+# the path is reported pending until registration completes (2.9).
+#
+# It composes the existing media layer rather than duplicating it: media/MediaProbe
+# (through its injectable MediaProbeBackend seam) reads the container, and
+# media/ImportValidation supplies the acceptance policy and the format describer.
+# Palmier::media is already linked by this target, so no new dependency enters
+# here. Appended so the existing source list above is preserved verbatim.
+target_sources(palmier_services PRIVATE
+    MediaImportService.cpp)

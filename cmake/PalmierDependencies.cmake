@@ -8,14 +8,22 @@
 # and reports a single, clear message that names every missing dependency along
 # with an install hint, then fails configuration.
 #
+# The vendor hardware-codec SDKs (libva, oneVPL/libmfx, ffnvcodec) are the
+# exception: they are optional. A missing vendor SDK only records
+# PALMIER_<PATH>_AVAILABLE=OFF plus a status message, and configuration succeeds
+# with that hardware path compiled out (Requirements 8.1, 8.9).
+#
 # Discovered dependencies:
 #   * Qt 6            (Core, Gui, Quick, Qml, Widgets)   — find_package
 #   * FFmpeg / libav* (avformat avcodec avutil swscale swresample) — pkg-config
 #   * Vulkan          (loader + headers)                 — find_package
 #   * shaderc         (GLSL -> SPIR-V compilation)       — pkg-config / find_*
-#   * libva           (VAAPI HW codec path)              — pkg-config [optional]
-#   * oneVPL / libvpl (Intel QSV HW codec path)          — pkg-config [optional]
-#   * ffnvcodec       (NVIDIA NVDEC/NVENC headers)       — pkg-config [optional]
+#   * libva           (VAAPI HW codec path)              — pkg-config [optional,
+#                                                          never fatal]
+#   * oneVPL / libvpl (Intel QSV HW codec path)          — pkg-config [optional,
+#                                                          never fatal]
+#   * ffnvcodec       (NVIDIA NVDEC/NVENC headers)       — pkg-config [optional,
+#                                                          never fatal]
 #   * LittleCMS/lcms2 (color management)                 — pkg-config
 #   * libsecret       (secure credential storage)        — pkg-config
 
@@ -106,35 +114,109 @@ palmier_require_pkgconfig(LIBSECRET "libsecret"
     libsecret-1)
 
 # ---------------------------------------------------------------------------
-# Vendor hardware codec paths (optional, gated by build options).
+# Vendor hardware codec paths — OPTIONAL (Requirements 8.1, 8.9).
+#
+# A vendor SDK that is requested (PALMIER_ENABLE_<PATH>=ON) but not installed is
+# NOT a configuration failure: discovery records the miss, emits a status message
+# naming the SDK and how to install it, and configuration continues with that
+# hardware path compiled out. Only the software (FFmpeg/CPU) path is mandatory.
+#
+# Contract for consumers (src/media, src/gpu, cmake/PalmierSummary.cmake, tests):
+#
+#   PALMIER_VAAPI_AVAILABLE  ON | OFF
+#   PALMIER_QSV_AVAILABLE    ON | OFF
+#   PALMIER_NVENC_AVAILABLE  ON | OFF
+#
+#   Each is ON if and only if BOTH the corresponding PALMIER_ENABLE_* option is
+#   ON *and* that vendor's SDK was located at configure time. It is OFF when the
+#   option is OFF (no lookup is attempted) and OFF when the option is ON but the
+#   SDK is missing. So a consumer that wants the "ENABLE AND FOUND" gate can test
+#   PALMIER_*_AVAILABLE alone, e.g.
+#
+#       if(PALMIER_VAAPI_AVAILABLE)
+#           target_link_libraries(... PkgConfig::LIBVA)
+#           target_compile_definitions(... PALMIER_HAVE_VAAPI=1)
+#       endif()
+#
+#   All three are always defined (never left unset) and are stored as
+#   CACHE INTERNAL, so they are readable from any directory or function scope and
+#   are recomputed (INTERNAL implies FORCE) on every configure run.
+#
+#   To distinguish "disabled by option" from "SDK not found" — which the
+#   configuration summary needs — combine with PALMIER_ENABLE_<PATH>:
+#       option OFF                        -> disabled (option OFF)
+#       option ON  and AVAILABLE ON       -> enabled (SDK found)
+#       option ON  and AVAILABLE OFF      -> disabled (SDK not found)
+#
+#   The pkg-config prefixes LIBVA / LIBVPL / FFNVCODEC (and their imported
+#   targets PkgConfig::LIBVA / PkgConfig::LIBVPL / PkgConfig::FFNVCODEC) are also
+#   populated on a hit. The lookups are deliberately performed at this file's
+#   top-level scope (not inside a helper function) so that LIBVA_FOUND,
+#   LIBVPL_FOUND and FFNVCODEC_FOUND are visible to the src/* subdirectories.
 # ---------------------------------------------------------------------------
-if(PALMIER_ENABLE_VAAPI)
-    palmier_require_pkgconfig(LIBVA "libva (VAAPI)"
-        "apt install libva-dev  |  dnf install libva-devel"
-        libva
-        libva-drm)
-endif()
 
+# --- VAAPI (Intel / AMD via libva) -----------------------------------------
+set(_palmier_vaapi_available OFF)
+if(PALMIER_ENABLE_VAAPI)
+    pkg_check_modules(LIBVA IMPORTED_TARGET libva libva-drm)
+    if(LIBVA_FOUND)
+        set(_palmier_vaapi_available ON)
+        # LIBVA_VERSION is empty for a multi-module check; report libva's own version.
+        message(STATUS "Palmier: VAAPI hardware codec path ENABLED — libva ${LIBVA_libva_VERSION} found.")
+    else()
+        message(STATUS "Palmier: VAAPI hardware codec path DISABLED — libva/libva-drm not found "
+                       "(install: apt install libva-dev | dnf install libva-devel, "
+                       "or configure with -DPALMIER_ENABLE_VAAPI=OFF). "
+                       "Configuration continues; encoding falls back to the software path.")
+    endif()
+else()
+    message(STATUS "Palmier: VAAPI hardware codec path DISABLED — PALMIER_ENABLE_VAAPI=OFF.")
+endif()
+set(PALMIER_VAAPI_AVAILABLE ${_palmier_vaapi_available} CACHE INTERNAL
+    "VAAPI hardware codec path is enabled AND its SDK (libva) was found")
+
+# --- QSV (Intel Quick Sync via oneVPL, or the legacy Media SDK) -------------
+set(_palmier_qsv_available OFF)
 if(PALMIER_ENABLE_QSV)
     # Intel Quick Sync via oneVPL (new) or legacy Media SDK (mfx).
     pkg_check_modules(LIBVPL IMPORTED_TARGET vpl)
     if(NOT LIBVPL_FOUND)
         pkg_check_modules(LIBVPL IMPORTED_TARGET libmfx)
     endif()
-    if(NOT LIBVPL_FOUND)
-        list(APPEND _PALMIER_MISSING_DEPS
-            "  - oneVPL / Intel Media SDK (QSV) [PALMIER_ENABLE_QSV=ON]\n      Install: apt install libvpl-dev  |  dnf install oneVPL-devel  (or set -DPALMIER_ENABLE_QSV=OFF)")
+    if(LIBVPL_FOUND)
+        set(_palmier_qsv_available ON)
+        message(STATUS "Palmier: QSV hardware codec path ENABLED — oneVPL/Media SDK ${LIBVPL_VERSION} found.")
+    else()
+        message(STATUS "Palmier: QSV hardware codec path DISABLED — oneVPL (vpl) / Intel Media SDK (libmfx) "
+                       "not found (install: apt install libvpl-dev | dnf install oneVPL-devel, "
+                       "or configure with -DPALMIER_ENABLE_QSV=OFF). "
+                       "Configuration continues; encoding falls back to the software path.")
     endif()
+else()
+    message(STATUS "Palmier: QSV hardware codec path DISABLED — PALMIER_ENABLE_QSV=OFF.")
 endif()
+set(PALMIER_QSV_AVAILABLE ${_palmier_qsv_available} CACHE INTERNAL
+    "QSV hardware codec path is enabled AND its SDK (oneVPL/libmfx) was found")
 
+# --- NVENC / NVDEC (NVIDIA codec headers consumed by FFmpeg) ----------------
+set(_palmier_nvenc_available OFF)
 if(PALMIER_ENABLE_NVENC)
     # NVIDIA codec headers (ffnvcodec) expose NVDEC/NVENC to FFmpeg.
     pkg_check_modules(FFNVCODEC IMPORTED_TARGET ffnvcodec)
-    if(NOT FFNVCODEC_FOUND)
-        list(APPEND _PALMIER_MISSING_DEPS
-            "  - ffnvcodec headers (NVDEC/NVENC) [PALMIER_ENABLE_NVENC=ON]\n      Install: apt install nv-codec-headers  |  build nv-codec-headers from source  (or set -DPALMIER_ENABLE_NVENC=OFF)")
+    if(FFNVCODEC_FOUND)
+        set(_palmier_nvenc_available ON)
+        message(STATUS "Palmier: NVENC/NVDEC hardware codec path ENABLED — ffnvcodec ${FFNVCODEC_VERSION} found.")
+    else()
+        message(STATUS "Palmier: NVENC/NVDEC hardware codec path DISABLED — ffnvcodec headers not found "
+                       "(install: apt install nv-codec-headers, or build nv-codec-headers from source, "
+                       "or configure with -DPALMIER_ENABLE_NVENC=OFF). "
+                       "Configuration continues; encoding falls back to the software path.")
     endif()
+else()
+    message(STATUS "Palmier: NVENC/NVDEC hardware codec path DISABLED — PALMIER_ENABLE_NVENC=OFF.")
 endif()
+set(PALMIER_NVENC_AVAILABLE ${_palmier_nvenc_available} CACHE INTERNAL
+    "NVENC/NVDEC hardware codec path is enabled AND its SDK (ffnvcodec) was found")
 
 # ---------------------------------------------------------------------------
 # Report all missing dependencies at once and fail configuration clearly.
@@ -148,10 +230,15 @@ if(_PALMIER_MISSING_DEPS)
         "==================================================================\n"
         "${_missing_str}\n"
         "------------------------------------------------------------------\n"
-        "Install the packages listed above and re-run CMake. Vendor hardware\n"
-        "codec paths can be disabled individually if their SDKs are absent:\n"
-        "  -DPALMIER_ENABLE_VAAPI=OFF  -DPALMIER_ENABLE_NVENC=OFF  -DPALMIER_ENABLE_QSV=OFF\n"
+        "Install the packages listed above and re-run CMake. Only the software\n"
+        "(FFmpeg/CPU) media path is required — a missing vendor hardware codec\n"
+        "SDK (libva / oneVPL / ffnvcodec) never appears here and never blocks\n"
+        "configuration; that path is simply compiled out.\n"
         "==================================================================\n")
 endif()
 
 message(STATUS "Palmier Pro Linux: all required dependencies located.")
+message(STATUS "Palmier Pro Linux: hardware codec paths — "
+               "VAAPI=${PALMIER_VAAPI_AVAILABLE} "
+               "QSV=${PALMIER_QSV_AVAILABLE} "
+               "NVENC=${PALMIER_NVENC_AVAILABLE}")

@@ -206,7 +206,7 @@ private:
 
 /// Default software effect application (the P5 reference). Handles every effect
 /// kind the core model enumerates — Brightness, Contrast, Blur, CropTransform,
-/// and ColorGrade — in place on an RGBA8 buffer. These host-memory
+/// ColorGrade, and InvertColors — in place on an RGBA8 buffer. These host-memory
 /// implementations are *the* reference the SPIR-V compute kernels (see
 /// EffectKernels.hpp, task 7.4) must match within tolerance for property P5
 /// (GPU/CPU parity, Req 10.7); each GLSL kernel mirrors the math below
@@ -226,6 +226,8 @@ private:
 ///   * ColorGrade   — `gainR`/`gainG`/`gainB` (default 1), `lift` (default 0,
 ///                    added as lift*255), `saturation` (default 1, mixes each
 ///                    pixel toward its Rec.601 luma).
+///   * InvertColors — no parameters: each RGB channel becomes 255 minus the
+///                    input value; alpha is unchanged (Requirements 14.4).
 void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba,
                          std::uint32_t width, std::uint32_t height) noexcept;
 

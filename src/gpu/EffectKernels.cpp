@@ -140,6 +140,29 @@ void main() {
 }
 )glsl";
 
+// Invert colors (upstream PR 408; Requirements 14.4): rgb = 1 - rgb, alpha kept.
+// In byte space that is exactly 255 - value, which is what the software
+// reference computes: 1.0 - n stored back through the rgba8 round-to-nearest
+// conversion yields round(255 - value) == 255 - value for every input byte, so
+// the two paths agree exactly (well inside property P5's 1-of-255 tolerance).
+// The kernel takes no parameters; the push-constant block is a reserved
+// placeholder so every kernel keeps the same dispatch signature.
+constexpr std::string_view kInvertColorsSrc = R"glsl(#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba8) uniform readonly  image2D inImage;
+layout(binding = 1, rgba8) uniform writeonly image2D outImage;
+layout(push_constant) uniform Params { float reserved; } pc;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(inImage);
+    if (p.x >= size.x || p.y >= size.y) return;
+    vec4 c = imageLoad(inImage, p);
+    // 255 - value in byte space == 1.0 - value in normalized [0,1] space.
+    vec3 rgb = clamp(vec3(1.0) - c.rgb, 0.0, 1.0);
+    imageStore(outImage, p, vec4(rgb, c.a)); // alpha unchanged
+}
+)glsl";
+
 constexpr std::string_view kTransitionSrc = R"glsl(#version 450
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(binding = 0, rgba8) uniform readonly  image2D inA;
@@ -166,6 +189,7 @@ std::string_view effectKernelName(EffectKernel kernel) noexcept {
         case EffectKernel::Blur:          return "blur";
         case EffectKernel::CropTransform: return "crop_transform";
         case EffectKernel::ColorGrade:    return "color_grade";
+        case EffectKernel::InvertColors:  return "invert_colors";
         case EffectKernel::Transition:    return "transition";
     }
     return "unknown";
@@ -178,6 +202,7 @@ std::optional<EffectType> effectTypeForKernel(EffectKernel kernel) noexcept {
         case EffectKernel::Blur:          return EffectType::Blur;
         case EffectKernel::CropTransform: return EffectType::CropTransform;
         case EffectKernel::ColorGrade:    return EffectType::ColorGrade;
+        case EffectKernel::InvertColors:  return EffectType::InvertColors;
         case EffectKernel::Transition:    return std::nullopt; // no per-clip EffectType
     }
     return std::nullopt;
@@ -190,6 +215,7 @@ std::optional<EffectKernel> kernelForEffectType(EffectType type) noexcept {
         case EffectType::Blur:          return EffectKernel::Blur;
         case EffectType::CropTransform: return EffectKernel::CropTransform;
         case EffectType::ColorGrade:    return EffectKernel::ColorGrade;
+        case EffectType::InvertColors:  return EffectKernel::InvertColors;
         case EffectType::Custom:        return std::nullopt; // caller-supplied kernel
     }
     return std::nullopt;
@@ -202,6 +228,7 @@ std::string_view effectKernelSource(EffectKernel kernel) noexcept {
         case EffectKernel::Blur:          return kBlurSrc;
         case EffectKernel::CropTransform: return kCropTransformSrc;
         case EffectKernel::ColorGrade:    return kColorGradeSrc;
+        case EffectKernel::InvertColors:  return kInvertColorsSrc;
         case EffectKernel::Transition:    return kTransitionSrc;
     }
     return {};

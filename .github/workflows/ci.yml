@@ -12,11 +12,18 @@
 # Notes on build options (see cmake/PalmierOptions.cmake):
 #   * PALMIER_BUILD_TESTS  = ON   -> compile + register the CTest suite
 #   * PALMIER_BUILD_UI     = ON   -> build the Qt 6 presentation layer
-#   * PALMIER_ENABLE_VAAPI = ON   -> libva HW path (libva-dev is installed)
-#   * PALMIER_ENABLE_NVENC = OFF  -> would need ffnvcodec (nv-codec-headers)
-#   * PALMIER_ENABLE_QSV   = OFF  -> would need oneVPL/libvpl (libvpl-dev)
-# NVENC/QSV are disabled here so configuration succeeds with the packages that
-# ship in the Ubuntu archive; the FFmpeg software codec path still covers tests.
+#   * PALMIER_ENABLE_VAAPI = ON   -> libva HW path        (libva-dev)
+#   * PALMIER_ENABLE_NVENC = ON   -> ffnvcodec HW path    (nv-codec-headers)
+#   * PALMIER_ENABLE_QSV   = ON   -> oneVPL/QSV HW path   (libvpl-dev)
+# All three vendor SDK development packages ship in the Ubuntu archive, so they
+# are installed here and every vendor path is configured ON: that is what makes
+# PALMIER_HAVE_VAAPI / PALMIER_HAVE_NVENC / PALMIER_HAVE_QSV actually defined in
+# CI, so the hardware code paths are compiled and type-checked (Requirement
+# 8.1). Hardware *execution* still skips on runners without a device.
+#
+# The companion `configure-without-vendor-sdks` job configures the same options
+# ON with none of the vendor SDKs visible, proving configuration still succeeds
+# and each path is reported disabled (Requirement 8.9).
 #
 # Runs on ubuntu-24.04 to satisfy the app's platform check (glibc >= 2.31).
 # RapidCheck reads RC_PARAMS from the environment; the tests already set a
@@ -87,6 +94,8 @@ jobs:
             spirv-tools \
             libshaderc-dev \
             libva-dev \
+            nv-codec-headers \
+            libvpl-dev \
             liblcms2-dev \
             libsecret-1-dev
 
@@ -106,13 +115,34 @@ jobs:
 
       - name: Configure (CMake + Ninja)
         run: |
+          set -o pipefail
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DPALMIER_BUILD_TESTS=ON \
             -DPALMIER_BUILD_UI=ON \
             -DPALMIER_ENABLE_VAAPI=ON \
-            -DPALMIER_ENABLE_NVENC=OFF \
-            -DPALMIER_ENABLE_QSV=OFF
+            -DPALMIER_ENABLE_NVENC=ON \
+            -DPALMIER_ENABLE_QSV=ON \
+            2>&1 | tee configure.log
+
+      # Requirement 8.1: with the option ON and the vendor SDK present, the
+      # configuration summary must report the path as enabled with the SDK found.
+      - name: Assert vendor hardware paths are enabled in the configuration summary
+        run: |
+          status=0
+          for path in VAAPI NVENC QSV; do
+            if grep -Eq "${path}[^:]*:[[:space:]]*enabled \(SDK found\)" configure.log; then
+              echo "OK: ${path} reported as 'enabled (SDK found)'"
+            else
+              echo "::error::configuration summary does not report ${path} as 'enabled (SDK found)'"
+              status=1
+            fi
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "--- hardware codec summary lines ---"
+            grep -E "VAAPI|NVENC|QSV" configure.log || true
+            exit 1
+          fi
 
       - name: Build
         run: cmake --build build
@@ -127,3 +157,98 @@ jobs:
           name: ctest-logs
           path: build/Testing/**
           if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Requirement 8.9: a vendor path may be enabled at configure time while its
+  # SDK/driver development package is absent. Configuration must still succeed,
+  # the PALMIER_HAVE_* definition must stay undefined, and the configuration
+  # summary must list that path as disabled.
+  #
+  # This job installs only the mandatory dependencies — no libva-dev,
+  # nv-codec-headers or libvpl-dev — and configures with all three vendor
+  # options ON. Tests are switched off because this job checks configuration of
+  # the vendor paths only; the build-and-test job above covers the test tree.
+  # ---------------------------------------------------------------------------
+  configure-without-vendor-sdks:
+    name: Configure without vendor SDKs (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install mandatory build dependencies only
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-declarative-dev \
+            qt6-tools-dev \
+            qt6-tools-dev-tools \
+            libgl1-mesa-dev \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libavfilter-dev \
+            libswscale-dev \
+            libswresample-dev \
+            libavdevice-dev \
+            libvulkan-dev \
+            libshaderc-dev \
+            liblcms2-dev \
+            libsecret-1-dev
+
+      # A vendor .pc file can arrive transitively through another dev package.
+      # Hide any that did so this job really exercises the "SDK not found" path;
+      # renaming the pkg-config file (rather than purging the package) keeps the
+      # mandatory dependencies installed and intact.
+      - name: Hide any vendor codec SDKs from pkg-config
+        run: |
+          for module in libva libva-drm vpl libmfx ffnvcodec; do
+            if pkg-config --exists "$module"; then
+              pcdir=$(pkg-config --variable=pcfiledir "$module")
+              echo "Hiding transitively installed ${module}.pc from ${pcdir}"
+              sudo mv "${pcdir}/${module}.pc" "${pcdir}/${module}.pc.ci-hidden"
+            fi
+          done
+          for module in libva libva-drm vpl libmfx ffnvcodec; do
+            if pkg-config --exists "$module"; then
+              echo "::error::${module} is still visible to pkg-config; this job requires no vendor SDKs"
+              exit 1
+            fi
+          done
+          echo "No vendor codec SDKs are visible to pkg-config."
+
+      - name: Configure with every vendor path ON and no vendor SDKs
+        run: |
+          set -o pipefail
+          cmake -S . -B build-no-sdk -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DPALMIER_BUILD_TESTS=OFF \
+            -DPALMIER_BUILD_UI=ON \
+            -DPALMIER_ENABLE_VAAPI=ON \
+            -DPALMIER_ENABLE_NVENC=ON \
+            -DPALMIER_ENABLE_QSV=ON \
+            2>&1 | tee configure-no-sdk.log
+
+      - name: Assert vendor hardware paths are disabled in the configuration summary
+        run: |
+          status=0
+          for path in VAAPI NVENC QSV; do
+            if grep -Eq "${path}[^:]*:[[:space:]]*disabled \(SDK not found\)" configure-no-sdk.log; then
+              echo "OK: ${path} reported as 'disabled (SDK not found)'"
+            else
+              echo "::error::configuration summary does not report ${path} as 'disabled (SDK not found)'"
+              status=1
+            fi
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "--- hardware codec summary lines ---"
+            grep -E "VAAPI|NVENC|QSV" configure-no-sdk.log || true
+            exit 1
+          fi

@@ -276,6 +276,27 @@ CommandResult TimelineEngine::redo() {
     return result;
 }
 
+CommandResult TimelineEngine::reset(Project initial) {
+    // A project load is committed only if the incoming value is itself a legal
+    // timeline; otherwise the current project and both histories are untouched.
+    if (Result<void> invariants = checkTimelineInvariants(initial); invariants.isError()) {
+        return CommandResult::failed(std::move(invariants).error());
+    }
+
+    Project before = std::move(project_);
+    project_ = std::move(initial);
+
+    // The new project carries no editing history: neither the commands applied to
+    // the previous project nor the ones undone on it are meaningful here.
+    undoStack_.clear();
+
+    // Always notify — the views must refresh to the loaded state even when the
+    // diff happens to be empty. Origin Reset (not Apply) keeps this out of any
+    // applied-command counter used for rollback.
+    notifyObservers(buildChangeSet(before, project_, ChangeOrigin::Reset, "Reset"));
+    return CommandResult::applied("Reset");
+}
+
 Subscription TimelineEngine::observe(std::function<void(const ChangeSet&)> callback) {
     if (!callback) {
         return Subscription{};  // inactive handle; nothing registered

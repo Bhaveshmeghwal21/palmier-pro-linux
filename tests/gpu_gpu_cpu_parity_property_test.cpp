@@ -185,6 +185,14 @@ void gpuColorGrade(const std::vector<std::uint8_t>& in, std::vector<std::uint8_t
     }
 }
 
+/// Mirror of kInvertColorsSrc: rgb = clamp(1 - c.rgb, 0, 1); alpha preserved.
+void gpuInvertColors(const std::vector<std::uint8_t>& in, std::vector<std::uint8_t>& out) {
+    for (std::size_t i = 0; i < in.size(); i += 4) {
+        for (int c = 0; c < 3; ++c) out[i + c] = store01(1.0 - load01(in[i + c]));
+        out[i + 3] = in[i + 3];
+    }
+}
+
 /// Mirror of kTransitionSrc: out = mix(a, b, progress) across all four channels.
 void gpuTransition(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b,
                    std::vector<std::uint8_t>& out, double progress) {
@@ -222,6 +230,9 @@ void gpuTransition(const std::vector<std::uint8_t>& a, const std::vector<std::ui
         case EffectType::ColorGrade:
             gpuColorGrade(in, out, param("gainR", 1.0), param("gainG", 1.0), param("gainB", 1.0),
                           param("lift", 0.0), param("saturation", 1.0));
+            break;
+        case EffectType::InvertColors:
+            gpuInvertColors(in, out);
             break;
         case EffectType::Custom:
             out = in; // passthrough, matching the software reference
@@ -276,7 +287,8 @@ struct GenFrame {
 [[nodiscard]] Effect genEffect() {
     const EffectType type = *rc::gen::element(EffectType::Brightness, EffectType::Contrast,
                                               EffectType::Blur, EffectType::CropTransform,
-                                              EffectType::ColorGrade, EffectType::Custom);
+                                              EffectType::ColorGrade, EffectType::InvertColors,
+                                              EffectType::Custom);
     switch (type) {
         case EffectType::Brightness:
             return makeEffect(type, {{"amount", genScaled(-1000, 1000)}}); // [-1,1]
@@ -295,6 +307,8 @@ struct GenFrame {
                                      {"gainB", genScaled(0, 2000)},
                                      {"lift", genScaled(-500, 500)},
                                      {"saturation", genScaled(0, 2000)}});
+        case EffectType::InvertColors:
+            return makeEffect(type, {}); // parameterless
         case EffectType::Custom:
             return makeEffect(type, {{"anything", genScaled(-1000, 1000)}});
     }
