@@ -97,3 +97,41 @@ target_sources(palmier_media PRIVATE ImportValidation.cpp)
 # FFmpeg/GPU. Added via target_sources (append-only) so it composes with the
 # sources declared in the add_library() call above without editing that list.
 target_sources(palmier_media PRIVATE ExportEngine.cpp)
+
+
+# Decoder teardown queue (task 7.1; Requirement 14.8). Destroys retired
+# MediaDecoder objects (and any other resource with a slow destructor) on one
+# dedicated thread, so closing an FFmpeg decode context never blocks the
+# playback thread, the audio callback thread or the Qt main thread. Standard
+# library only — no FFmpeg, GPU or vendor SDK dependency — so it builds and is
+# testable everywhere. Reused by the audio decoder in stage 8 (upstream PR 405).
+# Added via target_sources (append-only) so it composes with the sources declared
+# in the add_library() call above without editing that list.
+target_sources(palmier_media PRIVATE DecoderTeardownQueue.cpp)
+
+
+# Playback decode stage (task 7.3; Requirements 5.1, 5.5, 14.8).
+#
+#   * DecodeWorkerPool          — N = 2 worker threads, one MediaDecoder per
+#                                 active asset, decoded frames pushed to a
+#                                 bounded lock-protected per-clip queue, and
+#                                 retired decoders handed to
+#                                 DecoderTeardownQueue so an eviction never
+#                                 blocks the playback thread.
+#   * DecoderClipFrameProvider  — the gpu::ClipFrameProvider the Compositor
+#                                 consumes: maps (Clip, timelinePosition) to
+#                                 sourceIn + (position - timelineStart), keeps
+#                                 decoders in an LRU cache, seeks when a request
+#                                 is not the next sequential frame, converts
+#                                 DecodedFrame to gpu::SourceFrame, and returns a
+#                                 decode failure as an error so
+#                                 Compositor::renderAt emits no partial frame.
+#
+# Both are standard-library plus Palmier::gpu only: decoders are opened through
+# MediaDecoder's existing DecodeBackendFactory seam, so they build and are
+# testable with no FFmpeg, GPU or media fixture. Added via target_sources
+# (append-only) so they compose with the sources declared in the add_library()
+# call above without editing that list.
+target_sources(palmier_media PRIVATE
+    DecodeWorkerPool.cpp
+    DecoderClipFrameProvider.cpp)

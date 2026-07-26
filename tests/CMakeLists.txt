@@ -1981,3 +1981,102 @@ target_link_libraries(palmier_services_remote_access_tests PRIVATE
 palmier_test_enable_openssl(palmier_services_remote_access_tests)
 
 palmier_register_test(palmier_services_remote_access_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Decoder teardown tests (tasks 7.1, 7.2; Requirement 14.8) — Property 75 plus
+# the unit tests for media::DecoderTeardownQueue.
+#
+# The queue exists so that closing a decoder — which blocks inside FFmpeg for
+# hundreds of milliseconds — never runs on the playback thread, the audio
+# callback thread or the Qt main thread (upstream PR 405). Property 75 asserts
+# the hand-over never waits on a destructor, that every retired decoder is
+# destroyed exactly once, and that destroying the queue terminates, over
+# generated retirement counts, arrival patterns (burst versus spread),
+# concurrent producer counts and close costs.
+#
+# The property's fake decoder blocks on a gate the test controls rather than on
+# a sleep, so the assertions are about ordering and completion, never about
+# elapsed wall-clock time; every wait in the suite is bounded, so a regression
+# that reintroduces synchronous teardown fails with a counterexample instead of
+# hanging under the 600-second per-test limit.
+#
+# Links Palmier::media (which brings in Palmier::gpu and Palmier::core) so the
+# real MediaDecoder overload is exercised through MediaDecoder's existing
+# IDecodeBackend seam; no FFmpeg, GPU, vendor SDK or media fixture is needed.
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_decoder_teardown_tests
+    media/decoder_teardown_property_test.cpp)
+target_link_libraries(palmier_media_decoder_teardown_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_decoder_teardown_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Audio decode tests (tasks 8.1, 8.2; Requirement 6.1) — Property 26 plus the
+# unit tests for the MediaDecoder audio surface.
+#
+# Task 8.1 gave MediaDecoder an audio surface (AudioFrame, openAudioStream,
+# nextAudioFrame, seekAudio, hasAudio) yielding the interleaved-float AudioBuffer
+# the existing AudioGraph consumes. Property 26 asserts what Requirement 6.1
+# fixes: every buffer the decoder emits declares a sample rate in
+# 8 000-192 000 Hz, a channel count in 1-8, and a presentation timestamp
+# non-decreasing across consecutive buffers of that stream — and hasAudio()
+# agrees with the source's stream layout.
+#
+# Everything is driven through MediaDecoder's existing IDecodeBackend /
+# DecodeBackendFactory seam with a synthetic audio backend, so the generator can
+# explore the whole rate x channel x block-size space, plus layouts with audio at
+# a non-zero index and assets with no audio stream at all, and out-of-range
+# formats that must be refused rather than emitted. No FFmpeg, GPU, vendor SDK,
+# sound card or media fixture is needed. The unit tests in the same file cover the
+# example-based edges, including the default "no audio" IDecodeBackend
+# implementation that keeps every pre-audio backend and test double compiling.
+#
+# Links Palmier::media (which brings in Palmier::gpu and Palmier::core).
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_audio_decode_tests
+    media/audio_decode_property_test.cpp)
+target_link_libraries(palmier_media_audio_decode_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_audio_decode_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Playback frame-fidelity tests (tasks 7.3, 7.4; Requirements 5.1, 5.5, 14.8) —
+# Property 20 plus the unit tests for media::DecoderClipFrameProvider and
+# media::DecodeWorkerPool.
+#
+# Property 20 asserts that the frame presented for a timeline position is exactly
+# the source frame the clip's (sourceIn, timelineStart) mapping selects. The
+# ground truth comes from MediaDecoder's existing DecodeBackendFactory /
+# IDecodeBackend seam: a synthetic backend emits frames whose pixel values are a
+# deterministic function of the frame index, so a presented frame identifies which
+# source frame reached the canvas. Generated cases cover sequential playback,
+# forward and backward seeks, interleaved access, non-zero sourceIn, several clips
+# sharing one asset, and more distinct assets than the LRU decoder cache holds.
+#
+# The pipeline runs for real: the provider owns a DecodeWorkerPool with the
+# design's N = 2 workers and bounded per-clip queues, and the composited output is
+# produced by gpu::Compositor on gpu::GpuContext::softwareFallback(). Nothing here
+# needs FFmpeg, a GPU, a media fixture or a temporary file — the asset "paths" are
+# opaque keys the synthetic factory dispatches on. Every wait in the file is
+# bounded, so a concurrency regression fails with a counterexample rather than
+# hanging under the harness's 600-second per-test limit.
+#
+# Links Palmier::media (which brings in Palmier::gpu and Palmier::core).
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_playback_tests
+    media/playback_frame_fidelity_property_test.cpp)
+target_link_libraries(palmier_media_playback_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_playback_tests)

@@ -25,8 +25,17 @@
 // PALMIER_HAVE_FFMPEG is defined. On a machine without FFmpeg the module still
 // builds and the default factory reports FailedPrecondition, while the whole
 // open/nextFrame/seek + routing/fallback surface stays exercisable with a mock
-// backend (see tests/media_decoder_test.cpp). Audio decode/resampling (task 8.4)
-// and encode (task 8.3) are out of scope here.
+// backend (see tests/media_decoder_test.cpp).
+//
+// Audio (task 8.1 of end-to-end-editor-integration; Requirement 6.1): the audio
+// surface — openAudioStream / nextAudioFrame / seekAudio / hasAudio — mirrors the
+// video surface and yields interleaved-float AudioBuffers (media/AudioGraph.hpp)
+// that the existing AudioGraph consumes directly. Audio decode is ALWAYS
+// software, so it does not go through the CodecBridge and needs no
+// hardware-fallback logic. IDecodeBackend::decodeAudio / seekAudio are
+// default-implemented as "this backend decodes no audio", so every backend and
+// test double written before the audio surface existed keeps compiling and simply
+// presents as an audio-less source. Encode lives in MediaEncoder.
 
 #ifndef PALMIER_MEDIA_MEDIADECODER_HPP
 #define PALMIER_MEDIA_MEDIADECODER_HPP
@@ -44,6 +53,7 @@
 #include "gpu/CodecBridge.hpp"
 #include "gpu/FramePool.hpp"
 #include "gpu/GpuTypes.hpp"
+#include "media/AudioGraph.hpp"
 #include "media/MediaInfo.hpp"
 
 namespace palmier::media {
@@ -186,6 +196,75 @@ struct BackendFrame {
     }
 };
 
+// ---------------------------------------------------------------------------
+// Audio decode surface (task 8.1; Requirement 6.1)
+// ---------------------------------------------------------------------------
+
+/// Declared bounds every audio buffer the decoder yields conforms to
+/// (Requirement 6.1). A source whose audio stream falls outside them is rejected
+/// at openAudioStream() rather than emitted out of range, so the invariant holds
+/// for every buffer nextAudioFrame() ever returns.
+constexpr int kMinAudioSampleRate = 8'000;
+constexpr int kMaxAudioSampleRate = 192'000;
+constexpr int kMinAudioChannels = 1;
+constexpr int kMaxAudioChannels = 8;
+
+/// True iff `rate` is inside the declared sample-rate range.
+[[nodiscard]] constexpr bool isDeclaredAudioSampleRate(int rate) noexcept {
+    return rate >= kMinAudioSampleRate && rate <= kMaxAudioSampleRate;
+}
+
+/// True iff `channels` is inside the declared channel-count range.
+[[nodiscard]] constexpr bool isDeclaredAudioChannelCount(int channels) noexcept {
+    return channels >= kMinAudioChannels && channels <= kMaxAudioChannels;
+}
+
+/// One decoded block of audio: interleaved 32-bit float samples in the
+/// `AudioBuffer` the existing AudioGraph already consumes, plus the presentation
+/// timestamp of its first sample. `endOfStream` marks the exhausted stream and
+/// carries an empty buffer.
+///
+/// Unlike DecodedFrame there is no GPU variant: audio decode is always software
+/// (there is no hardware audio decode path to route), so the CodecBridge is not
+/// involved and no hardware/CPU fallback logic exists on this path.
+struct AudioFrame {
+    bool        endOfStream = false;
+    Duration    presentation{Duration::zero()};
+    AudioBuffer buffer{};
+
+    [[nodiscard]] static AudioFrame eos() {
+        AudioFrame f;
+        f.endOfStream = true;
+        return f;
+    }
+
+    /// Sample rate declared by this buffer (0 for an end-of-stream marker).
+    [[nodiscard]] int sampleRate() const noexcept { return buffer.sampleRate(); }
+
+    /// Interleaved channel count declared by this buffer (0 at end of stream).
+    [[nodiscard]] int channels() const noexcept { return buffer.channels(); }
+
+    /// Complete interleaved frames carried by this buffer.
+    [[nodiscard]] std::size_t frameCount() const noexcept { return buffer.frameCount(); }
+};
+
+/// One block of audio as produced by a decode backend, before MediaDecoder
+/// validates it against the declared ranges and enforces timestamp monotonicity.
+/// The buffer is already interleaved float at the source's own sample rate and
+/// channel count — resampling to the engine's output format is the AudioGraph's
+/// job, not the decoder's.
+struct BackendAudioFrame {
+    bool        endOfStream = false;
+    Duration    timestamp{Duration::zero()};
+    AudioBuffer buffer{};
+
+    [[nodiscard]] static BackendAudioFrame eos() {
+        BackendAudioFrame f;
+        f.endOfStream = true;
+        return f;
+    }
+};
+
 /// The pluggable decode implementation. The FFmpeg backend provides the concrete
 /// codec work; tests supply mocks. This seam keeps MediaDecoder's routing and
 /// zero-copy/fallback policy free of any FFmpeg dependency and unit-testable
@@ -211,6 +290,39 @@ public:
 
     /// Reposition the source so the next decode resumes at (or near) `ts`.
     [[nodiscard]] virtual Result<void> seek(Duration ts) = 0;
+
+    // --- Audio (task 8.1; Requirement 6.1) ---------------------------------
+    //
+    // Both audio entry points are NON-pure and default to "this backend decodes
+    // no audio". That is deliberate: every backend that predates the audio
+    // surface — the FFmpeg video backend before it grew audio support, and every
+    // test double across the suite — keeps compiling and behaves as an
+    // audio-less source, which is exactly what Requirement 6.6 wants an
+    // audio-less asset to look like. A backend opts in by overriding them.
+
+    /// Decode the next block of audio from `streamIndex` (an index into
+    /// info().streams naming an audio stream), converting it to interleaved
+    /// 32-bit float at the stream's own sample rate and channel count. End of
+    /// stream is signalled by BackendAudioFrame::eos(). Audio decode is always
+    /// software, so there is no hardware/CPU route parameter.
+    ///
+    /// The default implementation reports that this backend provides no audio.
+    [[nodiscard]] virtual Result<BackendAudioFrame> decodeAudio(int streamIndex) {
+        (void)streamIndex;
+        return err<BackendAudioFrame>(makeError(
+            ErrorCode::Unsupported, "this decode backend provides no audio decode support"));
+    }
+
+    /// Reposition `streamIndex` so the next decodeAudio() resumes at (or near)
+    /// `ts`. Independent of seek(), which repositions the video stream.
+    ///
+    /// The default implementation reports that this backend provides no audio.
+    [[nodiscard]] virtual Result<void> seekAudio(Duration ts, int streamIndex) {
+        (void)ts;
+        (void)streamIndex;
+        return makeError(ErrorCode::Unsupported,
+                         "this decode backend provides no audio decode support");
+    }
 };
 
 /// Builds a decode backend for `path` under `prefs`. Mirrors MediaProbe's
@@ -277,6 +389,58 @@ public:
     /// path (Requirement 10.5).
     [[nodiscard]] bool lastFrameRetriedOnCpu() const noexcept { return lastRetriedOnCpu_; }
 
+    // --- Audio surface (task 8.1; Requirement 6.1) --------------------------
+
+    /// True when the opened source carries at least one audio stream. An
+    /// audio-less asset is not an error anywhere: the Audio_Engine contributes
+    /// silence for its timeline range (Requirement 6.6), and this predicate is
+    /// how it decides that without opening anything.
+    [[nodiscard]] bool hasAudio() const noexcept { return info_.hasAudio(); }
+
+    /// Select the audio stream to decode. `streamIndex == -1` selects the
+    /// source's primary (first) audio stream; any other value must name an audio
+    /// stream in info().streams — an audio stream is NOT required to be stream 0.
+    /// Calling it again re-selects, resetting the timestamp baseline.
+    ///
+    /// Errors:
+    ///   * FailedPrecondition — the decoder is not open, or the source carries no
+    ///     audio stream at all.
+    ///   * InvalidArgument    — `streamIndex` is out of range or names a stream
+    ///     that is not audio.
+    ///   * Unsupported        — the stream declares a sample rate outside
+    ///     8 000–192 000 Hz or a channel count outside 1–8, naming the value. The
+    ///     stream is refused rather than decoded out of range, so every buffer
+    ///     nextAudioFrame() yields conforms to the declared ranges
+    ///     (Requirement 6.1).
+    [[nodiscard]] Result<void> openAudioStream(int streamIndex = -1);
+
+    /// The stream index openAudioStream() selected, or -1 when no audio stream is
+    /// open.
+    [[nodiscard]] int audioStreamIndex() const noexcept { return audioStreamIndex_; }
+
+    /// Decode the next block of audio from the open audio stream as interleaved
+    /// 32-bit float samples, or an end-of-stream AudioFrame once exhausted.
+    ///
+    /// Guarantees for every returned non-end-of-stream frame (Requirement 6.1):
+    /// the buffer declares a sample rate in 8 000–192 000 Hz, a channel count in
+    /// 1–8, and a presentation timestamp no earlier than that of the previous
+    /// frame of this stream. A backend block that violates the range guarantee is
+    /// reported as an error and no frame is emitted; a backend timestamp that
+    /// regresses is raised to the previous frame's timestamp, which keeps the
+    /// non-decreasing invariant true without discarding audible samples.
+    ///
+    /// Errors: FailedPrecondition when no audio stream is open; Unsupported when
+    /// the backend decodes no audio; whatever the backend reports otherwise.
+    [[nodiscard]] Result<AudioFrame> nextAudioFrame();
+
+    /// Reposition the open audio stream so the next nextAudioFrame() resumes at
+    /// (or near) `ts`. A seek starts a new monotonic run: the timestamp baseline
+    /// is cleared, so a legitimate backwards seek is not clamped forward.
+    ///
+    /// Errors: FailedPrecondition when no audio stream is open; whatever the
+    /// backend reports otherwise.
+    [[nodiscard]] Result<void> seekAudio(Duration ts);
+
 private:
     MediaDecoder(MediaInfo info, std::unique_ptr<IDecodeBackend> backend, DecodePrefs prefs);
 
@@ -286,6 +450,11 @@ private:
     gpu::CodecBridge                bridge_;
     gpu::CodecId                    videoCodec_{gpu::CodecId::Unknown};
     bool                            lastRetriedOnCpu_{false};
+
+    // Audio state: the selected stream and the monotonicity baseline. The
+    // baseline is std::nullopt before the first frame of a run and after a seek.
+    int                             audioStreamIndex_{-1};
+    std::optional<Duration>         lastAudioPresentation_{};
 };
 
 } // namespace palmier::media

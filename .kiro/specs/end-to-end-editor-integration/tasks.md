@@ -394,21 +394,21 @@ generated cases.
 ### Stage 7 — Playback
 
 - [ ] 7. Assemble the decode → composite → present pipeline
-  - [~] 7.1 Implement `media::DecoderTeardownQueue`
+  - [x] 7.1 Implement `media::DecoderTeardownQueue`
     - `src/media/DecoderTeardownQueue.{hpp,cpp}`: single dedicated thread; `MediaDecoder` objects
       are moved in as `unique_ptr` and the caller returns immediately; drain-to-empty is observable
     - This is the Linux adaptation of upstream PR 405 and **must precede stage 8** so the audio
       decoder reuses it
     - _Requirements: 14.8_
 
-  - [ ]* 7.2 Write the decoder-teardown property test
+  - [x]* 7.2 Write the decoder-teardown property test
     - **Property 75: Decoder teardown never deadlocks or stalls** —
       **Validates: Requirements 14.8**
     - File: `tests/media/decoder_teardown_property_test.cpp`; new target
       `palmier_media_decoder_teardown_tests`
     - _Requirements: 14.8_
 
-  - [~] 7.3 Implement `DecodeWorkerPool` and `media::DecoderClipFrameProvider`
+  - [x] 7.3 Implement `DecodeWorkerPool` and `media::DecoderClipFrameProvider`
     - `src/media/DecodeWorkerPool.{hpp,cpp}`: N = 2 workers, one `MediaDecoder` per active asset,
       decoded frames pushed to a bounded lock-protected per-clip queue
     - `src/media/DecoderClipFrameProvider.{hpp,cpp}`: implements `gpu::ClipFrameProvider`, maps
@@ -418,7 +418,7 @@ generated cases.
       is returned as an error so `Compositor::renderAt` emits no partial frame
     - _Requirements: 5.1, 5.5, 14.8_
 
-  - [ ]* 7.4 Write the frame-fidelity property test
+  - [x]* 7.4 Write the frame-fidelity property test
     - **Property 20: Presented frames match the decoded source frames** —
       **Validates: Requirements 5.1**
     - File: `tests/media/playback_frame_fidelity_property_test.cpp`; new target
@@ -452,7 +452,7 @@ generated cases.
 ### Stage 8 — Audio (`NullAudioSink` first, real sinks additive behind optional detection)
 
 - [ ] 8. Build the audio decode → mix → output pipeline
-  - [~] 8.1 Add the audio surface to `MediaDecoder`
+  - [x] 8.1 Add the audio surface to `MediaDecoder`
     - `src/media/MediaDecoder.{hpp,cpp}`: `AudioFrame`, `openAudioStream(int)`, `nextAudioFrame()`,
       `seekAudio(Duration)`, `hasAudio()`; `IDecodeBackend` gains `decodeAudio()` and
       `seekAudio()`, with the FFmpeg backend converting through `libswresample` into the
@@ -461,7 +461,7 @@ generated cases.
       per stream; audio decode is always software, so `CodecBridge` is not involved
     - _Requirements: 6.1_
 
-  - [ ]* 8.2 Write the audio-decode property test
+  - [x]* 8.2 Write the audio-decode property test
     - **Property 26: Decoded audio buffers conform to the declared ranges** —
       **Validates: Requirements 6.1**
     - File: `tests/media/audio_decode_property_test.cpp`
@@ -1052,14 +1052,18 @@ Checkpoint tasks (4.8, 9.9, 11.12, 12.13) are intentionally excluded from the wa
 ## Progress
 
 **Complete:** stages 0–6 in full — every task of 6.1 through 6.6 has landed, so stage 6 itself is
-closed. Stages 7–12 are untouched.
+closed. Stage 7 has 7.1–7.4 done (`DecoderTeardownQueue` with Property 75, `DecodeWorkerPool` and
+`DecoderClipFrameProvider` with Property 20), with 7.5 and 7.6 remaining. Stage 8 has 8.1 and 8.2
+done (the `MediaDecoder` audio surface with Property 26), with 8.3–8.7 remaining. Stages 9–12 are
+untouched.
 
-**Test count:** 871 registered tests, all passing (`100% tests passed, 0 tests failed out of 871`,
-about 6 seconds of wall clock), confirmed over two consecutive runs of the same tree with no
-flakes — relevant because the remote-access integration tests bind real loopback sockets. A full
-clean rebuild takes roughly 5 minutes on 8 cores. Against the 862 recorded after task 6.3: tasks
-6.4 and 6.6 add 7 (Properties 52, 53, 54, 56 and 58, plus the two remote-access integration tests)
-and task 6.5 adds 2 (Properties 55 and 57 in `mcp_session_property_test.cpp`).
+**Test count:** 899 registered tests, all passing (`100% tests passed, 0 tests failed out of 899`,
+about 7 seconds of wall clock), confirmed over two consecutive runs of the same tree with no
+flakes — relevant because this batch added three concurrency-heavy components (the single-threaded
+teardown queue and the two-worker decode pool) on top of the remote-access integration tests that
+bind real loopback sockets. A full clean rebuild takes roughly 5 minutes on 8 cores. Against the
+871 recorded after stage 6: tasks 7.1/7.2 add the decoder-teardown target, tasks 7.3/7.4 add the
+playback target, and tasks 8.1/8.2 add the audio-decode target.
 
 **One requirement conflict resolved in task 6.4:** the loopback fallback of Requirements 10.3 and
 10.12 binds `127.0.0.1:19789`, not the configured port. `RemoteAccessGate::computeDecision` was
@@ -1068,10 +1072,17 @@ name 19789, so the implementation was corrected. A configuration that never enab
 still honours its configured port (Requirements 10.1, 16.3) — that is a different antecedent, and
 both branches are asserted by Property 52.
 
-**Verification configuration:** this sandbox has no Qt 6, so all verification runs with
-`-DPALMIER_BUILD_UI=OFF`. The headless surface — core, gpu, media, services and app composition —
-is fully covered, but nothing under `src/ui` is compiled or exercised here. Stage 11 (mounting the
-editor shell) will need Qt 6 restored, via `aqtinstall`, before it can be built or verified.
+**Verification configuration:** Qt 6.8.3 is now installed at `/usr/local` via `aqtinstall`, so both
+trees are available:
+
+- `build-nogui/` (`-DPALMIER_BUILD_UI=OFF`) remains the primary verification tree — it is what the
+  test counts above are measured on, and it covers the headless surface of core, gpu, media,
+  services and app composition.
+- `build-ui/` configures and builds with `-DPALMIER_BUILD_UI=ON`, so `src/ui` and the `palmier-pro`
+  executable compile and link. This unblocks stage 11 (mounting the editor shell).
+
+`PKG_CONFIG_PATH=/usr/local/lib/pkgconfig` is required when configuring either tree, because
+FFmpeg is a from-source install under `/usr/local` and is discovered through `pkg-config`.
 
 **Working build tree:** `build-nogui/` is the configured tree used for all of the above:
 
