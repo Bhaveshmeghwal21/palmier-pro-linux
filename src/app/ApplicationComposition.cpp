@@ -21,7 +21,9 @@
 #include "app/ApplicationComposition.hpp"
 
 #include <cstdint>
+#include <iostream>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -49,6 +51,7 @@
 #include "services/MentionResolver.hpp"
 #include "services/ProjectSaveService.hpp"
 #include "services/ProjectSession.hpp"
+#include "services/RemoteAccessGate.hpp"
 #include "services/SecretStore.hpp"
 #include "services/ToolRegistry.hpp"
 
@@ -267,6 +270,19 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     mcpServer_ = std::make_unique<services::McpServer>(
         [executor](const services::Json& request) { return executor->execute(request); });
 
+    // --- Remote access gate (task 6.3; Requirements 10.1-10.13) ------------
+    // The gate is constructed unconditionally and wired into the transport
+    // unconditionally, because that is what makes the compatibility guarantee
+    // structural rather than conditional: with remote access off (the default) its
+    // bind decision is loopback-only and `admit()` allows every request, so the
+    // endpoint behaves exactly as it did before this stage — a request carrying
+    // neither Authorization nor Origin is served, and no 401 or 403 can be produced
+    // (Requirements 10.1, 10.10).
+    rejectionLog_ = std::make_unique<services::StreamRejectionLog>(std::clog);
+    remoteAccessGate_ =
+        std::make_unique<services::RemoteAccessGate>(config.remote, *rejectionLog_);
+    mcpServer_->setRemoteAccessGate(remoteAccessGate_.get());
+
     // --- In-app agent chat: reuse the SAME executor + registry -------------
     agentGate_ = std::make_unique<services::AuthServiceAgentGate>(*auth_, config.byokProviders);
     agent_ = std::make_unique<services::AgentOrchestrator>(
@@ -295,9 +311,51 @@ ApplicationComposition::~ApplicationComposition() {
 // ---------------------------------------------------------------------------
 
 Result<void> ApplicationComposition::start() {
-    // Requirements 7.1/7.2/7.3: bind the loopback endpoint and begin accepting;
-    // a port-in-use failure is forwarded and the server stays stopped.
-    return mcpServer_->start(mcpHost_, mcpPort_);
+    const services::BindDecision decision = remoteAccessGate_->validate();
+
+    // Requirement 10.3/10.12: an enabled-but-incomplete remote configuration is a
+    // startup ERROR that names every unmet prerequisite — and never the token — yet
+    // it does not stop the editor: the endpoint simply comes up on loopback.
+    remoteAccessStartupError_.clear();
+    if (!decision.unmetPrerequisites.empty()) {
+        remoteAccessStartupError_ =
+            "Remote MCP access is enabled but was not started: unmet prerequisites — ";
+        for (std::size_t i = 0; i < decision.unmetPrerequisites.size(); ++i) {
+            if (i > 0) remoteAccessStartupError_ += "; ";
+            remoteAccessStartupError_ += decision.unmetPrerequisites[i];
+        }
+        remoteAccessStartupError_ += ". The endpoint is bound to loopback instead.";
+        std::clog << remoteAccessStartupError_ << '\n';
+    }
+
+    // Requirement 10.7: exactly one warning, emitted before the first request is
+    // accepted — hence here, before the listener starts, and taken from the gate so
+    // repeated starts cannot repeat it.
+    if (std::optional<std::string> warning = remoteAccessGate_->takeStartupWarning();
+        warning.has_value()) {
+        remoteAccessWarning_ = *warning;
+        std::clog << remoteAccessWarning_ << '\n';
+    }
+
+    if (decision.loopbackOnly) {
+        // Requirements 7.1/7.2/7.3 unchanged: bind the configured loopback endpoint
+        // and begin accepting; a port-in-use failure is forwarded and the server
+        // stays stopped. The composition's own host/port is used here rather than the
+        // decision's so an ephemeral test port keeps working.
+        return mcpServer_->start(mcpHost_, mcpPort_);
+    }
+
+    if (decision.tlsEnabled) {
+        // The gate has already established that the material loads and matches, so a
+        // failure here would mean the two disagreed — refuse rather than downgrade.
+        if (Result<void> material = mcpServer_->setTlsMaterial(
+                *remoteAccessGate_->config().tlsCertificate,
+                *remoteAccessGate_->config().tlsPrivateKey);
+            material.isError()) {
+            return material;
+        }
+    }
+    return mcpServer_->start(decision);
 }
 
 void ApplicationComposition::stop() {

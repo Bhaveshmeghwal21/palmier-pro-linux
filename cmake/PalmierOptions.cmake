@@ -18,6 +18,16 @@ option(PALMIER_BUILD_UI
 option(PALMIER_WERROR
     "Treat compiler warnings as errors" OFF)
 
+# --- Optional TLS transport for the MCP endpoint ----------------------------
+# Serves HTTPS on an opt-in remote MCP binding (Requirement 10.6) through
+# OpenSSL 3.x. Detection is OPTIONAL: with the option ON but OpenSSL absent,
+# configuration still succeeds, PALMIER_HAVE_OPENSSL stays undefined, and
+# configuring TLS material becomes an unmet prerequisite that falls the endpoint
+# back to a loopback bind. The endpoint itself is unaffected either way — it is
+# loopback-only unless remote access is explicitly enabled.
+option(PALMIER_ENABLE_OPENSSL
+    "Enable the OpenSSL-backed TLS transport for the remote MCP endpoint" ON)
+
 # --- Vendor hardware codec paths (VAAPI / NVENC / QSV) ---------------------
 # These control which hardware-accelerated decode/encode backends are compiled
 # in. When all are OFF the build still produces a fully functional editor that

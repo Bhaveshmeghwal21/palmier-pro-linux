@@ -15,6 +15,8 @@
 #   * PALMIER_ENABLE_VAAPI = ON   -> libva HW path        (libva-dev)
 #   * PALMIER_ENABLE_NVENC = ON   -> ffnvcodec HW path    (nv-codec-headers)
 #   * PALMIER_ENABLE_QSV   = ON   -> oneVPL/QSV HW path   (libvpl-dev)
+#   * PALMIER_ENABLE_OPENSSL = ON -> TLS transport for the remote MCP endpoint
+#                                   (libssl-dev; openssl-devel on Fedora/RHEL)
 # All three vendor SDK development packages ship in the Ubuntu archive, so they
 # are installed here and every vendor path is configured ON: that is what makes
 # PALMIER_HAVE_VAAPI / PALMIER_HAVE_NVENC / PALMIER_HAVE_QSV actually defined in
@@ -97,7 +99,8 @@ jobs:
             nv-codec-headers \
             libvpl-dev \
             liblcms2-dev \
-            libsecret-1-dev
+            libsecret-1-dev \
+            libssl-dev
 
       - name: Verify toolchain versions
         run: |
@@ -141,6 +144,19 @@ jobs:
           if [ "$status" -ne 0 ]; then
             echo "--- hardware codec summary lines ---"
             grep -E "VAAPI|NVENC|QSV" configure.log || true
+            exit 1
+          fi
+
+      # Requirement 10.6: with the option ON and OpenSSL 3.x present, the summary
+      # must report the TLS transport as enabled, so PALMIER_HAVE_OPENSSL really is
+      # defined and the HTTPS path is compiled and type-checked here.
+      - name: Assert the TLS transport is enabled in the configuration summary
+        run: |
+          if grep -Eq "TLS \(OpenSSL\)[^:]*:[[:space:]]*enabled \(OpenSSL found\)" configure.log; then
+            echo "OK: TLS transport reported as 'enabled (OpenSSL found)'"
+          else
+            echo "::error::configuration summary does not report the TLS transport as 'enabled (OpenSSL found)'"
+            grep -E "TLS \(OpenSSL\)" configure.log || true
             exit 1
           fi
 

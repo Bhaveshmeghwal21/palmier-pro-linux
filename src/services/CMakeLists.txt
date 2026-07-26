@@ -231,3 +231,49 @@ target_sources(palmier_services PRIVATE
 target_sources(palmier_services PRIVATE
     McpSessionRegistry.cpp
     McpProtocolHandler.cpp)
+
+
+
+# --- Tasks 6.2 / 6.3: Remote_Access_Gate + the optional TLS transport -------
+#
+# services::RemoteAccessGate is the admission control of design.md D4, with two
+# deliberately separated responsibilities:
+#
+#   * bind-time — validate() turns a RemoteAccessConfig into the BindDecision the
+#     transport binds. Absent configuration is loopback 127.0.0.1:19789
+#     (Requirement 10.1); enabling a non-loopback bind requires ALL of a valid
+#     IPv4/IPv6 literal, a 32-512 printable-ASCII bearer token and an explicit
+#     acknowledgement, plus — when TLS material is configured — a certificate and
+#     key that load and match. Any unmet prerequisite still binds loopback and
+#     carries the NAMED prerequisites for the startup error, never the token
+#     (Requirements 10.2, 10.3, 10.12). Enabled without TLS still binds and offers
+#     exactly one plaintext warning (Requirement 10.7).
+#   * per-request — admit() allows everything on a loopback-only binding, so the
+#     current default developer experience is preserved bit for bit
+#     (Requirement 10.10); on a non-loopback binding it checks the source block
+#     list, the bearer token by constant-time compare (401), the Origin allow-list
+#     extended with the bound address and loopback hosts (403), and the
+#     session-count limit (Requirements 10.4, 10.5, 10.9, 10.13).
+#
+# Every rejection goes to a RejectionLog sink as a UTC millisecond timestamp, the
+# source address and a reason CODE; the presented credential is never a parameter
+# of the logging path, so it cannot appear in a record (Requirement 10.8).
+#
+# services::TlsTransport is the OpenSSL 3.x layer behind PALMIER_ENABLE_OPENSSL
+# (default ON) with OPTIONAL detection setting PALMIER_HAVE_OPENSSL. The guard is
+# defined only when the option is ON *and* OpenSSL 3.x was found, and the imported
+# target is linked only in that same branch — the ENABLE-and-FOUND form
+# src/gpu/CMakeLists.txt already models. With the guard absent the same sources
+# still compile and report the capability unavailable, so configuring TLS becomes
+# an unmet prerequisite and the gate falls back to loopback: a host without
+# OpenSSL configures, builds and tests exactly as it did before this stage.
+#
+# Appended here so the existing source list above is preserved verbatim.
+target_sources(palmier_services PRIVATE
+    RemoteAccessGate.cpp
+    TlsTransport.cpp)
+
+if(PALMIER_ENABLE_OPENSSL AND OPENSSL_FOUND)
+    target_compile_definitions(palmier_services PRIVATE PALMIER_HAVE_OPENSSL=1)
+    target_link_libraries(palmier_services PRIVATE PkgConfig::OPENSSL)
+endif()

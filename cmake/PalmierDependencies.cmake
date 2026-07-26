@@ -219,6 +219,37 @@ set(PALMIER_NVENC_AVAILABLE ${_palmier_nvenc_available} CACHE INTERNAL
     "NVENC/NVDEC hardware codec path is enabled AND its SDK (ffnvcodec) was found")
 
 # ---------------------------------------------------------------------------
+# OpenSSL 3.x — the optional TLS transport for the remote MCP endpoint
+# (Requirement 10.6; design.md D4). Optional in exactly the same sense as the
+# vendor codec SDKs: a miss records PALMIER_OPENSSL_AVAILABLE=OFF and a status
+# message, and configuration succeeds with the TLS path compiled out. Code behind
+# the absent PALMIER_HAVE_OPENSSL guard degrades to a working fallback —
+# configuring TLS becomes an unmet prerequisite and the gate binds loopback — so
+# a host with no OpenSSL configures, builds and tests exactly as before.
+#
+# OpenSSL is Apache-2.0 from 3.0 onward, which is compatible with GPLv3; the 1.x
+# series is not, so 3.0 is the floor rather than a preference.
+# ---------------------------------------------------------------------------
+set(_palmier_openssl_available OFF)
+if(PALMIER_ENABLE_OPENSSL)
+    pkg_check_modules(OPENSSL IMPORTED_TARGET "openssl >= 3.0")
+    if(OPENSSL_FOUND)
+        set(_palmier_openssl_available ON)
+        message(STATUS "Palmier: TLS transport ENABLED — OpenSSL ${OPENSSL_VERSION} found.")
+    else()
+        message(STATUS "Palmier: TLS transport DISABLED — OpenSSL 3.x not found "
+                       "(install: apt install libssl-dev | dnf install openssl-devel, "
+                       "or configure with -DPALMIER_ENABLE_OPENSSL=OFF). "
+                       "Configuration continues; the MCP endpoint serves plaintext and "
+                       "configured TLS material becomes an unmet prerequisite.")
+    endif()
+else()
+    message(STATUS "Palmier: TLS transport DISABLED — PALMIER_ENABLE_OPENSSL=OFF.")
+endif()
+set(PALMIER_OPENSSL_AVAILABLE ${_palmier_openssl_available} CACHE INTERNAL
+    "The TLS transport is enabled AND OpenSSL 3.x was found")
+
+# ---------------------------------------------------------------------------
 # Report all missing dependencies at once and fail configuration clearly.
 # ---------------------------------------------------------------------------
 if(_PALMIER_MISSING_DEPS)
@@ -238,6 +269,8 @@ if(_PALMIER_MISSING_DEPS)
 endif()
 
 message(STATUS "Palmier Pro Linux: all required dependencies located.")
+message(STATUS "Palmier Pro Linux: TLS transport (OpenSSL) — "
+               "OPENSSL=${PALMIER_OPENSSL_AVAILABLE}")
 message(STATUS "Palmier Pro Linux: hardware codec paths — "
                "VAAPI=${PALMIER_VAAPI_AVAILABLE} "
                "QSV=${PALMIER_QSV_AVAILABLE} "

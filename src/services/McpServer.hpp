@@ -76,6 +76,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -90,6 +91,9 @@
 #include "services/RemoteAccessTypes.hpp"
 
 namespace palmier::services {
+
+class RemoteAccessGate;   // services/RemoteAccessGate.hpp (task 6.2)
+class TlsContext;         // services/TlsTransport.hpp (task 6.3)
 
 // ---------------------------------------------------------------------------
 // Minimal HTTP request / response
@@ -209,6 +213,36 @@ public:
     [[nodiscard]] bool hasProtocolDelegate() const noexcept
         { return static_cast<bool>(protocol_); }
 
+    /// Wire the Remote_Access_Gate (task 6.2). The gate is consulted **strictly
+    /// upstream** of the protocol delegate: a request it denies is answered from
+    /// the transport with the gate's HTTP status and never reaches
+    /// `McpProtocolHandler`, so it provably never reaches the Tool_Surface
+    /// (Requirements 10.4, 10.5, 10.6). Borrowed; the gate must outlive the
+    /// server. A null gate means "no admission control", which is what every
+    /// pre-task-6.3 composition and its tests already assume — and is equivalent
+    /// to a loopback-only gate, since such a gate admits unconditionally
+    /// (Requirement 10.10).
+    void setRemoteAccessGate(RemoteAccessGate* gate) noexcept { gate_ = gate; }
+
+    /// True iff an admission gate is wired.
+    [[nodiscard]] bool hasRemoteAccessGate() const noexcept { return gate_ != nullptr; }
+
+    /// Install the TLS material this listener serves when a `BindDecision` asks
+    /// for TLS (task 6.3; Requirement 10.6). Must be called before `start()`.
+    ///
+    /// Returns the load error unchanged when the certificate or key cannot be
+    /// read, cannot be parsed, or do not form a matching pair, and `Unsupported`
+    /// when this build has no TLS transport — the same classification the gate
+    /// reports at bind time, so the two cannot disagree.
+    Result<void> setTlsMaterial(const std::filesystem::path& certificate,
+                                const std::filesystem::path& privateKey);
+
+    /// True iff TLS material is loaded and this listener can serve HTTPS.
+    [[nodiscard]] bool hasTlsMaterial() const noexcept { return tls_ != nullptr; }
+
+    /// True while the current listener serves TLS.
+    [[nodiscard]] bool secureTransport() const noexcept { return secureTransport_; }
+
     /// Bind the loopback endpoint and begin accepting connections.
     ///
     /// `host` MUST be a loopback address (see `isLoopbackHost`) — a non-loopback
@@ -231,10 +265,11 @@ public:
     ///
     /// Returns an error and leaves the server stopped when: the server is already
     /// running (FailedPrecondition); `decision.loopbackOnly` is set and the host is
-    /// not a loopback literal, or the host is not an IPv4 literal this listener can
-    /// bind (InvalidArgument); `decision.tlsEnabled` is set, since the TLS
-    /// transport is not compiled in yet (Unsupported — task 6.3 supplies it); or
-    /// the address is already in use (FailedPrecondition naming the port).
+    /// not a loopback literal, or the host is not an IPv4/IPv6 literal this
+    /// listener can bind (InvalidArgument); `decision.tlsEnabled` is set but no TLS
+    /// material has been installed through `setTlsMaterial()` (Unsupported — the
+    /// bind is refused rather than silently downgraded to plaintext); or the
+    /// address is already in use (FailedPrecondition naming the port).
     Result<void> start(const BindDecision& decision);
 
     /// Stop accepting connections and join the accept thread (idempotent — a no-op
@@ -257,6 +292,11 @@ public:
 
     /// Route a single (already-parsed) HTTP request with its captured context —
     /// the JSON-RPC path, and equally pure and socket-free (task 5.3).
+    ///
+    /// When an admission gate is wired it is consulted first, before the body is
+    /// handed to the protocol layer: a denied request is answered with the gate's
+    /// status and a body naming only the rejection reason code, and the protocol
+    /// delegate is not called at all (task 6.3).
     ///
     /// A path other than `/mcp` yields 404 and a method other than POST yields
     /// 405, as before. A body larger than `kMaxRequestBodyBytes` yields a
@@ -288,6 +328,8 @@ private:
 
     McpRequestHandler   handler_;
     McpProtocolDelegate protocol_;   ///< JSON-RPC 2.0 layer (task 5.2), or empty.
+    RemoteAccessGate*   gate_ = nullptr;   ///< Admission control (task 6.2), or null.
+    std::unique_ptr<TlsContext> tls_;      ///< Loaded TLS material (task 6.3), or null.
 
     std::string      boundHost_;       ///< Host of the current bind ("" when stopped).
     bool             secureTransport_ = false;  ///< True when the listener serves TLS.

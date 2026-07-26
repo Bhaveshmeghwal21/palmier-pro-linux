@@ -242,6 +242,30 @@ public:
     [[nodiscard]] services::AgentOrchestrator&   agent() noexcept { return *agent_; }
     [[nodiscard]] services::LocalizationManager& localization() noexcept { return *localization_; }
 
+    /// The one Remote_Access_Gate of the application (task 6.3): the bind-time
+    /// decision the endpoint was started from and the per-request admission control
+    /// the transport consults upstream of the protocol handler. Constructed for
+    /// every composition — with remote access disabled (the default) it decides
+    /// loopback and admits every request, so it is not an opt-in component
+    /// (Requirements 10.1, 10.10).
+    [[nodiscard]] services::RemoteAccessGate& remoteAccessGate() noexcept {
+        return *remoteAccessGate_;
+    }
+
+    /// The startup error naming every unmet remote-access prerequisite, or empty
+    /// when remote access is off or fully configured. Populated by `start()`. Never
+    /// contains the configured bearer token (Requirements 10.3, 10.12).
+    [[nodiscard]] const std::string& remoteAccessStartupError() const noexcept {
+        return remoteAccessStartupError_;
+    }
+
+    /// The single "traffic is unencrypted" warning of Requirement 10.7, or empty
+    /// when TLS is configured or remote access is off. Populated by `start()`, at
+    /// most once for the lifetime of the composition.
+    [[nodiscard]] const std::string& remoteAccessWarning() const noexcept {
+        return remoteAccessWarning_;
+    }
+
     /// The user-facing "GPU acceleration unavailable" notice from the GPU layer
     /// (Requirement 10.4), or empty when hardware acceleration is active. Surfaced
     /// here so the UI shell can show the non-blocking notification.
@@ -281,6 +305,10 @@ private:
     // --- Shared tool surface + MCP + agent --------------------------------
     std::unique_ptr<services::ToolRegistry>     toolRegistry_;
     std::unique_ptr<services::McpToolExecutor>  executor_;
+    std::unique_ptr<services::RejectionLog>     rejectionLog_;
+    std::unique_ptr<services::RemoteAccessGate> remoteAccessGate_;
+    std::string                                 remoteAccessStartupError_;
+    std::string                                 remoteAccessWarning_;
     std::unique_ptr<services::McpServer>        mcpServer_;
     std::unique_ptr<services::IAgentAuthGate>   agentGate_;
     std::unique_ptr<services::AgentOrchestrator> agent_;

@@ -47,6 +47,16 @@ palmier_vendor_path_status(_palmier_nvenc_status
 palmier_vendor_path_status(_palmier_qsv_status
     PALMIER_ENABLE_QSV PALMIER_QSV_AVAILABLE LIBVPL_FOUND)
 
+# The optional TLS transport is reported in the same three states, with the
+# dependency named rather than called an "SDK" (Requirement 10.6; design.md D4).
+if(NOT PALMIER_ENABLE_OPENSSL)
+    set(_palmier_openssl_status "disabled (option OFF)")
+elseif(PALMIER_OPENSSL_AVAILABLE)
+    set(_palmier_openssl_status "enabled (OpenSSL found)")
+else()
+    set(_palmier_openssl_status "disabled (OpenSSL not found)")
+endif()
+
 message(STATUS "")
 message(STATUS "==================== Palmier Pro Linux ====================")
 message(STATUS "  Version           : ${PROJECT_VERSION}")
@@ -61,5 +71,6 @@ message(STATUS "  ---------------------------------------------------------")
 message(STATUS "  HW codec: VAAPI   : ${_palmier_vaapi_status}")
 message(STATUS "  HW codec: NVENC   : ${_palmier_nvenc_status}")
 message(STATUS "  HW codec: QSV     : ${_palmier_qsv_status}")
+message(STATUS "  TLS (OpenSSL)     : ${_palmier_openssl_status}")
 message(STATUS "===========================================================")
 message(STATUS "")

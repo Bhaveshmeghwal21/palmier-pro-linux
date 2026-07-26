@@ -126,6 +126,24 @@ function(palmier_register_test target)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# palmier_test_enable_openssl(<target>)
+#
+# Attaches the optional TLS transport to a test binary that compiles
+# src/services/TlsTransport.cpp directly (task 6.3): the PALMIER_HAVE_OPENSSL
+# guard and the OpenSSL imported target are added ONLY when the option is ON and
+# OpenSSL 3.x was found — the same ENABLE-and-FOUND form src/services uses. With
+# the guard absent the same sources still compile and report the capability
+# unavailable, so a host without OpenSSL builds and runs this suite unchanged and
+# the TLS-specific cases skip with a recorded reason.
+# ---------------------------------------------------------------------------
+function(palmier_test_enable_openssl target)
+    if(PALMIER_ENABLE_OPENSSL AND PALMIER_OPENSSL_AVAILABLE)
+        target_compile_definitions(${target} PRIVATE PALMIER_HAVE_OPENSSL=1)
+        target_link_libraries(${target} PRIVATE PkgConfig::OPENSSL)
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # Placeholder test binary — proves the GoogleTest + RapidCheck wiring, the
 # required property tag format, and the 100-iteration floor. Replaced by the
 # real P1-P12 property tests in later tasks.
@@ -851,12 +869,16 @@ palmier_register_test(palmier_services_key_moment_bounds_tests)
 add_executable(palmier_services_mcp_server_tests
     services/mcp_server_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/RemoteAccessGate.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/TlsTransport.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_mcp_server_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(palmier_services_mcp_server_tests PRIVATE
     Palmier::core
     Palmier::test_support)
+
+palmier_test_enable_openssl(palmier_services_mcp_server_tests)
 
 palmier_register_test(palmier_services_mcp_server_tests)
 
@@ -989,6 +1011,8 @@ palmier_register_test(palmier_services_agent_orchestrator_tests)
 add_executable(palmier_services_mcp_http_integration_tests
     services/mcp_http_integration_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/RemoteAccessGate.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/TlsTransport.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
@@ -1003,6 +1027,8 @@ target_include_directories(palmier_services_mcp_http_integration_tests PRIVATE
 target_link_libraries(palmier_services_mcp_http_integration_tests PRIVATE
     Palmier::core
     Palmier::test_support)
+
+palmier_test_enable_openssl(palmier_services_mcp_http_integration_tests)
 
 palmier_register_test(palmier_services_mcp_http_integration_tests)
 
@@ -1348,6 +1374,8 @@ add_executable(palmier_app_composition_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/RemoteAccessGate.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/TlsTransport.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/MentionResolver.cpp"
@@ -1358,6 +1386,8 @@ target_link_libraries(palmier_app_composition_tests PRIVATE
     Palmier::core
     Palmier::gpu
     Palmier::test_support)
+
+palmier_test_enable_openssl(palmier_app_composition_tests)
 
 palmier_register_test(palmier_app_composition_tests)
 
@@ -1774,13 +1804,35 @@ palmier_register_test(palmier_app_settings_tests)
 #
 # The registry depends only on Palmier::core (Result/Error) and the standard
 # library, so it is compiled directly into the test binary, following the
-# neighbouring service suites' isolated-source pattern. Tasks 5.5 and 6.5 add
-# services/mcp_session_property_test.cpp to this target (Properties 49, 51, 55,
-# 57).
+# neighbouring service suites' isolated-source pattern.
+#
+# services/mcp_session_property_test.cpp (task 5.5) joins the same target with the
+# universally quantified halves of the same behaviour: Property 49 — every issued
+# identifier is at least 32 opaque characters, no identifier is ever reissued for
+# the process lifetime (asserted across sequences of up to 200 creations
+# interleaved with closures, expiries and later requests, so distinctness holds for
+# identifiers whose sessions are long gone), and a live identifier is accepted on
+# every later request from the same client; and Property 51 — `tools/list` and
+# `tools/call` presented on an unrecognised, expired or uninitialized session are
+# refused with -32001 / -32002, create no edit command and leave the project
+# byte-identical. Property 51 drives the real stack, so this target also compiles
+# the protocol handler, the executor, the tool surface, the project session and the
+# project store; Palmier::core supplies the real TimelineEngine, and the binary
+# still links no libav*, libsecret or lcms2. Task 6.5 adds Properties 55 and 57
+# (the session limit and idle expiry) to this same file.
 # ---------------------------------------------------------------------------
 add_executable(palmier_services_mcp_session_tests
     services/mcp_session_registry_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp")
+    services/mcp_session_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_mcp_session_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(palmier_services_mcp_session_tests PRIVATE
@@ -1816,11 +1868,20 @@ palmier_register_test(palmier_services_mcp_session_tests)
 # the project store are compiled directly into the test binary alongside
 # Palmier::core (which supplies the real TimelineEngine and EditCommands), so the
 # binary links no libav*, libsecret or lcms2 — `tools/call` still runs the real
-# production execution policy. Task 5.4 adds
-# services/mcp_protocol_property_test.cpp to this target (Properties 43-48).
+# production execution policy.
+#
+# Task 5.4 adds services/mcp_protocol_property_test.cpp to the same target: the six
+# universally quantified protocol properties (43-48) — the JSON-RPC envelope
+# round-trip and the zero-byte notification answer (9.1, 9.13), the version
+# negotiation (9.2), the tools/list description of any registry contents (9.3), the
+# tools/call result shape (9.4), the untouched project and undo history behind a
+# failing tool (9.5), and the fault-code map with no edit command created (9.6-9.9)
+# — driven through the handler with no socket, over the same real session, tool
+# surface, executor and session registry.
 # ---------------------------------------------------------------------------
 add_executable(palmier_services_mcp_protocol_tests
     services/mcp_protocol_handler_test.cpp
+    services/mcp_protocol_property_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
@@ -1837,3 +1898,58 @@ target_link_libraries(palmier_services_mcp_protocol_tests PRIVATE
     Palmier::test_support)
 
 palmier_register_test(palmier_services_mcp_protocol_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Remote-access gate tests (tasks 6.2, 6.3; Requirements 10.1-10.5, 10.7-10.10,
+# 10.12, 10.13).
+#
+# Exercise services::RemoteAccessGate directly, with no socket, keeping the gate's
+# two responsibilities apart the way design.md D4 does:
+#
+#   * bind-time — absent configuration binds loopback 127.0.0.1:19789 (10.1); a
+#     non-loopback bind is the conjunction of a valid IPv4/IPv6 literal, a 32-512
+#     printable-ASCII bearer token and an explicit acknowledgement (10.2); any
+#     unmet prerequisite falls back to loopback while NAMING every prerequisite it
+#     missed and leaking no fragment of the token (10.3); configured TLS material
+#     must be readable, parseable and a matching pair, with the three conditions
+#     distinguished (10.12); and enabling without TLS still binds while offering
+#     exactly one plaintext warning (10.7).
+#   * per-request — a loopback-only binding admits everything, so the current
+#     default developer experience is preserved and no 401/403 is producible
+#     (10.10); a non-loopback binding refuses an absent, malformed or non-matching
+#     bearer token with 401 (10.4), an Origin outside the allow-list extended with
+#     the bound address and loopback hosts with 403 (10.5), and only the excess
+#     session-initiating request when the ceiling is reached (10.9); five
+#     consecutive 401s from one source inside a 60-second window block that source
+#     alone for 60 seconds (10.13); and every refusal is recorded with a UTC
+#     millisecond timestamp, the source address and a reason code, with no
+#     substring of the presented credential anywhere in the record (10.8).
+#
+# The clock is injected, so the window and block boundaries are driven by advancing
+# a variable rather than by sleeping. The TLS cases generate a real P-256 key and a
+# matching self-signed certificate when the TLS transport is compiled in, and
+# otherwise assert the documented degradation (configuring TLS is an unmet
+# prerequisite and the gate binds loopback) — the invariant that keeps a host
+# without OpenSSL configuring, building and testing unchanged.
+#
+# Following the neighbouring service suites' isolated-source pattern, the gate and
+# the TLS transport are compiled directly into the test binary alongside
+# Palmier::core, so it links no libav*, libsecret or lcms2. Task 6.4 adds
+# services/remote_access_gate_property_test.cpp (Properties 52-54, 56, 58) and task
+# 6.6 adds services/remote_access_http_integration_test.cpp to this target.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_remote_access_tests
+    services/remote_access_gate_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/RemoteAccessGate.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/TlsTransport.cpp")
+target_include_directories(palmier_services_remote_access_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_remote_access_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_test_enable_openssl(palmier_services_remote_access_tests)
+
+palmier_register_test(palmier_services_remote_access_tests)

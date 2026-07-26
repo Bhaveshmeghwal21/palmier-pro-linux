@@ -68,8 +68,8 @@ generated cases.
 
 ### Stage 1 — Core extensions (additive to `Palmier::core` / `Palmier::gpu`)
 
-- [ ] 1. Extend the domain core and GPU effect set
-  - [~] 1.1 Add `ChangeOrigin::Reset` and `TimelineEngine::reset`
+- [x] 1. Extend the domain core and GPU effect set
+  - [x] 1.1 Add `ChangeOrigin::Reset` and `TimelineEngine::reset`
     - `src/core/ChangeSet.hpp`: new `ChangeOrigin::Reset`
     - `src/core/TimelineEngine.{hpp,cpp}`: `[[nodiscard]] CommandResult reset(Project initial)`
       swaps the project value in place, clears the undo and redo stacks, and emits a `ChangeSet`
@@ -78,7 +78,7 @@ generated cases.
       history-clearing cases
     - _Requirements: 3.4, 4.3_
 
-  - [~] 1.2 Add track commands and promote `SetTransitionCommand` into the core
+  - [x] 1.2 Add track commands and promote `SetTransitionCommand` into the core
     - `src/core/EditCommands.{hpp,cpp}`: `AddTrackCommand` (appends after the last track of its
       kind, rejects beyond 64 per kind), `RemoveTrackCommand` (removes the track and its clips,
       preserving the relative order of the rest)
@@ -87,21 +87,21 @@ generated cases.
     - Extend `tests/core/edit_commands_test.cpp`
     - _Requirements: 3.3, 3.8, 3.10_
 
-  - [~] 1.3 Add the invert-colors effect (upstream PR 408, ported here)
+  - [x] 1.3 Add the invert-colors effect (upstream PR 408, ported here)
     - `src/core/Effect.hpp`: `EffectType::InvertColors`
     - `src/gpu/EffectKernels.{hpp,cpp}`: software reference branch in `applyEffectSoftware` plus the
       matching GLSL/SPIR-V kernel, wired through `gpu/Compositor`
     - Per-channel rule: R, G, B become 255 minus input; alpha is unchanged
     - _Requirements: 14.4_
 
-  - [ ]* 1.4 Write property tests for the invert-colors effect
+  - [x]* 1.4 Write property tests for the invert-colors effect
     - **Property 73: Invert-colors channel arithmetic** — **Validates: Requirements 14.4**
     - **Property 74: Invert-colors agrees between playback and export** —
       **Validates: Requirements 14.5**
     - File: `tests/gpu/invert_colors_property_test.cpp`; new target `palmier_gpu_invert_colors_tests`
     - _Requirements: 14.4, 14.5_
 
-  - [~] 1.5 Move the document schema to 1.1 with optional reads
+  - [x] 1.5 Move the document schema to 1.1 with optional reads
     - `src/core/SchemaVersion.{hpp,cpp}`: version 1.1
     - `src/services/ProjectStore.cpp`: read/write `effects[].type = "invert_colors"`,
       `tracks[].name` (default `""`) and `clipGroups` (default `[]`, reserved for upstream PR 397);
@@ -112,8 +112,8 @@ generated cases.
 
 ### Stage 2 — Project_Session (introduce only, no existing caller changes)
 
-- [ ] 2. Introduce the session abstraction
-  - [~] 2.1 Implement `services::ProjectSession`
+- [x] 2. Introduce the session abstraction
+  - [x] 2.1 Implement `services::ProjectSession`
     - `src/services/ProjectSession.{hpp,cpp}`: owns exactly one `TimelineEngine` and the
       `MediaManager` media library for its lifetime; `Status`, `engine()`, `mediaLibrary()`,
       `status()`, `modified()`, `revision()`, `documentPath()`, `createProject()`, `openProject()`,
@@ -124,7 +124,7 @@ generated cases.
       `TimelineEngine::reset` only on full success; they are not `EditCommand`s and are not undoable
     - _Requirements: 1.1, 1.10, 3.2, 3.4, 3.5, 3.8, 3.9, 4.6, 4.10_
 
-  - [~] 2.2 Move saving off the UI thread with a revision guard
+  - [x] 2.2 Move saving off the UI thread with a revision guard
     - Add the `services::RawFileWriter` injection seam used by the save-failure tests
     - `ProjectSession::requestSave(path, SaveCompletion)` captures `(Project snapshot, revision r)`,
       hands them to a `std::jthread` calling `ProjectSaveService::save`, and returns immediately;
@@ -134,7 +134,7 @@ generated cases.
     - This is the Linux adaptation of upstream PR 403
     - _Requirements: 4.1, 4.4, 4.6, 14.6, 14.7_
 
-  - [ ]* 2.3 Write persistence property tests for the session
+  - [x]* 2.3 Write persistence property tests for the session
     - **Property 16: Save/open round-trip preserves the project** — **Validates: Requirements 4.7**
     - **Property 17: Saving a loaded project is idempotent** — **Validates: Requirements 4.8**
     - **Property 19: Unmodified until the next tool-applied edit** — **Validates: Requirements 4.6**
@@ -143,7 +143,7 @@ generated cases.
       `TimelineEngine::reset` unit tests
     - _Requirements: 4.6, 4.7, 4.8_
 
-  - [ ]* 2.4 Write the save-failure property test
+  - [x]* 2.4 Write the save-failure property test
     - **Property 18: A failed save preserves the file and the modified state** —
       **Validates: Requirements 4.4, 14.7**
     - File: `tests/services/project_save_failure_property_test.cpp`, injecting the three failure
@@ -152,8 +152,8 @@ generated cases.
 
 ### Stage 3 — ToolSchema, then the session switch (the only atomic multi-file step)
 
-- [ ] 3. Unify argument specification, then retarget the tool surface at the session
-  - [~] 3.1 Implement `services::ToolSchema`
+- [x] 3. Unify argument specification, then retarget the tool surface at the session
+  - [x] 3.1 Implement `services::ToolSchema`
     - `src/services/ToolSchema.{hpp,cpp}`: `ArgSpec` (name, `JsonKind`, required, description,
       `minInt`/`maxInt`, `minNum`/`maxNum`, `minLength`/`maxLength`, `enumValues`, `uuid`),
       `ToolSchema::arg()`, `toJsonSchema()` rendering the draft-07 object schema, and `validate()`
@@ -162,7 +162,7 @@ generated cases.
       `palmier_services_tool_schema_tests`
     - _Requirements: 9.3, 9.9_
 
-  - [~] 3.2 Convert each existing tool to `ToolSchema`, one tool at a time
+  - [x] 3.2 Convert each existing tool to `ToolSchema`, one tool at a time
     - `src/services/ToolRegistry.{hpp,cpp}`: `Tool` gains `ToolSchema schema`, and `inputSchema`
       becomes `schema.toJsonSchema()`
     - For each of `timeline.read`, `add_clip`, `delete_clip`, `move_clip`, `trim_clip`,
@@ -174,13 +174,13 @@ generated cases.
       to the `add_effect` type enum
     - _Requirements: 3.1, 9.3, 9.9, 9.12, 14.4_
 
-  - [ ]* 3.3 Write the schema/handler conformance property test
+  - [x]* 3.3 Write the schema/handler conformance property test
     - **Property 50: The advertised schema and the handler agree** —
       **Validates: Requirements 9.12**
     - File: `tests/services/tool_schema_conformance_property_test.cpp`
     - _Requirements: 9.12_
 
-  - [~] 3.4 Switch the tool surface from `TimelineEngine&` to `ProjectSession&` in one commit
+  - [x] 3.4 Switch the tool surface from `TimelineEngine&` to `ProjectSession&` in one commit
     - `buildDefaultToolRegistry(ProjectSession&, ToolRegistryHooks)` replaces the
       `TimelineEngine&` form; every handler resolves the engine at invocation time
     - `src/services/McpToolExecutor.{hpp,cpp}`: `TimelineEngine*` → `ProjectSession*`,
@@ -195,8 +195,8 @@ generated cases.
 
 ### Stage 4 — New session and media tools
 
-- [ ] 4. Make the headless surface able to build a project
-  - [~] 4.1 Implement `services::MediaImportService`
+- [x] 4. Make the headless surface able to build a project
+  - [x] 4.1 Implement `services::MediaImportService`
     - `src/services/MediaImportService.{hpp,cpp}`: `ImportedAsset`, `import()`, `isPending()`;
       probe → validate → register exactly one asset; duplicate detection via
       `std::filesystem::weakly_canonical` against the library; 30 s probe/validation timeout;
@@ -204,7 +204,7 @@ generated cases.
       containers and codecs named in the error
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.7, 2.8, 2.9_
 
-  - [ ]* 4.2 Write the media-import property tests
+  - [x]* 4.2 Write the media-import property tests
     - **Property 4: Import result completeness and optional-field rule** —
       **Validates: Requirements 2.2**
     - **Property 5: Rejected imports name the format and leave the library unchanged** —
@@ -217,7 +217,7 @@ generated cases.
       `palmier_services_media_import_tests`
     - _Requirements: 2.2, 2.3, 2.4, 2.5, 2.6_
 
-  - [~] 4.3 Add the `project.*` tools
+  - [x] 4.3 Add the `project.*` tools
     - `project.create`, `project.open`, `project.save`, `project.info` in
       `src/services/ToolRegistry.cpp` with the `ToolSchema` argument sets and success-result fields
       given in the design's tool table; `ToolRegistryHooks` gains `createProject`, `openProject`,
@@ -226,17 +226,17 @@ generated cases.
       project is current
     - _Requirements: 3.1, 3.2, 3.4, 3.5, 3.8, 3.9_
 
-  - [~] 4.4 Add the `media.*` tools
+  - [x] 4.4 Add the `media.*` tools
     - `media.import` and `media.list` wired to `MediaImportService` through the new
       `importMedia` / `listMedia` hooks, returning the fields listed in the design's tool table
     - _Requirements: 2.2, 3.1_
 
-  - [~] 4.5 Add the track tools
+  - [x] 4.5 Add the track tools
     - `timeline.add_track` and `timeline.remove_track` backed by the stage-1 `AddTrackCommand` /
       `RemoveTrackCommand`, so both are undoable through the same path as every other edit
     - _Requirements: 3.1, 3.3, 3.8, 3.10_
 
-  - [ ]* 4.6 Write the project-tool property tests
+  - [x]* 4.6 Write the project-tool property tests
     - **Property 8: project.create carries exactly the requested settings** —
       **Validates: Requirements 3.2**
     - **Property 10: project.open reports the loaded project accurately** —
@@ -252,7 +252,7 @@ generated cases.
       `palmier_services_project_tools_tests`
     - _Requirements: 3.2, 3.4, 3.5, 3.7, 3.8, 3.9, 4.10_
 
-  - [ ]* 4.7 Write the track-tool property tests
+  - [x]* 4.7 Write the track-tool property tests
     - **Property 9: add_track appends after the last track of its kind** —
       **Validates: Requirements 3.3**
     - **Property 15: remove_track preserves the order of remaining tracks** —
@@ -260,14 +260,14 @@ generated cases.
     - File: `tests/services/timeline_track_tools_property_test.cpp`
     - _Requirements: 3.3, 3.10_
 
-  - [~] 4.8 Checkpoint
+  - [x] 4.8 Checkpoint
     - Ensure all tests pass, ask the user if questions arise. The headless sequence of Requirement
       3.6 is now runnable except for export.
 
 ### Stage 5 — MCP protocol layer
 
-- [ ] 5. Replace the bespoke envelope with JSON-RPC 2.0
-  - [~] 5.1 Implement `services::McpSessionRegistry`
+- [x] 5. Replace the bespoke envelope with JSON-RPC 2.0
+  - [x] 5.1 Implement `services::McpSessionRegistry`
     - `src/services/McpSessionRegistry.{hpp,cpp}`: `McpSessionRecord`, `create()` minting a 256-bit
       value from `std::random_device` as 64 lowercase hex characters, `touch()` returning
       `NotFound` / expired, `markInitialized()`, `expireIdle()`, `activeCount()`; options for
@@ -275,7 +275,7 @@ generated cases.
       in a never-pruned set so uniqueness holds for the process lifetime
     - _Requirements: 9.10, 9.11, 9.14, 9.15, 10.9, 10.11_
 
-  - [~] 5.2 Implement `services::McpProtocolHandler`
+  - [x] 5.2 Implement `services::McpProtocolHandler`
     - `src/services/McpProtocolHandler.{hpp,cpp}`: `McpRequestContext`, `McpReply`,
       `kSupportedProtocolVersions`, `handle()`; dispatch order parse (−32700) → envelope (−32600)
       → method (−32601) → session state → `ToolSchema::validate` (−32602) → execute
@@ -288,7 +288,7 @@ generated cases.
       invoker
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9, 9.10, 9.14, 9.15, 9.16_
 
-  - [~] 5.3 Extend the `McpServer` transport and update its contract test in the same commit
+  - [x] 5.3 Extend the `McpServer` transport and update its contract test in the same commit
     - `src/services/McpServer.{hpp,cpp}`: `start(const BindDecision&)`, header capture into
       `McpRequestContext`, `Mcp-Session-Id` emission, 202-with-empty-body support, a 1 MiB body cap
       yielding −32700, and delegation to `McpProtocolHandler`; `dispatch()` keeps its pure,
@@ -299,7 +299,7 @@ generated cases.
       `tools/list` entry
     - _Requirements: 9.1, 9.6, 9.10, 9.11, 10.1, 15.3_
 
-  - [ ]* 5.4 Write the JSON-RPC protocol property tests
+  - [x]* 5.4 Write the JSON-RPC protocol property tests
     - **Property 43: JSON-RPC envelope round-trip** — **Validates: Requirements 9.1, 9.13**
     - **Property 44: initialize negotiates a supported protocol version** —
       **Validates: Requirements 9.2**
@@ -313,7 +313,7 @@ generated cases.
       `palmier_services_mcp_protocol_tests`
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9, 9.13_
 
-  - [ ]* 5.5 Write the session-identity property tests
+  - [x]* 5.5 Write the session-identity property tests
     - **Property 49: Session identifiers are opaque and unique for the process lifetime** —
       **Validates: Requirements 9.11**
     - **Property 51: Session-state violations are rejected without touching the project** —
@@ -325,14 +325,14 @@ generated cases.
 ### Stage 6 — Remote access (defaults to loopback, so CI is green before `libssl-dev` lands)
 
 - [ ] 6. Add opt-in authenticated remote MCP access
-  - [~] 6.1 Implement `app::AppSettings` and extend `AppConfig`
+  - [x] 6.1 Implement `app::AppSettings` and extend `AppConfig`
     - `src/app/AppSettings.{hpp,cpp}`: precedence built-in defaults → `key=value` file at
       `$XDG_CONFIG_HOME/palmier-pro/config` → environment variables → command-line flags, producing
       an `AppConfig`
     - `AppConfig` gains `RemoteAccessConfig remote` and `MainThreadInvoker mainThreadInvoker`
     - _Requirements: 10.2, 16.3_
 
-  - [~] 6.2 Implement `services::RemoteAccessGate` and `RejectionLog`
+  - [x] 6.2 Implement `services::RemoteAccessGate` and `RejectionLog`
     - `src/services/RemoteAccessGate.{hpp,cpp}`: `RemoteAccessConfig`, `BindDecision`,
       `RejectionReason`, `Admission`, `validate()`, `admit()`, `noteSessionCreated/Closed()`
     - Bind-time: absent configuration yields `127.0.0.1:19789`; enabling requires a valid
@@ -348,7 +348,7 @@ generated cases.
       inside a 60 s window install a 60 s block for that source alone
     - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.7, 10.8, 10.9, 10.10, 10.12, 10.13_
 
-  - [~] 6.3 Add the optional TLS transport and the non-loopback bind
+  - [x] 6.3 Add the optional TLS transport and the non-loopback bind
     - `src/services/TlsTransport.{hpp,cpp}` on OpenSSL 3.x behind `PALMIER_ENABLE_OPENSSL`
       (default ON) with optional detection setting `PALMIER_HAVE_OPENSSL`; when the guard is absent,
       configuring TLS is an unmet prerequisite and the gate falls back to loopback
@@ -1045,3 +1045,31 @@ graph TD
 ```
 
 Checkpoint tasks (4.8, 9.9, 11.12, 12.13) are intentionally excluded from the wave schedule.
+
+
+---
+
+## Progress
+
+**Complete:** stages 0–5 in full, plus tasks 6.1, 6.2 and 6.3 of stage 6. Remaining in stage 6:
+6.4, 6.5 and 6.6 (the admission-gate, session-limit and TLS integration test tasks). Stages 7–12
+are untouched.
+
+**Test count:** 862 registered tests, all passing (`100% tests passed, 0 tests failed out of 862`,
+about 6 seconds of wall clock). A full clean rebuild of the same tree takes roughly 5 minutes on
+8 cores.
+
+**Verification configuration:** this sandbox has no Qt 6, so all verification runs with
+`-DPALMIER_BUILD_UI=OFF`. The headless surface — core, gpu, media, services and app composition —
+is fully covered, but nothing under `src/ui` is compiled or exercised here. Stage 11 (mounting the
+editor shell) will need Qt 6 restored, via `aqtinstall`, before it can be built or verified.
+
+**Working build tree:** `build-nogui/` is the configured tree used for all of the above:
+
+```
+cmake --build build-nogui -j$(nproc)
+ctest --test-dir build-nogui --output-on-failure
+```
+
+`build-nogui/`, `build/` and any other `build-*/` directory are local artifacts and are not
+committed.
