@@ -17,8 +17,16 @@
 //                 respective error, create no edit command, and leave the project
 //                 byte-identical (Requirements 9.14, 9.15).
 //
-// Tasks 6.5 add Properties 55 (session limit) and 57 (idle expiry) to this same
-// target.
+// Task 6.5 added two more to this same file and target:
+//
+//   Property 55 — a session-initiating request is accepted while the active count
+//                 is below the configured maximum, each request arriving at the
+//                 maximum is rejected naming the limit, and every established
+//                 session stays active and usable (Requirement 10.9).
+//   Property 57 — an established session is closed if and only if its idle
+//                 interval EXCEEDS the configured timeout, and a later request
+//                 carrying that identifier is told the session is no longer valid
+//                 (Requirement 10.11).
 //
 // Time is injected, never slept on
 // -------------------------------
@@ -45,7 +53,7 @@
 // is compared against a baseline deliberately raised to 1 by a legitimate edit
 // first, so a case cannot pass merely because nothing had ever been recorded.
 //
-// _Requirements: 9.11, 9.14, 9.15_
+// _Requirements: 9.11, 9.14, 9.15, 10.9, 10.11_
 
 #include "services/McpSessionRegistry.hpp"
 
@@ -533,6 +541,305 @@ RC_GTEST_PROP(McpSessionProperties, SessionStateViolationsAreRejectedWithoutTouc
     // No edit command was created, and the project is byte-identical.
     RC_ASSERT(stack.engine().undoDepth() == undoDepthBefore);
     RC_ASSERT(serializeProject(stack.engine().snapshot()) == projectBefore);
+}
+
+// ---------------------------------------------------------------------------
+// A registry on the manual clock (tasks 5.5 and 6.5)
+// ---------------------------------------------------------------------------
+
+/// `clock` must outlive the returned registry: `ManualClock::source()` captures it
+/// by pointer, so the caller keeps the clock as a named local and never moves it.
+std::unique_ptr<McpSessionRegistry> makeRegistry(ManualClock&         clock,
+                                                std::chrono::seconds timeout,
+                                                std::size_t          maxSessions) {
+    McpSessionRegistry::Options options;
+    options.maxSessions = maxSessions;
+    options.idleTimeout = timeout;
+    options.clock = clock.source();
+    return std::make_unique<McpSessionRegistry>(std::move(options));
+}
+
+// ===========================================================================
+// Feature: end-to-end-editor-integration, Property 55: The session limit rejects
+// only the excess request — for any configured maximum in 1-32 and any sequence of
+// session-initiating requests, requests are accepted while the active session count
+// is below the maximum, each request arriving at the maximum is rejected with an
+// error indicating the session limit was reached, and every established session
+// remains active and usable.
+//
+// Requirement 10.9: "THE Remote_Access_Gate SHALL limit concurrent MCP sessions to
+// a configurable maximum in the range 1 to 32 with a default of 8, and IF a
+// session-initiating request arrives while that maximum is reached, THEN THE
+// Remote_Access_Gate SHALL reject only that request with an error indicating the
+// session limit was reached and SHALL keep all established sessions active."
+//
+// "Only the excess" is what this property is really about, so a rejection is never
+// observed in isolation. After every refusal the case asserts three further things:
+// nothing was minted (`issuedCount` unmoved, so a refused request consumed no
+// identifier), every session established before the refusal is still counted
+// active, and every one of them still `touch()`es successfully — active *and*
+// usable, not merely present. Freeing a slot by closing a session is generated as
+// an operation of its own, and the loop is followed by a saturate → refuse → close →
+// accept coda, so the refusal is also shown not to be sticky: the limit refuses the
+// request, not the client.
+//
+// The idle timeout is pinned to its maximum and the clock never advances, so no
+// record can expire underneath this property — the only thing that removes a
+// session here is an explicit close, which keeps the model exact. Property 57 owns
+// expiry.
+//
+// **Validates: Requirements 10.9**
+// ===========================================================================
+RC_GTEST_PROP(McpSessionProperties, TheSessionLimitRejectsOnlyTheExcessRequest, ()) {
+    const auto maxSessions = *rc::gen::inRange<std::size_t>(1, 33);
+
+    ManualClock clock;
+    auto        registry = makeRegistry(clock, McpSessionRegistry::kMaxIdleTimeout, maxSessions);
+    RC_ASSERT(registry->maxSessions() == maxSessions);
+
+    // Model: the sessions currently established, in creation order.
+    std::vector<std::string> live;
+    std::set<std::string>    issued;
+
+    /// Every established session is still counted active and still usable.
+    const auto assertEstablishedStillUsable = [&registry](const std::vector<std::string>& ids) {
+        RC_ASSERT(registry->activeCount() == ids.size());
+        for (const std::string& id : ids) {
+            const Result<McpSessionRecord*> touched = registry->touch(id);
+            RC_ASSERT(touched.isOk());
+            RC_ASSERT(touched.value()->id == id);
+            RC_ASSERT(touched.value()->protocolVersion == "2025-06-18");
+        }
+    };
+
+    const int operations = *rc::gen::inRange(1, 65);
+    for (int step = 0; step < operations; ++step) {
+        // Closing an empty registry is not an operation, so an empty model always
+        // initiates; otherwise initiations outnumber closures 3:1, which keeps the
+        // count pressed against the maximum where the interesting cases live.
+        const bool initiate = live.empty() || *rc::gen::element(true, true, true, false);
+
+        if (initiate) {
+            const std::vector<std::string> established = live;
+            const std::size_t              issuedBefore = registry->issuedCount();
+            const std::string client = "203.0.113." + std::to_string(1 + (issued.size() % 250));
+
+            const Result<std::string> created = registry->create(client, "2025-06-18");
+
+            if (established.size() < maxSessions) {
+                // Below the maximum: accepted.
+                RC_ASSERT(created.isOk());
+                const std::string& id = created.value();
+                RC_ASSERT(McpSessionRegistry::isWellFormedId(id));
+                RC_ASSERT(issued.insert(id).second);
+                RC_ASSERT(registry->issuedCount() == issuedBefore + 1);
+                live.push_back(id);
+                RC_ASSERT(registry->activeCount() == live.size());
+                RC_ASSERT(live.size() <= maxSessions);
+            } else {
+                // At the maximum: this request, and only this request, is refused.
+                RC_ASSERT(created.isError());
+                RC_ASSERT(created.error().code() == ErrorCode::FailedPrecondition);
+                RC_ASSERT(contains(created.error().message(), "session limit"));
+                RC_ASSERT(contains(created.error().message(), std::to_string(maxSessions)));
+                // A refused request mints nothing, so it cannot consume an identifier.
+                RC_ASSERT(registry->issuedCount() == issuedBefore);
+                RC_ASSERT(registry->issuedCount() == issued.size());
+            }
+
+            // Established sessions survive an acceptance and a refusal alike.
+            assertEstablishedStillUsable(live);
+        } else {
+            const auto index = *rc::gen::inRange<std::size_t>(0, live.size());
+            const std::string closed = live[index];
+            RC_ASSERT(registry->close(closed));
+            live.erase(live.begin() + static_cast<std::ptrdiff_t>(index));
+            RC_ASSERT(registry->activeCount() == live.size());
+            // A closed identifier is gone but never reusable.
+            const Result<McpSessionRecord*> afterClose = registry->touch(closed);
+            RC_ASSERT(afterClose.isError());
+            RC_ASSERT(afterClose.error().code() == ErrorCode::NotFound);
+            RC_ASSERT(registry->wasIssued(closed));
+            assertEstablishedStillUsable(live);
+        }
+    }
+
+    // Coda: saturate, be refused, free exactly one slot, be accepted again — the
+    // limit refuses the excess request, not the client, and never permanently.
+    while (live.size() < maxSessions) {
+        const Result<std::string> created = registry->create("203.0.113.254", "2025-06-18");
+        RC_ASSERT(created.isOk());
+        RC_ASSERT(issued.insert(created.value()).second);
+        live.push_back(created.value());
+    }
+    RC_ASSERT(registry->activeCount() == maxSessions);
+
+    const Result<std::string> refused = registry->create("203.0.113.254", "2025-06-18");
+    RC_ASSERT(refused.isError());
+    RC_ASSERT(refused.error().code() == ErrorCode::FailedPrecondition);
+    RC_ASSERT(contains(refused.error().message(), "session limit"));
+    assertEstablishedStillUsable(live);
+
+    RC_ASSERT(registry->close(live.back()));
+    live.pop_back();
+    const Result<std::string> accepted = registry->create("203.0.113.254", "2025-06-18");
+    RC_ASSERT(accepted.isOk());
+    RC_ASSERT(issued.insert(accepted.value()).second);
+    live.push_back(accepted.value());
+    RC_ASSERT(registry->activeCount() == maxSessions);
+    assertEstablishedStillUsable(live);
+
+    // Nothing was minted outside the model, so no refusal ever silently created a
+    // session and no acceptance ever created two.
+    RC_ASSERT(registry->issuedCount() == issued.size());
+    RC_ASSERT(live.size() == maxSessions);
+}
+
+// ===========================================================================
+// Feature: end-to-end-editor-integration, Property 57: Idle sessions expire exactly
+// at their configured timeout — for any configured idle timeout in 30-3600 seconds
+// and any idle interval, an established session is closed with a recorded reason if
+// and only if the idle interval exceeds the timeout, and subsequent requests
+// carrying that identifier are rejected with an error indicating the session is no
+// longer valid.
+//
+// Requirement 10.11: "WHILE an established MCP session has received no request for
+// LONGER than the configured idle timeout, which is configurable in the range 30 to
+// 3600 seconds with a default of 300 seconds, THE Remote_Access_Gate SHALL close
+// that session, record the closure reason, and reject subsequent requests carrying
+// that session identifier with an error indicating the session is no longer valid."
+//
+// The boundary is STRICT, and that is the whole point of the property
+// -----------------------------------------------------------------
+// "no request for longer than the configured idle timeout" makes the comparison
+// `elapsed > timeout`, not `>=`: a session idle for EXACTLY the timeout has not yet
+// gone longer than it, so it is still alive; the first observation strictly past the
+// timeout closes it. An off-by-one in either direction is a real defect — closing at
+// exactly the timeout evicts a client that is still within its budget, and closing
+// only past `timeout + 1` keeps a session past its configured life — so this
+// property asserts BOTH sides of the boundary in every generated case, in the
+// `exact timeout` / `timeout + 1 second` block below, rather than relying on the
+// generator to happen to produce the two adjacent intervals.
+//
+// The generated interval is then drawn from a distribution deliberately clustered
+// on the boundary (0, 1, half, timeout - 1, timeout, timeout + 1, timeout + 2, twice
+// the timeout) unioned with a uniform draw across the whole range, and the expected
+// outcome is computed from the same strict rule, so aliveness is asserted as an
+// if-and-only-if rather than in one direction.
+//
+// Time is advanced by moving the injected clock, never by sleeping: a case that
+// straddles a 3600-second timeout costs no wall clock at all, and the boundary is
+// reproducible to the second, which sleeping could never guarantee.
+//
+// Both closure paths are exercised: the lazy one in `touch()`, whose error is what
+// the client is actually told, and the sweep in `expireIdle()`, whose return value is
+// the recorded closure count.
+//
+// **Validates: Requirements 10.11**
+// ===========================================================================
+RC_GTEST_PROP(McpSessionProperties, IdleSessionsExpireExactlyAtTheirConfiguredTimeout, ()) {
+    const std::int64_t         timeoutSeconds = *rc::gen::inRange<std::int64_t>(30, 3601);
+    const std::chrono::seconds timeout(timeoutSeconds);
+
+    // -----------------------------------------------------------------------
+    // The strict boundary, asserted on both sides in every case.
+    //
+    // Idle for exactly the timeout: NOT "longer than", so still established, and
+    // the sweep closes nothing. One further second: now longer than the timeout, so
+    // the session is closed and the client is told it is no longer valid.
+    // -----------------------------------------------------------------------
+    {
+        ManualClock clock;
+        auto        registry = makeRegistry(clock, timeout, 8);
+        RC_ASSERT(registry->idleTimeout() == timeout);
+
+        const Result<std::string> created = registry->create("203.0.113.7", "2025-06-18");
+        RC_ASSERT(created.isOk());
+        const std::string id = created.value();
+
+        clock.advance(timeout);  // elapsed == timeout exactly
+        RC_ASSERT(registry->expireIdle() == 0);
+        RC_ASSERT(registry->activeCount() == 1);
+
+        clock.advance(1s);  // elapsed == timeout + 1: strictly longer
+        RC_ASSERT(registry->expireIdle() == 1);  // closed, and the closure is counted
+        RC_ASSERT(registry->activeCount() == 0);
+
+        const Result<McpSessionRecord*> afterSweep = registry->touch(id);
+        RC_ASSERT(afterSweep.isError());
+        RC_ASSERT(afterSweep.error().code() == ErrorCode::NotFound);
+        RC_ASSERT(contains(afterSweep.error().message(), "initialize"));
+        RC_ASSERT(registry->wasIssued(id));
+    }
+
+    // -----------------------------------------------------------------------
+    // The same boundary through `touch()`, whose error is what a client presenting
+    // the identifier actually receives, over a generated idle interval.
+    // -----------------------------------------------------------------------
+    const auto idleSeconds = *rc::gen::oneOf(
+        rc::gen::element<std::int64_t>(0, 1, timeoutSeconds / 2, timeoutSeconds - 1,
+                                       timeoutSeconds, timeoutSeconds + 1, timeoutSeconds + 2,
+                                       2 * timeoutSeconds),
+        rc::gen::inRange<std::int64_t>(0, 2 * timeoutSeconds + 2));
+
+    // A generated mid-interval request, so the property also pins down what the idle
+    // interval is measured FROM: `lastSeen`, refreshed by every accepted request.
+    const bool         requestMidway = *rc::gen::element(true, false);
+    const std::int64_t firstGap =
+        requestMidway ? *rc::gen::inRange<std::int64_t>(0, idleSeconds + 1) : idleSeconds;
+    const std::int64_t secondGap = idleSeconds - firstGap;
+
+    ManualClock clock;
+    auto        registry = makeRegistry(clock, timeout, 8);
+
+    const Result<std::string> created = registry->create("203.0.113.9", "2025-06-18");
+    RC_ASSERT(created.isOk());
+    const std::string id = created.value();
+    registry->markInitialized(id);
+    RC_ASSERT(registry->activeCount() == 1);
+
+    /// Advance `gap` seconds since the session's last accepted request and assert the
+    /// outcome of presenting the identifier. Returns true while the session lives.
+    const auto observeAfter = [&](std::int64_t gap) {
+        clock.advance(std::chrono::seconds(gap));
+        const bool expected = gap > timeoutSeconds;  // strictly longer than the timeout
+
+        const Result<McpSessionRecord*> touched = registry->touch(id);
+        if (expected) {
+            // Closed, with the reason recorded in the error the client is given.
+            RC_ASSERT(touched.isError());
+            RC_ASSERT(touched.error().code() == ErrorCode::Timeout);
+            RC_ASSERT(contains(touched.error().message(), "no longer valid"));
+            RC_ASSERT(contains(touched.error().message(), std::to_string(timeoutSeconds)));
+            RC_ASSERT(registry->activeCount() == 0);
+            // Every subsequent request carrying it is rejected too, and the
+            // identifier is never handed out again.
+            const Result<McpSessionRecord*> again = registry->touch(id);
+            RC_ASSERT(again.isError());
+            RC_ASSERT(again.error().code() == ErrorCode::NotFound);
+            RC_ASSERT(contains(again.error().message(), "initialize"));
+            RC_ASSERT(registry->expireIdle() == 0);  // nothing left to close
+            RC_ASSERT(registry->wasIssued(id));
+            return false;
+        }
+
+        // Within budget: still established, still initialized, and the accepted
+        // request has refreshed the idle interval's origin.
+        RC_ASSERT(touched.isOk());
+        RC_ASSERT(touched.value()->id == id);
+        RC_ASSERT(touched.value()->initialized);
+        RC_ASSERT(touched.value()->lastSeen == clock.now());
+        RC_ASSERT(registry->activeCount() == 1);
+        RC_ASSERT(registry->expireIdle() == 0);
+        RC_ASSERT(registry->activeCount() == 1);
+        return true;
+    };
+
+    if (observeAfter(firstGap) && requestMidway) {
+        // The mid-interval request reset the clock, so the total elapsed time is
+        // irrelevant and only this second gap decides.
+        (void)observeAfter(secondGap);
+    }
 }
 
 }  // namespace

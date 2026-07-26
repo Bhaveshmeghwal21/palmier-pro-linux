@@ -278,7 +278,16 @@ BindDecision RemoteAccessGate::computeDecision() const {
     if (!unmet.empty()) {
         // Fail closed: still bind loopback, and carry the named prerequisites for
         // the startup error (Requirements 10.3, 10.12).
-        BindDecision decision = BindDecision::loopback(config_.port);
+        //
+        // The fallback port is 19789, NOT the configured port. Requirements 10.3 and
+        // 10.12 both say "SHALL bind `127.0.0.1` on port 19789 instead", and the
+        // configured port was chosen for the non-loopback endpoint the gate has just
+        // refused to bind — carrying it over would move the local endpoint an
+        // operator's existing loopback clients (documented at 19789) rely on, as a
+        // side effect of a rejected remote-access configuration. The not-enabled
+        // branch above is a different antecedent: there the configured port is the
+        // endpoint's own port (Requirements 10.1, 16.3) and is honoured.
+        BindDecision decision = BindDecision::loopback();
         decision.unmetPrerequisites = std::move(unmet);
         return decision;
     }

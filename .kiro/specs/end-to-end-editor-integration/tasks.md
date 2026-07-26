@@ -324,7 +324,7 @@ generated cases.
 
 ### Stage 6 — Remote access (defaults to loopback, so CI is green before `libssl-dev` lands)
 
-- [ ] 6. Add opt-in authenticated remote MCP access
+- [x] 6. Add opt-in authenticated remote MCP access
   - [x] 6.1 Implement `app::AppSettings` and extend `AppConfig`
     - `src/app/AppSettings.{hpp,cpp}`: precedence built-in defaults → `key=value` file at
       `$XDG_CONFIG_HOME/palmier-pro/config` → environment variables → command-line flags, producing
@@ -358,7 +358,7 @@ generated cases.
     - Construct the gate in `ApplicationComposition` with a `remoteAccessGate()` accessor
     - _Requirements: 10.6, 10.7, 10.12_
 
-  - [ ]* 6.4 Write the admission-gate property tests
+  - [x]* 6.4 Write the admission-gate property tests
     - **Property 52: A non-loopback bind requires all prerequisites, and failure falls back to
       loopback without leaking the token** — **Validates: Requirements 10.2, 10.3, 10.12**
     - **Property 53: Non-loopback admission is exactly the conjunction of its checks** —
@@ -373,7 +373,7 @@ generated cases.
       `palmier_services_remote_access_tests`
     - _Requirements: 10.2, 10.3, 10.4, 10.5, 10.8, 10.10, 10.12, 10.13_
 
-  - [ ]* 6.5 Write the session-limit and idle-expiry property tests
+  - [x]* 6.5 Write the session-limit and idle-expiry property tests
     - **Property 55: The session limit rejects only the excess request** —
       **Validates: Requirements 10.9**
     - **Property 57: Idle sessions expire exactly at their configured timeout** —
@@ -382,7 +382,7 @@ generated cases.
       injected clock
     - _Requirements: 10.9, 10.11_
 
-  - [ ]* 6.6 Write the remote-access and TLS integration tests
+  - [x]* 6.6 Write the remote-access and TLS integration tests
     - `tests/services/remote_access_http_integration_test.cpp`: bind a non-loopback-configured
       endpoint on a test-local address and issue three requests — no bearer token, a wrong token,
       the configured token — asserting 401, 401, 200 and a byte-identical project after each
@@ -1051,13 +1051,22 @@ Checkpoint tasks (4.8, 9.9, 11.12, 12.13) are intentionally excluded from the wa
 
 ## Progress
 
-**Complete:** stages 0–5 in full, plus tasks 6.1, 6.2 and 6.3 of stage 6. Remaining in stage 6:
-6.4, 6.5 and 6.6 (the admission-gate, session-limit and TLS integration test tasks). Stages 7–12
-are untouched.
+**Complete:** stages 0–6 in full — every task of 6.1 through 6.6 has landed, so stage 6 itself is
+closed. Stages 7–12 are untouched.
 
-**Test count:** 862 registered tests, all passing (`100% tests passed, 0 tests failed out of 862`,
-about 6 seconds of wall clock). A full clean rebuild of the same tree takes roughly 5 minutes on
-8 cores.
+**Test count:** 871 registered tests, all passing (`100% tests passed, 0 tests failed out of 871`,
+about 6 seconds of wall clock), confirmed over two consecutive runs of the same tree with no
+flakes — relevant because the remote-access integration tests bind real loopback sockets. A full
+clean rebuild takes roughly 5 minutes on 8 cores. Against the 862 recorded after task 6.3: tasks
+6.4 and 6.6 add 7 (Properties 52, 53, 54, 56 and 58, plus the two remote-access integration tests)
+and task 6.5 adds 2 (Properties 55 and 57 in `mcp_session_property_test.cpp`).
+
+**One requirement conflict resolved in task 6.4:** the loopback fallback of Requirements 10.3 and
+10.12 binds `127.0.0.1:19789`, not the configured port. `RemoteAccessGate::computeDecision` was
+carrying the configured port through the fallback; the requirement text and design Property 52 both
+name 19789, so the implementation was corrected. A configuration that never enabled remote access
+still honours its configured port (Requirements 10.1, 16.3) — that is a different antecedent, and
+both branches are asserted by Property 52.
 
 **Verification configuration:** this sandbox has no Qt 6, so all verification runs with
 `-DPALMIER_BUILD_UI=OFF`. The headless surface — core, gpu, media, services and app composition —

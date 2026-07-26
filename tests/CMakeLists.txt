@@ -1936,14 +1936,42 @@ palmier_register_test(palmier_services_mcp_protocol_tests)
 #
 # Following the neighbouring service suites' isolated-source pattern, the gate and
 # the TLS transport are compiled directly into the test binary alongside
-# Palmier::core, so it links no libav*, libsecret or lcms2. Task 6.4 adds
-# services/remote_access_gate_property_test.cpp (Properties 52-54, 56, 58) and task
-# 6.6 adds services/remote_access_http_integration_test.cpp to this target.
+# Palmier::core, so it links no libav*, libsecret or lcms2.
+#
+# Task 6.4 adds services/remote_access_gate_property_test.cpp — Properties 52
+# (the bind decision is the conjunction of every prerequisite), 53 (non-loopback
+# admission is the conjunction of its checks), 54 (every rejection is logged
+# without the credential), 56 (loopback-only preserves the current developer
+# experience) and 58 (the 401 rate limiter blocks the offending source alone), all
+# under an injected clock.
+#
+# Task 6.6 adds services/remote_access_http_integration_test.cpp, the only
+# remote-access test with a real socket in front of it: a non-loopback-configured
+# endpoint answering three genuine HTTP requests (no token, wrong token, the
+# configured token -> 401, 401, 200) with a byte-identical project after each
+# rejection, plus the HTTPS-succeeds / plaintext-rejected case of Requirement 10.6,
+# which skips with a recorded reason when PALMIER_HAVE_OPENSSL is absent. Both of
+# those exercise the gate through the transport and the JSON-RPC layer, so the MCP
+# server, protocol handler, session registry, tool surface and project session join
+# the compiled-in source list — the same set services/mcp_http_integration_test.cpp
+# uses.
 # ---------------------------------------------------------------------------
 add_executable(palmier_services_remote_access_tests
     services/remote_access_gate_test.cpp
+    services/remote_access_gate_property_test.cpp
+    services/remote_access_http_integration_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/RemoteAccessGate.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/TlsTransport.cpp")
+    "${PROJECT_SOURCE_DIR}/src/services/TlsTransport.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_remote_access_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(palmier_services_remote_access_tests PRIVATE
