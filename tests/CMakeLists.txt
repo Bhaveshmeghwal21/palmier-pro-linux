@@ -2396,6 +2396,65 @@ palmier_register_test(palmier_services_generative_backend_tests)
 
 
 
+# ---------------------------------------------------------------------------
+# Generation lifecycle property tests (task 10.6; Requirements 12.3, 12.9).
+# RapidCheck Property 65 (a successful generation is one undoable edit) and
+# Property 66 (invalid generation requests never reach the network).
+#
+# Both properties are stated about the ONE path a `generation.generate` call
+# takes, so the binary assembles that whole path out of product sources: the
+# McpToolExecutor's schema validation and rollback policy, the shared
+# ToolRegistry's declared `generation.generate` schema, the
+# GenerativeMediaCoordinator over the real AuthServiceGenerationGate and
+# GenerativeClientRunner, and task 10.5's backend registry with its hosted HTTPS
+# client. The ProjectSession supplies the one TimelineEngine (undo history) and
+# the one MediaManager (media library); the `.palmier` store supplies
+# serializeProject, which is how Property 65 compares the post-undo project to
+# the pre-generation one as a document rather than as spot checks.
+#
+# The injected GenerativeHttpTransport is the only route from any of it to a
+# socket, which is what makes "never reached the network" checkable: Property 66
+# installs a transport that fails the test when asked to send, and ${CMAKE_DL_LIBS}
+# is linked so the same dlsym(RTLD_NEXT, ...) socket interposers task 10.5's suite
+# uses can count socket/connect/getaddrinfo/sendto for the process rather than for
+# a mock. A non-vacuity case arms those counters and opens a real socket.
+#
+# Sources are listed explicitly (rather than linking Palmier::services) so this
+# binary needs neither libsecret, lcms2 nor Palmier::media, exactly as the other
+# service-layer test targets do.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_generative_lifecycle_tests
+    services/generative_lifecycle_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeBackendRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeHttpTransport.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_generative_lifecycle_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_generative_lifecycle_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+# dlsym(RTLD_NEXT, ...) for the socket interposers.
+if(CMAKE_DL_LIBS)
+    target_link_libraries(palmier_services_generative_lifecycle_tests PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+palmier_register_test(palmier_services_generative_lifecycle_tests)
+
+
+
 
 # ---------------------------------------------------------------------------
 # Export audio stream tests (task 9.3; Requirements 6.5, 6.11) — the encoder's

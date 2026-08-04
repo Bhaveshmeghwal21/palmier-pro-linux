@@ -666,7 +666,7 @@ generated cases.
       named and no library, clip or undo entry added
     - _Requirements: 12.1, 12.2, 12.4, 12.8_
 
-  - [ ]* 10.6 Write the generation lifecycle property tests
+  - [x]* 10.6 Write the generation lifecycle property tests
     - **Property 65: A successful generation is one undoable edit** —
       **Validates: Requirements 12.3**
     - **Property 66: Invalid generation requests never reach the network** —
@@ -1374,8 +1374,60 @@ honest default: it reports `Unsupported` per request without contacting anything
 `hosted` on such a build yields a descriptive error rather than a link failure. Supplying a real
 transport is a matter of implementing one interface, and nothing above it changes.
 
-So stage 10 now stands at **10.1–10.5 and 10.8 done, with 10.6, 10.7 and 10.9 remaining**, and the
-stage-10 parent stays open. Stages 11 and 12 are untouched.
+**10.6 is now done, so stage 10 stands at 10.1–10.6 and 10.8 done, with 10.7 and 10.9 remaining**,
+and the stage-10 parent stays open. 10.6 added
+`tests/services/generative_lifecycle_property_test.cpp` on the new
+`palmier_services_generative_lifecycle_tests` target: Property 65 (a successful generation is one
+undoable edit, Requirement 12.3) and Property 66 (invalid generation requests never reach the
+network, Requirement 12.9), plus two non-vacuity cases —
+`GenerativeLifecycleNetworkSeam.TheInterposersObserveARealSocketCall`, which arms the
+`dlsym(RTLD_NEXT, …)` `socket`/`connect`/`getaddrinfo`/`sendto` counters and opens a real socket so
+the zero Property 66 asserts cannot be vacuous, and
+`GenerativeLifecycleNetworkSeam.TheGenerateToolIsTheOneRoutedEntryPoint`. The target assembles the
+whole `generation.generate` path out of product sources — `McpToolExecutor`'s schema validation and
+rollback policy, the shared `ToolRegistry`'s declared schema, `GenerativeMediaCoordinator` over the
+real `AuthServiceGenerationGate` and `GenerativeClientRunner`, and 10.5's backend registry with its
+hosted HTTPS client — with the injected `GenerativeHttpTransport` as the only route to a socket, and
+`ProjectSession` supplying the one `TimelineEngine` and `MediaManager` so Property 65 can compare the
+post-undo project to the pre-generation one as a serialized document rather than by spot checks.
+
+**Two product gaps were found while writing 10.6, and both are source defects rather than test
+problems. Neither is fixed.** They are the most valuable output of this round and must not be lost.
+
+1. **`src/app/main.cpp` never wires `AppSettings`.** It constructs `ApplicationComposition` with a
+   default-constructed `AppConfig` and never calls `AppSettings::load()` or
+   `AppSettings::fromArgv()`. So the shipped `palmier-pro` executable **ignores the configuration
+   file, the environment and the command line entirely**, and remote access cannot be enabled
+   through the executable at all. Requirement 16.3's configuration surface is implemented and
+   enforced — and tested at the `AppSettings` / `ApplicationComposition` level — but **unreachable
+   from the binary a user actually runs.** Every `AppConfig` seam the tests drive (including
+   `featureCredentials`, `generativeBackendId` and the remote-access fields) is therefore
+   test-only in practice. The fix is in `main.cpp`, not in the settings layer.
+
+2. **Requirement 12.9 is not fully satisfied for an unknown `trackId`.** A syntactically valid but
+   **absent** track identifier passes the declared schema, and
+   `GenerativeMediaCoordinator::generateAndPlace` **runs the generation and calls
+   `library_.importAsset()` before `TimelineEnginePlacer::place` ever looks the track up**. So such
+   a request *does* reach the network, and it leaves a media-library entry behind that the
+   executor's rollback does not remove — rollback undoes engine commands only, and the import is
+   not one. Property 66 **documents this as an explicit exclusion rather than asserting it**, which
+   is why the property passes; the exclusion is the honest record of a real gap, not a weakened
+   test. Closing it needs a source change moving track-existence validation ahead of job
+   submission, after which Property 66's exclusion should be removed and the case asserted.
+
+**Stage 12 is now partly started, and 12.6 is half done — it stays `[~]` and must not be ticked.**
+Three of its six documents are checked in: `docs/BUILD.md` (the clean-checkout
+configure/build/test/launch sequence, the per-distribution native package names, every `PALMIER_*`
+option with default and effect, and the minimum host specification), `docs/MCP_CLIENTS.md` (the
+Claude Code, Codex and Cursor client entries at `127.0.0.1:19789` and the Requirement 3.1 tool-list
+confirmation) and `docs/REMOTE_ACCESS.md` (bind address, ≥32-character token generation, the
+acknowledgement flag, TLS material and the tunnel alternative, the Origin allow-list, ≤32 maximum
+sessions, the ≤3600 s idle timeout and the unencrypted-traffic warning). **Still outstanding on
+12.6: `docs/TOOLS.md`, `docs/HARDWARE_ENCODE.md`, `docs/QUICKSTART.md`, and the `README.md` trim**
+to an overview plus links into `docs/` so each checked name lives in exactly one file. Note that
+task 12.7's consistency checker reads `docs/BUILD.md` and `docs/TOOLS.md`, so the missing
+`TOOLS.md` blocks half of 12.7 as well. The stage-12 parent stays open; 12.1 and 12.2 are done,
+12.6 and 12.7 are partial, and the rest of stage 12 is untouched. Stage 11 is untouched.
 
 **Tasks 12.1 and 12.2 are done: `docs/UPSTREAM_PARITY.md` and `docs/PORT_BACKLOG.md` are checked in.**
 The parity report carries the 22 tool-category rows of Requirement 13.1 and the 12 capability-area
@@ -1441,10 +1493,27 @@ Rather than drop the mandated phrases, the missing tool surface was added:
 `edit.undo` and `edit.redo` expose the already-existing history stack through the tool surface and
 add no new edit semantics.
 
-**Test count (authoritative): 1106 registered tests, 100% passing in both trees.**
-`100% tests passed, 0 tests failed out of 1106` in `build-nogui` and the identical
-`100% tests passed, 0 tests failed out of 1106` in `build-ui` under `xvfb-run -a`, about 10-12
-seconds of wall clock each. **The +34 over the previous 1072 is task 10.5**: 27 on the new
+**Test count (authoritative): 1110 registered tests, `100% tests passed, 0 tests failed out of 1110`
+in `build-nogui`, about 18 seconds of wall clock.** The two expected skips below are unchanged.
+**The +4 over 1106 is task 10.6**: Properties 65 and 66 plus the two
+`GenerativeLifecycleNetworkSeam` non-vacuity cases, all four on the new
+`palmier_services_generative_lifecycle_tests` target.
+
+> ### ⚠️ 1110 was verified in `build-nogui` only — `build-ui` could not be configured this round
+>
+> **Qt 6.8.3 was wiped from this host again and was deliberately not reinstalled**, so the
+> `build-ui` tree could not be configured and the count was **not** cross-checked there. This is a
+> genuine absence and not the `WrapOpenGL` false negative the warning above describes: `qmake6` is
+> not on `PATH` **and** `/usr/local/lib/cmake/Qt6` does not exist, and a from-scratch configure
+> stops at `cannot configure — missing required dependencies: Qt 6 (>= 6.2, components: Core Gui
+> Quick Qml Widgets)`. FFmpeg survived (libavcodec **60.31.102** under `/usr/local`, restored from
+> `/projects/sandbox/.ffmpeg-src/ffmpeg-6.1.2` by `make install` + `ldconfig`), and the
+> `build-nogui` cache was confirmed to postdate that restore and to point at files that are really
+> on disk, so the 1110 is a real build and not a stub one. **`build-ui` must be reconfigured and the
+> count re-confirmed there once Qt is restored**, per the Qt steps in the restore recipe below.
+> Because every test target is built in both trees, the expected `build-ui` count is also 1110.
+
+The preceding **+34 over the previous 1072 was task 10.5**: 27 on the new
 `palmier_services_generative_backend_tests` target (the id set, the four selection outcomes, the
 offline stub's rejection code / message / timing / zero-socket proof, request construction and
 credential placement for both schemes, the read-at-request-time credential policy, the BYOK-vs-
@@ -1488,7 +1557,8 @@ configuration problem rather than a UI-only test.
    and for what remains unverified.
 
 Earlier runs in this session reported **975** and **1029** from two concurrent agents. Of those two,
-**1029 was the correct number** (it is now 1106, after 9.5, 9.6, 10.3, 10.4, 9.7, 10.8 and 10.5); 975 was a tree in
+**1029 was the correct number** (it is now 1110, after 9.5, 9.6, 10.3, 10.4, 9.7, 10.8, 10.5 and
+10.6); 975 was a tree in
 which the FFmpeg paths had compiled as stubs against a stale cache, as described in the warning
 above. The lesson stands: a count *below* the authoritative number is a stub build, not a
 regression, and calls for a from-scratch reconfigure rather than acceptance.
@@ -1552,6 +1622,8 @@ lcms2 2.19, libsecret-1 0.21.4, OpenSSL 3.5.5, libpipewire-0.3 1.2.7, ALSA 1.2.7
 Vulkan (`/lib64/libvulkan.so`) and — for `build-ui` — Qt 6.8.3 at
 `/usr/local/lib/cmake/Qt6`. The three vendor hardware codec paths (VAAPI, NVENC, QSV) are
 `disabled (SDK not found)`; that is expected on this host and encoding falls back to software.
+**As of the 10.6 verification run the Qt 6.8.3 half of that configuration is no longer present**
+(see the `build-ui` blockquote above); everything else in the list was re-confirmed.
 
 **The stack was lost again before the 9.7/10.8 verification run, and this time `/usr/local` was
 completely empty** — no FFmpeg, no Qt, no shaderc. Both cheap gates failed up front
@@ -1589,6 +1661,16 @@ dnf install -y alsa-lib-devel pipewire-devel \
     xcb-util-renderutil-devel xcb-util-wm-devel xcb-util-cursor-devel \
     libXrender-devel libXi-devel mesa-dri-drivers xorg-x11-server-Xvfb
 ```
+
+**Shortcut for the FFmpeg half:** an already-configured, already-built FFmpeg 6.1.2 tree survives at
+`/projects/sandbox/.ffmpeg-src/ffmpeg-6.1.2` (outside the repository, so it is not affected by
+`/usr/local` being wiped). When only FFmpeg is missing, `make install` in that directory followed by
+`ldconfig` restores libavcodec 60.31.102 in seconds and skips the download, `dnf install xz nasm`,
+`./configure` and the full compile. **Then verify with
+`PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --exists libavcodec` and delete/reconfigure any
+build tree whose `CMakeCache.txt` predates the restore** — a cache that predates it will report
+`FFMPEG_FOUND=1` against files that were absent when it was written. Checking that the cache's mtime
+postdates `/usr/local/lib/libavcodec.so` is a quick way to tell whether a full reconfigure is needed.
 
 The `ldconfig` line is required, otherwise the Qt libraries under `/usr/local/lib` are installed but
 not loadable at runtime. The **OpenGL/GLX packages are required for `find_package(Qt6)` to succeed
