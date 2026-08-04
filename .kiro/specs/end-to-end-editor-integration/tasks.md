@@ -800,7 +800,7 @@ generated cases.
 ### Stage 12 — Documents, suite hygiene, CI
 
 - [ ] 12. Author the checked-in document set and close out verification
-  - [~] 12.1 Author `docs/UPSTREAM_PARITY.md`
+  - [x] 12.1 Author `docs/UPSTREAM_PARITY.md`
     - Provenance block: `upstream-repository: https://github.com/palmier-io/palmier-pro`,
       `upstream-ref`, `linux-ref`, `comparison-date: YYYY-MM-DD`, plus the three status definitions
       stated in reachability terms
@@ -812,7 +812,7 @@ generated cases.
       `must` before `should` before `later`
     - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.7, 13.9_
 
-  - [~] 12.2 Author `docs/PORT_BACKLOG.md` for all ten identified upstream changes
+  - [x] 12.2 Author `docs/PORT_BACKLOG.md` for all ten identified upstream changes
     - Provenance block with `upstream-repository`, `upstream-range` and
       `window: 2026-06-25..2026-07-25`; one entry per change carrying identifier, ≤200-character
       summary, one disposition of `port`/`adapt`/`not-applicable`, a rationale of at least one
@@ -1376,6 +1376,44 @@ transport is a matter of implementing one interface, and nothing above it change
 
 So stage 10 now stands at **10.1–10.5 and 10.8 done, with 10.6, 10.7 and 10.9 remaining**, and the
 stage-10 parent stays open. Stages 11 and 12 are untouched.
+
+**Tasks 12.1 and 12.2 are done: `docs/UPSTREAM_PARITY.md` and `docs/PORT_BACKLOG.md` are checked in.**
+The parity report carries the 22 tool-category rows of Requirement 13.1 and the 12 capability-area
+rows of Requirement 13.2 — both name sets verified identical to the requirement text, in the same
+order — with a build-order projection holding exactly the 31 `absent` and `partial` entries
+(2 `must`, 19 `should`, 10 `later`), and `multicam` deliberately appearing in both tables as two
+distinct entries identified by the (table, name) pair. The backlog carries the ten Requirement 14.2
+changes with unique identifiers, and a `given`/`when`/`then` `check:` block on each of the nine
+`port`/`adapt` entries and on none of the `not-applicable` one (PR 401), per Requirement 14.3. Both
+documents were audited mechanically against every one of those rules before being committed and **no
+defect was found**, which matters because task 12.3's `ReportParser` will re-check them in the suite.
+
+> ### ⚠️ Follow-up owed on the parity report: the two generation rows are now stale
+>
+> `docs/UPSTREAM_PARITY.md` scores **`generate` (tool category)** and **`generation and upscaling`
+> (capability area)** as `absent`, and both scores were correct *when written* but are **not correct
+> now**. The report's `linux-ref` is `16274d51b77ac9ffcf8db49592d2a90411610ab5`, the commit before
+> task 10.5; at that ref the only installed generative backend was the private offline stub in
+> `ApplicationComposition.cpp`, which refused `submit`, `poll` and `fetchResult`, so no generation
+> operation was reachable and `absent` was the honest reading. Task 10.5 was uncommitted
+> working-tree state at the time and was deliberately excluded for that reason — the report's own
+> "Known limits" section already predicts this exact re-scoring.
+>
+> **10.5 has now landed as `f0a7925`, so both rows should move from `absent` to `partial`:** the
+> request path and backend selection are reachable — `services::GenerativeBackendRegistry`,
+> `selectGenerativeBackend()`, the hosted and BYOK HTTPS clients and the `generation.generate` hook
+> that asks the selected backend for `unmetPrecondition()` — while the model catalog (PR 406), the
+> upscale mode (PR 396) and audio generation (PR 395) all remain absent and the **offline default
+> still completes no generation**. Because at least one but not every operation is reachable, that
+> is precisely the report's own definition of `partial`.
+>
+> **`linux-ref` in the document is therefore stale** and must be advanced when the rows are
+> re-scored, along with the `linux-components` and `rationale` cells of both rows, the two rows'
+> entries in the build-order projection (their priority stays `should`, so their position does not
+> move, but the status counts in the prose beneath the list — currently 3 `present` / 11 `partial` /
+> 20 `absent` — become 3 / 13 / 18), and the "Known limits" bullet that describes the pending
+> re-score. The documents were **not** edited when 12.1/12.2 were committed; this is recorded as
+> owed work rather than done work.
 
 **One source fix came out of task 10.4: `MentionResolver`'s two refusal messages now state the
 number of matching assets.** Requirement 11.7 asks for "an error that names the mention text **and
