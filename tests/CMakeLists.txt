@@ -818,6 +818,13 @@ palmier_register_test(palmier_gpu_graceful_degradation_property_tests)
 # Links Palmier::media (which brings in Palmier::gpu and Palmier::core) alongside
 # the shared GoogleTest/RapidCheck support target.
 # ---------------------------------------------------------------------------
+# Task 9.6 extends the same file with Property 38 (two successive exports are
+# identical; Requirement 7.8): two exports of one generated timeline over all four
+# containers, all three codecs and both encoder selections, compared trace against
+# trace. The hardware selection is reachable here because gpu::GpuCaps and
+# gpu::BridgeAvailability are values on EncodeSpec, so no GPU or vendor SDK is
+# needed; the trace length is asserted against plannedFrameCount first, so two empty
+# traces cannot compare equal into a pass.
 add_executable(palmier_media_export_ordering_property_tests
     media_export_ordering_property_test.cpp)
 target_link_libraries(palmier_media_export_ordering_property_tests PRIVATE
@@ -1089,9 +1096,18 @@ palmier_register_test(palmier_services_edit_equivalence_property_tests)
 # library links. (Task 16.3 adds the dedicated mention-resolution + auth-gating
 # suite under its own target.)
 # ---------------------------------------------------------------------------
+# Task 10.4 extends this target with `services/mention_resolver_property_test.cpp`
+# — design.md Property 63 (Requirements 11.6, 11.7), the quantified form of the
+# two arms the unit half pins by example. It drives the resolver through the real
+# MessagePreprocessor seam, the real AgentOrchestrator, the REAL
+# OfflineIntentInterpreter (hence the added source) and the real tool surface, so
+# `OfflineIntentInterpreter.cpp` joins the isolated-source list. No new target: the
+# design fixes Property 63 on this one.
 add_executable(palmier_services_mention_resolver_tests
     services/mention_resolver_test.cpp
+    services/mention_resolver_property_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/MentionResolver.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/OfflineIntentInterpreter.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
@@ -2396,10 +2412,78 @@ palmier_register_test(palmier_media_export_audio_tests)
 # an injected virtual-time probe awaiter. Links Palmier::services (which brings in
 # Palmier::media, Palmier::gpu and Palmier::core).
 # ---------------------------------------------------------------------------
+# Task 9.5 adds services/export_coordinator_property_test.cpp to the SAME target
+# (Properties 33, 34, 35, 36, 37 and 39; Requirements 6.10, 7.1-7.7, 7.9, 7.11,
+# 8.11). The properties reuse the whole arrangement above — real files at absolute
+# per-CASE paths containing getpid(), deterministic cancellation and failure driven
+# from inside the backend, and the injected clock for the cadence — and add the
+# anti-vacuity checks that matter for properties about absence: the backend records
+# that the file really existed on disk before cleanup, Property 35 recovers the
+# frame count from the finished file's own bytes, Property 39 compares a
+# pre-existing destination's bytes, and Property 33 compares a SERIALIZED project
+# snapshot across an edit made while the export runs.
 add_executable(palmier_services_export_coordinator_tests
-    services/export_coordinator_test.cpp)
+    services/export_coordinator_test.cpp
+    services/export_coordinator_property_test.cpp)
 target_link_libraries(palmier_services_export_coordinator_tests PRIVATE
     Palmier::services
     Palmier::test_support)
 
 palmier_register_test(palmier_services_export_coordinator_tests)
+
+
+
+
+
+# ---------------------------------------------------------------------------
+# Agent-equivalence property test (task 10.3; design.md Property 62;
+# Requirements 11.5, 11.10).
+#
+# One property, on its own target because it needs a collaborator no other agent
+# suite links: `AgentOrchestrator` (and therefore `AuthenticationService` and
+# `ByokCredentialManager`, which its `AuthServiceAgentGate` pulls in) on top of the
+# offline interpreter, the tool surface, the executor and the session. It builds
+# TWO real `ProjectSession`s per case from one `Project` value, drives one through
+# interpreter -> orchestrator -> executor and the other straight into
+# `McpToolExecutor::executeTool` with the same arguments, and compares the results
+# byte for byte over `serializeProject` — hence `ProjectStore.cpp`, whose
+# `serializeProject` is the canonical `.palmier` text the comparison is made on.
+#
+# Half the generated cases sabotage the EDITOR CONTEXT (a selection naming no
+# clip, a playhead past the clip end, track ordinals resolving to unknown
+# identifiers, an import of an absent file, an export or a save into a directory
+# that does not exist) so the failure arm of Property 62 — "both paths leave the
+# project byte-identical and the undo depth unchanged" — is reached about as often
+# as the success arm.
+#
+# No sleeping, no injected clock, no FFmpeg, no GPU, no Qt and no sound device.
+# `media.import` and `timeline.export` are hook-backed in the real surface and get
+# minimal in-test hooks; the import hook draws its asset ids from a per-case map
+# shared by both sessions so the same import yields the same asset id on both
+# sides. Every write-performing tool is only ever handed an absolute path inside a
+# per-case scratch directory whose name carries the process id.
+#
+# Sources are listed explicitly (rather than linking Palmier::services) so this
+# binary needs neither libsecret, lcms2 nor Palmier::media, exactly as the other
+# service-layer test targets do.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_agent_equivalence_tests
+    services/agent_equivalence_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/OfflineIntentInterpreter.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
+target_include_directories(palmier_services_agent_equivalence_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_agent_equivalence_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_agent_equivalence_tests)

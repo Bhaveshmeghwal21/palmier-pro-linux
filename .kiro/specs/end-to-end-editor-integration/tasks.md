@@ -570,7 +570,7 @@ generated cases.
       byte-for-byte
     - _Requirements: 6.10, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.9, 7.10, 7.11, 8.11_
 
-  - [ ]* 9.5 Write the export-coordinator property tests
+  - [x]* 9.5 Write the export-coordinator property tests
     - **Property 33: Export runs exactly the requested parameters and never touches the project** —
       **Validates: Requirements 7.1, 7.2**
     - **Property 34: Progress is monotonic, bounded and timely** — **Validates: Requirements 7.3**
@@ -585,7 +585,7 @@ generated cases.
       `palmier_services_export_coordinator_tests`
     - _Requirements: 6.10, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.9, 7.11, 8.11_
 
-  - [ ]* 9.6 Extend the export determinism property test
+  - [x]* 9.6 Extend the export determinism property test
     - **Property 38: Two successive exports are identical** — **Validates: Requirements 7.8**
     - File: `tests/media/media_export_ordering_property_test.cpp` (extends the existing test and its
       `palmier_media_export_ordering_property_tests` target)
@@ -639,13 +639,13 @@ generated cases.
       `palmier_services_agent_offline_tests`
     - _Requirements: 11.2, 11.3, 11.4, 11.9_
 
-  - [ ]* 10.3 Write the agent-equivalence property test
+  - [x]* 10.3 Write the agent-equivalence property test
     - **Property 62: The agent path equals a direct tool invocation** —
       **Validates: Requirements 11.5, 11.10**
     - File: `tests/services/agent_equivalence_property_test.cpp`
     - _Requirements: 11.5, 11.10_
 
-  - [ ]* 10.4 Write the mention-resolution property test
+  - [x]* 10.4 Write the mention-resolution property test
     - **Property 63: A unique @mention is substituted; a non-unique one is refused** —
       **Validates: Requirements 11.6, 11.7**
     - File: `tests/services/mention_resolver_property_test.cpp` (extends the existing
@@ -1102,7 +1102,7 @@ reports each sink.
 > avoided** — the working tree is the source of truth. A future push may need
 > `--no-thin`, or a fresh clone with this commit replayed on top.
 
-**Stage 9 in progress:** 9.1–9.4 are done. 9.1 and 9.2 delivered
+**Stage 9 in progress:** 9.1–9.6 are done. 9.1 and 9.2 delivered
 `media::EncoderSelector` with the `hardware(...)` / `software(codec, reason)` constructor pair (so
 no selection can report both hardware use and software fallback), the 3000 ms probe deadline, the
 single initialization retry before the documented software fallback, and
@@ -1114,17 +1114,43 @@ both streams and writes the trailer, and `ExportEngine` gained the `AudioRangeRe
 `validate()` that runs before any file is created, one worker thread per export over a
 **value-copy `Project` snapshot**, the `OutputGuard` scope guard that calls `finish()` best-effort
 then removes the output path on any failure or cancellation, and progress marshalled to the main
-thread. **9.5–9.9 remain**, so the stage-9 parent stays open.
+thread. 9.5 added `tests/services/export_coordinator_property_test.cpp` — Properties 33, 34, 35, 36,
+37 and 39 — as a **second source on the existing `palmier_services_export_coordinator_tests`
+target**, so the unit tests of 9.4 and the properties of 9.5 link one binary. 9.6 appended
+Property 38 (two successive exports are identical) to
+`tests/media_export_ordering_property_test.cpp`, comparing frame count, per-frame presentation
+timestamps and the bound encoder route across four containers, three codecs and both encoder
+selections, from a **test-owned trace** rather than from anything the code under test reports about
+itself. **9.7, 9.8 and 9.9 remain**, so the stage-9 parent stays open.
 
-**Stage 10 in progress:** 10.1 and 10.2 are done. 10.1 added
+**Stage 10 in progress:** 10.1–10.4 are done. 10.1 added
 `src/services/OfflineIntentInterpreter.{hpp,cpp}` (the 12 documented phrase patterns, matched
 case-insensitively on the whitespace-trimmed utterance, no network request) and
 `src/services/AgentInterpreterRegistry.{hpp,cpp}` (ids `offline` default, `hosted`, `byok`);
 `makeUnconfiguredInterpreter()` was removed, and `AppConfig` / `AppSettings` /
 `ApplicationComposition` gained `agentInterpreterId` and `startupErrors()`. 10.2 added
 `tests/services/offline_interpreter_property_test.cpp` covering Properties 59, 60, 61 and 64 on
-`palmier_services_agent_offline_tests`. **10.3–10.9 remain**, so the stage-10 parent stays open.
+`palmier_services_agent_offline_tests`. 10.3 added
+`tests/services/agent_equivalence_property_test.cpp` (Property 62) on the new
+`palmier_services_agent_equivalence_tests` target: every documented phrase is driven once through
+the agent path and once as a direct tool invocation, and the two resulting project states are
+compared through a canonicalizing fingerprint that hides freshly generated identifier values and
+nothing else, with the sabotage modes asserted to fail and roll back on **both** paths. 10.4 added
+`tests/services/mention_resolver_property_test.cpp` (Property 63): a unique `@mention` is
+substituted and submitted, while an unmatched or ambiguous one is refused with no tool invoked and
+no project change. **10.5–10.9 remain**, so the stage-10 parent stays open.
 Stages 11 and 12 are untouched.
+
+**One source fix came out of task 10.4: `MentionResolver`'s two refusal messages now state the
+number of matching assets.** Requirement 11.7 asks for "an error that names the mention text **and
+the number of matching assets**", and the previous wording named only the mention — the count was at
+best implied by the length of the candidate list, and on the unmatched branch was not conveyed at
+all. `toPreprocessorResult` now writes `"… was not found: @name (0 matching assets in the project
+media library)"` and `"… matches more than one media item (N matching assets); please select one:
+…"`, with `N` taken from `resolution.candidates.size()`. The change is **additive**: the status
+classification, both error codes (`NotFound`, `FailedPrecondition`) and the candidate list are
+untouched, and the substrings the pre-existing `tests/services/mention_resolver_test.cpp` asserts on
+("not found", "select") were deliberately preserved, so no existing assertion had to be edited.
 
 **Three new tools were added by task 10.1, and why.** Four of the twelve phrases mandated by
 Requirement 11.1 had no tool to map to, and Property 60 requires every interpreter output to be
@@ -1141,12 +1167,13 @@ Rather than drop the mandated phrases, the missing tool surface was added:
 `edit.undo` and `edit.redo` expose the already-existing history stack through the tool surface and
 add no new edit semantics.
 
-**Test count (authoritative): 1029 registered tests, 100% passing in both trees.**
-`100% tests passed, 0 tests failed out of 1029` in `build-nogui` and the identical
-`100% tests passed, 0 tests failed out of 1029` in `build-ui` under `xvfb-run -a`, about 11 seconds
-of wall clock each. Confirmed over **three** consecutive `build-nogui` runs with no flakes, both
-trees having been **deleted and configured from scratch** first so that no stale cache could
-misreport a dependency.
+**Test count (authoritative): 1049 registered tests, 100% passing in both trees.**
+`100% tests passed, 0 tests failed out of 1049` in `build-nogui` and the identical
+`100% tests passed, 0 tests failed out of 1049` in `build-ui` under `xvfb-run -a`, about 19 seconds
+of wall clock each. The +20 over the previous 1029 is tasks 9.5, 9.6, 10.3 and 10.4. Confirmed over
+**two** consecutive `build-nogui` runs with no flakes on the incremental trees; those trees had been
+**deleted and configured from scratch** earlier in the session, so no stale cache could misreport a
+dependency.
 
 The two trees report the **same** count because every test target is built in both — `build-ui`
 adds only the `palmier-pro` executable (`build-ui/bin/palmier-pro`), which registers no ctest test.
@@ -1159,9 +1186,30 @@ One test is reported as `Skipped` rather than run, in both trees:
 permission bits the case needs in order to make a parent unwritable. It is a property of the
 sandbox user, not of the code, and the test was left untouched.
 
-Earlier runs in this session reported **975** and **1029** from two concurrent agents. **1029 is
-the correct number**; 975 was a tree in which the FFmpeg paths had compiled as stubs against a
-stale cache, as described in the warning above.
+Earlier runs in this session reported **975** and **1029** from two concurrent agents. Of those two,
+**1029 was the correct number** (it is now 1049 after 9.5, 9.6, 10.3 and 10.4); 975 was a tree in
+which the FFmpeg paths had compiled as stubs against a stale cache, as described in the warning
+above. The lesson stands: a count *below* the authoritative number is a stub build, not a
+regression, and calls for a from-scratch reconfigure rather than acceptance.
+
+> **This host's `libavcodec` has no H.264, HEVC or VP9 *encoder*, which blocks task 9.8.**
+> The from-source FFmpeg 6.1.x under `/usr/local` (libavcodec 60.31.102) was built without
+> `libx264`, `libx265`, `libvpx-vp9` and `libaom-av1`, and none of the vendor hardware encoders
+> (`h264_vaapi`, `h264_nvenc`, QSV) are present either. Probing the library directly confirms it:
+> `avcodec_find_encoder_by_name` returns null for all four external encoders, and
+> `avcodec_find_encoder` returns null for `AV_CODEC_ID_H264`, `AV_CODEC_ID_HEVC` and
+> `AV_CODEC_ID_VP9` — only built-in encoders such as `mpeg4` are available. Consequences to carry
+> forward:
+>
+> - **No real H.264/HEVC/VP9 bytes can be produced on this sandbox.** Tests that need a coded
+>   elementary stream in those codecs must assert on the encoder *selection* and on
+>   test-owned traces (as Properties 38 and 33–37 do) rather than on decoded output.
+> - **Task 9.8's hardware-versus-software output comparison cannot run here.** It needs the same
+>   fixture encoded twice, once through a hardware encoder and once through software, and this host
+>   has neither a hardware encoder nor a software H.264/HEVC/VP9 encoder to compare against. The
+>   `PALMIER_SKIP_WITHOUT_HW` guard from task 9.1 is the right mechanism, and the test will skip
+>   rather than fail here; it must be exercised on a host with a real encoder stack before 9.8 can
+>   be considered verified rather than merely written.
 
 **Property 19 flake fixed — root cause was the test's generator, not `ProjectSession`.**
 `ProjectSessionPersistenceProperties.UnmodifiedAfterSaveUntilTheNextToolAppliedEdit` (task 2.3)

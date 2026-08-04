@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <string>
 #include <utility>
 
 #include "core/Error.hpp"
@@ -252,16 +253,25 @@ Result<std::string> toPreprocessorResult(const MentionResolution& resolution) {
             return resolution.rewrittenMessage;
 
         case MentionStatus::Unmatched:
-            // 8.3 — indicate the referenced media item was not found.
+            // 8.3 — indicate the referenced media item was not found. Requirement
+            // 11.7 additionally asks the error to state the NUMBER of matching
+            // assets, which for this branch is zero; it is spelled out rather than
+            // implied so the count is machine-readable on both refusal branches.
             return err<std::string>(makeError(
                 ErrorCode::NotFound,
                 "The referenced media item was not found: @" + resolution.problemMention +
-                    ". Check the name against the project's media library."));
+                    " (0 matching assets in the project media library)."
+                    " Check the name against the project's media library."));
 
         case MentionStatus::Ambiguous: {
-            // 8.4 — prompt the user to select one of the matching candidates.
+            // 8.4 — prompt the user to select one of the matching candidates. The
+            // count is stated as a number as well as implied by the list, because
+            // Requirement 11.7 asks for "the mention text and the number of
+            // matching assets".
             std::string message = "The mention @" + resolution.problemMention +
-                                  " matches more than one media item; please select one: ";
+                                  " matches more than one media item (" +
+                                  std::to_string(resolution.candidates.size()) +
+                                  " matching assets); please select one: ";
             for (std::size_t idx = 0; idx < resolution.candidates.size(); ++idx) {
                 const MentionCandidate& c = resolution.candidates[idx];
                 if (idx != 0) message += ", ";
