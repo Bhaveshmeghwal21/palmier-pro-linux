@@ -44,6 +44,20 @@ bool GenerativeClient::budgetExceeded(const JobRecord& record) const {
     return (clock_() - record.submittedAt) >= budget_;
 }
 
+Error GenerativeClient::timedOutError(const JobId& id) const {
+    // 6.8 / 12.10: the failure names the job and states the limit that elapsed.
+    // The limit reported is the budget this client was configured with (the
+    // requirement allows 10 to 3600 seconds), so the message never claims a
+    // duration the client did not wait.
+    const std::int64_t seconds =
+        std::chrono::duration_cast<std::chrono::seconds>(budget_).count();
+    return makeError(ErrorCode::Timeout,
+                     "generation job " + id.value + " did not complete within " +
+                         std::to_string(seconds) +
+                         " seconds; the timeout limit elapsed and the request was "
+                         "cancelled");
+}
+
 Error GenerativeClient::cancelForTimeout(JobRecord& record, const JobId& id) {
     // 6.8: cancel the in-flight request (best-effort — a failed cancel does not
     // change the outcome we report) and mark the job terminally failed so a
@@ -53,13 +67,11 @@ Error GenerativeClient::cancelForTimeout(JobRecord& record, const JobId& id) {
         record.cancelled = true;
         record.lastStatus.phase = GenerationPhase::Failed;
         record.lastStatus.failureReason =
-            "generation timed out after " +
-            std::to_string(kGenerationBudgetSeconds) + " seconds";
+            "generation job " + id.value + " timed out after " +
+            std::to_string(std::chrono::duration_cast<std::chrono::seconds>(budget_).count()) +
+            " seconds";
     }
-    return makeError(ErrorCode::Timeout,
-                     "generation did not complete within " +
-                         std::to_string(kGenerationBudgetSeconds) +
-                         " seconds; the request was cancelled");
+    return timedOutError(id);
 }
 
 Result<GenerationJob> GenerativeClient::submit(const GenerationRequest& request,
@@ -102,12 +114,10 @@ Result<GenerationStatus> GenerativeClient::poll(const JobId& id) {
     // Once terminal, report the cached status without re-contacting the backend.
     if (record.lastStatus.isTerminal()) {
         if (record.cancelled) {
-            // A timed-out/cancelled job keeps reporting the timeout error.
-            return err<GenerationStatus>(makeError(
-                ErrorCode::Timeout,
-                "generation did not complete within " +
-                    std::to_string(kGenerationBudgetSeconds) +
-                    " seconds; the request was cancelled"));
+            // A timed-out/cancelled job keeps reporting the timeout error, and is
+            // no longer tracked at the backend: no further request is issued for
+            // it (Requirement 12.10's "stop tracking that job").
+            return err<GenerationStatus>(timedOutError(id));
         }
         return record.lastStatus;
     }
@@ -147,20 +157,18 @@ Result<MediaAsset> GenerativeClient::fetchResult(const JobId& id) {
 
     // A job that was previously timed out/cancelled keeps reporting the timeout.
     if (record.cancelled) {
-        return err<MediaAsset>(makeError(
-            ErrorCode::Timeout,
-            "generation did not complete within " +
-                std::to_string(kGenerationBudgetSeconds) +
-                " seconds; the request was cancelled"));
+        return err<MediaAsset>(timedOutError(id));
     }
 
-    // 6.6: a provider-side failure surfaces its descriptive reason. This client
-    // never mutates the project, so nothing needs to be rolled back.
+    // 6.6 / 12.7: a provider-side failure surfaces the job identifier together
+    // with its descriptive reason. This client never mutates the project, so
+    // nothing needs to be rolled back.
     if (record.lastStatus.phase == GenerationPhase::Failed) {
         const std::string& reason = record.lastStatus.failureReason;
         return err<MediaAsset>(makeError(
             ErrorCode::Internal,
-            reason.empty() ? "generation failed at the provider" : reason));
+            "generation job " + id.value + " failed at the provider: " +
+                (reason.empty() ? "no reason was reported" : reason)));
     }
 
     // The result is only available once the job has succeeded.
@@ -171,7 +179,14 @@ Result<MediaAsset> GenerativeClient::fetchResult(const JobId& id) {
 
     Result<MediaAsset> fetched = backend_.fetchResult(id, record.token);
     if (fetched.isError()) {
-        return err<MediaAsset>(std::move(fetched).error());
+        // 12.7: a retrieval failure is reported against the job that produced it,
+        // keeping the backend's code and its own reason intact. Nothing was
+        // imported or placed, so there is no partially retrieved media to remove.
+        const Error& cause = fetched.error();
+        return err<MediaAsset>(makeError(
+            cause.code(),
+            "retrieving the result of generation job " + id.value + " failed: " +
+                cause.message()));
     }
 
     MediaAsset asset = std::move(fetched).value();

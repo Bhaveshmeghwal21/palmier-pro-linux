@@ -250,6 +250,12 @@ private:
     /// True iff the elapsed wall-clock since submission has reached the budget.
     [[nodiscard]] bool budgetExceeded(const JobRecord& record) const;
 
+    /// The timeout failure for `id`: it identifies the job and states the elapsed
+    /// limit — the CONFIGURED budget, not the default constant, so a client built
+    /// with a shorter or longer budget reports the limit it actually applied
+    /// (Requirements 6.8, 12.10).
+    [[nodiscard]] Error timedOutError(const JobId& id) const;
+
     /// Cancel `record` at the backend (best-effort), mark it timed-out, and
     /// return the Timeout error (Requirement 6.8). Idempotent per record.
     [[nodiscard]] Error cancelForTimeout(JobRecord& record, const JobId& id);
