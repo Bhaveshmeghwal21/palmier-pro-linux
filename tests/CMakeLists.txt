@@ -766,12 +766,36 @@ palmier_register_test(palmier_services_generation_validation_tests)
 # the binary alongside Palmier::core, without the media/FFmpeg, libsecret, or
 # lcms2 dependencies that the full Palmier::services library links.
 # ---------------------------------------------------------------------------
+# Task 10.7 extends the same binary with Property 67 (a failed or timed-out job
+# leaves nothing behind; Requirements 12.7, 12.10). That property is stated about
+# the whole `generation.generate` path rather than about the coordinator alone, so
+# the target additionally compiles the tool surface (ToolRegistry/McpToolExecutor
+# over a ProjectSession, whose `.palmier` serialization is how the property
+# compares the post-failure project to the pre-submission one as a document) and
+# task 10.5's backend registry with its hosted HTTPS client. The injected
+# GenerativeHttpTransport is the only route from any of it to a socket, and it is
+# also where the timeout is injected: the transport advances an injected virtual
+# clock as it answers each poll, so Requirement 12.10's budget (10..3600 s) is
+# crossed with no wall-clock wait. As with the other service-layer targets the
+# sources are listed explicitly, so this binary needs neither libsecret, lcms2 nor
+# Palmier::media.
 add_executable(palmier_services_generative_atomicity_property_tests
     services/generative_atomicity_property_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeBackendRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeHttpTransport.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_generative_atomicity_property_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(palmier_services_generative_atomicity_property_tests PRIVATE

@@ -676,7 +676,7 @@ generated cases.
       invoked
     - _Requirements: 12.3, 12.9_
 
-  - [ ]* 10.7 Extend the generation atomicity property test
+  - [x]* 10.7 Extend the generation atomicity property test
     - **Property 67: A failed or timed-out job leaves nothing behind** —
       **Validates: Requirements 12.7, 12.10**
     - File: `tests/services/generative_atomicity_property_test.cpp` (extends the existing test)
@@ -1374,7 +1374,31 @@ honest default: it reports `Unsupported` per request without contacting anything
 `hosted` on such a build yields a descriptive error rather than a link failure. Supplying a real
 transport is a matter of implementing one interface, and nothing above it changes.
 
-**10.6 is now done, so stage 10 stands at 10.1–10.6 and 10.8 done, with 10.7 and 10.9 remaining**,
+**10.7 is now done, so stage 10 stands at 10.1–10.8 done with only 10.9 remaining**, and the
+stage-10 parent stays open. 10.7 extended
+`tests/services/generative_atomicity_property_test.cpp` (existing target
+`palmier_services_generative_atomicity_property_tests`, whose two earlier properties were left
+untouched) with **Property 67: a failed or timed-out job leaves nothing behind** (Requirements 12.7,
+12.10) — one new case, `GenerativeAtomicityProperties.AFailedOrTimedOutJobLeavesNothingBehind`. It
+reuses 10.6's `GenerationRig` shape (tool surface → `McpToolExecutor` → `ToolRegistry` →
+`GenerativeMediaCoordinator` → real gate/runner/client → 10.5's hosted backend over an injected
+`GenerativeHttpTransport`), so the target now also compiles the registry, transport, hosted/BYOK
+backends, tool surface and `.palmier` store sources. Three failure modes are injected through the
+transport seam — a post-submission `failed` status, a 503 on the result fetch (the "retain no
+partially retrieved media" half), and a job that never reaches a terminal status — and each is run
+twice, once through the executor and once straight at the coordinator, because the executor's
+invocation rollback would otherwise be indistinguishable from "nothing was ever applied". Each run
+asserts no media-library entry (in the `MediaManager` **and** in `Project.assets`), no timeline clip,
+no undo entry, an unchanged redo depth, and a byte-identical serialized project.
+**The timeout carries no wall-clock wait**: the budget is generated across Requirement 12.10's
+configurable 10–3600 s range and elapses on an injected `VirtualClock` that only the stalling
+transport advances, so the whole case runs in about 50 ms, and the property asserts both that the
+virtual clock crossed the budget and that real elapsed time did not. The
+`GenerativeMediaCoordinator` place-before-import ordering fix is at HEAD, so the property passes as
+written; a deliberate mutation of one of its assertions was confirmed to fail the test, so the
+zero-change assertions are not vacuous.
+
+**10.6 was done before it, so stage 10 stood at 10.1–10.6 and 10.8 done, with 10.7 and 10.9 remaining**,
 and the stage-10 parent stays open. 10.6 added
 `tests/services/generative_lifecycle_property_test.cpp` on the new
 `palmier_services_generative_lifecycle_tests` target: Property 65 (a successful generation is one
@@ -1493,13 +1517,15 @@ Rather than drop the mandated phrases, the missing tool surface was added:
 `edit.undo` and `edit.redo` expose the already-existing history stack through the tool surface and
 add no new edit semantics.
 
-**Test count (authoritative): 1110 registered tests, `100% tests passed, 0 tests failed out of 1110`
+**Test count (authoritative): 1111 registered tests, `100% tests passed, 0 tests failed out of 1111`
 in `build-nogui`, about 18 seconds of wall clock.** The two expected skips below are unchanged.
-**The +4 over 1106 is task 10.6**: Properties 65 and 66 plus the two
+**The +1 over 1110 is task 10.7**: Property 67 on the existing
+`palmier_services_generative_atomicity_property_tests` target (which now runs 3 cases).
+The preceding **+4 over 1106 is task 10.6**: Properties 65 and 66 plus the two
 `GenerativeLifecycleNetworkSeam` non-vacuity cases, all four on the new
 `palmier_services_generative_lifecycle_tests` target.
 
-> ### ⚠️ 1110 was verified in `build-nogui` only — `build-ui` could not be configured this round
+> ### ⚠️ 1111 was verified in `build-nogui` only — `build-ui` could not be configured this round
 >
 > **Qt 6.8.3 was wiped from this host again and was deliberately not reinstalled**, so the
 > `build-ui` tree could not be configured and the count was **not** cross-checked there. This is a
@@ -1509,9 +1535,10 @@ in `build-nogui`, about 18 seconds of wall clock.** The two expected skips below
 > Quick Qml Widgets)`. FFmpeg survived (libavcodec **60.31.102** under `/usr/local`, restored from
 > `/projects/sandbox/.ffmpeg-src/ffmpeg-6.1.2` by `make install` + `ldconfig`), and the
 > `build-nogui` cache was confirmed to postdate that restore and to point at files that are really
-> on disk, so the 1110 is a real build and not a stub one. **`build-ui` must be reconfigured and the
+> on disk, so the 1111 is a real build and not a stub one. **`build-ui` must be reconfigured and the
 > count re-confirmed there once Qt is restored**, per the Qt steps in the restore recipe below.
-> Because every test target is built in both trees, the expected `build-ui` count is also 1110.
+> Because every test target is built in both trees, the expected `build-ui` count is also 1111.
+> The 10.7 verification run found the same state: FFmpeg present under `/usr/local`, Qt still absent.
 
 The preceding **+34 over the previous 1072 was task 10.5**: 27 on the new
 `palmier_services_generative_backend_tests` target (the id set, the four selection outcomes, the

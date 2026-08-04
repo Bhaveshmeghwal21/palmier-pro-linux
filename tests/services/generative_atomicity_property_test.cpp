@@ -46,12 +46,60 @@
 //      project library unchanged".
 //
 // _Requirements: 6.6_
+//
+// ---------------------------------------------------------------------------
+// Task 10.7 extension — Property 67: A failed or timed-out job leaves nothing
+// behind (Requirements 12.7, 12.10).
+// ---------------------------------------------------------------------------
+//
+// Requirement 12.7 (a job that reports `failed` after submission) and Requirement
+// 12.10 (a job that reaches no terminal status within the configured timeout) make
+// the same three-part claim about what must NOT exist afterwards: the project, the
+// media library and the undo history are in their pre-submission state, and no
+// partially retrieved media is retained. The property below asserts exactly that,
+// for both antecedents, over the SAME path a real `generation.generate` call takes.
+//
+// The rig is the lifecycle suite's `GenerationRig` (task 10.6,
+// tests/services/generative_lifecycle_property_test.cpp) with one addition: the
+// `GenerativeClient` is built with an injected budget AND an injected clock, so a
+// timeout is a property of the exchange rather than of wall time. Everything from
+// the `McpToolExecutor` down to `HostedGenerativeBackend` is product code; the
+// injected `GenerativeHttpTransport` is the only route from any of it to a socket,
+// and it is the seam every failure in this property is injected through:
+//
+//   * a provider-side `failed` status                — a scripted poll response;
+//   * a result retrieval that fails after `succeeded` — a scripted 5xx response;
+//   * a job that never reaches a terminal status      — a transport that answers
+//     every poll with `running` and advances the VIRTUAL clock as it does so.
+//
+// The third case is why there is no `sleep` anywhere in this file. The budget is
+// generated across Requirement 12.10's configurable range (10 to 3600 seconds) and
+// is crossed entirely on the virtual clock, which only the transport advances; the
+// property additionally asserts that the REAL elapsed time stayed far below the
+// budget, so a future change that made the timeout wait for wall time would fail
+// here rather than merely make the suite slow.
+//
+// Each of the three failures is run twice, on a fresh rig each time: once through
+// the `McpToolExecutor` (the shared tool surface, which is also where an
+// invocation-level rollback would happen) and once directly against the
+// `GenerativeMediaCoordinator` (where no such rollback can mask a leftover). The
+// second route is what keeps the undo-stack half of the property honest: the
+// executor undoes whatever an invocation applied, so an assertion made only
+// through it could not distinguish "nothing was ever applied" from "something was
+// applied and then undone". The redo depth is asserted unchanged for the same
+// reason — an applied-then-rolled-back mutation would show up there.
+//
+// _Requirements: 12.7, 12.10_
 
 #include <algorithm>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -74,8 +122,20 @@
 #include "core/TimelineEngine.hpp"
 #include "core/Transition.hpp"
 #include "core/Uuid.hpp"
+#include "services/AuthenticationService.hpp"
+#include "services/ByokCredentialManager.hpp"
+#include "services/ByokCredentials.hpp"
+#include "services/GenerativeBackendRegistry.hpp"
 #include "services/GenerativeClient.hpp"
+#include "services/GenerativeHttpTransport.hpp"
 #include "services/GenerativeMediaCoordinator.hpp"
+#include "services/HostedGenerativeBackend.hpp"
+#include "services/Json.hpp"
+#include "services/McpToolExecutor.hpp"
+#include "services/ProjectSession.hpp"
+#include "services/ProjectStore.hpp"
+#include "services/SecretStore.hpp"
+#include "services/ToolRegistry.hpp"
 
 namespace palmier {
 namespace {
@@ -463,6 +523,668 @@ RC_GTEST_PROP(GenerativeProviderFailureAtomicityProperties,
     RC_ASSERT(projectsEqual(engine.snapshot(), beforeProject));
     RC_ASSERT(library.assetCount() == beforeAssetCount);
 }
+
+// ===========================================================================
+// Property 67: A failed or timed-out job leaves nothing behind
+// (task 10.7; Requirements 12.7, 12.10)
+// ===========================================================================
+//
+// Everything this property needs lives in its own namespace so that it adds to
+// the file rather than reaching into the helpers the two properties above were
+// written around (this rig needs a project whose assets are registered and a
+// dedicated empty target lane, which `makeSeedProject` above deliberately does
+// not provide).
+
+namespace property67 {
+
+using services::AuthBackend;
+using services::AuthServiceGenerationGate;
+using services::AuthenticationService;
+using services::BackendSession;
+using services::ByokCredential;
+using services::ByokCredentialManager;
+using services::ByokProviderValidator;
+using services::GenerativeBackend;
+using services::GenerativeBackendRequest;
+using services::GenerativeBackendSelection;
+using services::GenerativeHttpRequest;
+using services::GenerativeHttpResponse;
+using services::GenerativeHttpTransport;
+using services::HostedGenerativeBackend;
+using services::InMemorySecretStore;
+using services::InvocationSource;
+using services::Json;
+using services::LoginCredentials;
+using services::McpToolExecutor;
+using services::ProjectSession;
+using services::serializeProject;
+using services::ToolRegistry;
+using services::ToolRegistryHooks;
+
+constexpr const char* kGenerateTool = "generation.generate";
+
+/// A location, not a credential. `.invalid` is reserved by RFC 2606, so even a
+/// bug that did send a request could not reach a real service.
+constexpr const char* kEndpointBase = "https://generative.invalid";
+
+/// The secret-store scope the hosted client reads its credential under.
+constexpr const char* kUserScope = "default";
+
+/// Placeholder credential values, each NAMING ITSELF, so task 10.8's
+/// repository-hygiene checker reads them as descriptions of a secret rather than
+/// as one.
+constexpr const char* kStoredHostedCredential = "stored-hosted-account-token-placeholder";
+constexpr const char* kStoredProviderKey = "stored-byok-provider-key-placeholder";
+
+/// The two models the rig's BYOK credentials authorize.
+constexpr const char* kVideoModel = "sota-video-1";
+constexpr const char* kImageModel = "sota-image-1";
+
+// ---------------------------------------------------------------------------
+// The virtual clock: the only thing that makes time pass in this property
+// ---------------------------------------------------------------------------
+
+/// A monotonic clock that advances only when it is told to. The stalling
+/// transport below advances it as it answers each poll, which is how Requirement
+/// 12.10's timeout is reached without any real waiting: the budget can be an hour
+/// and the test still finishes in microseconds.
+class VirtualClock {
+public:
+    using TimePoint = std::chrono::steady_clock::time_point;
+
+    [[nodiscard]] TimePoint now() const noexcept { return origin_ + elapsed_; }
+    void advance(std::chrono::milliseconds by) noexcept { elapsed_ += by; }
+    [[nodiscard]] std::chrono::milliseconds elapsed() const noexcept { return elapsed_; }
+
+    /// A `GenerativeClient::Clock` reading this clock. The returned callable holds
+    /// a reference, so this object must outlive the client.
+    [[nodiscard]] services::GenerativeClient::Clock reader() noexcept {
+        return [this] { return now(); };
+    }
+
+private:
+    /// A fixed non-zero epoch, so a time point produced here is never confused
+    /// with a default-constructed one.
+    TimePoint origin_ = TimePoint{} + std::chrono::hours(1000);
+    std::chrono::milliseconds elapsed_{0};
+};
+
+// ---------------------------------------------------------------------------
+// Transports — the seam every failure in this property is injected through
+// ---------------------------------------------------------------------------
+
+/// Records every exchange, and classifies it the way the wire protocol shapes it:
+/// a POST to the collection is a submit, a POST to `.../cancel` is a cancel, and a
+/// GET is a poll or a result fetch.
+class RecordingTransport : public GenerativeHttpTransport {
+public:
+    [[nodiscard]] static bool isCancel(const GenerativeHttpRequest& request) {
+        return request.method == "POST" && request.url.size() >= 7 &&
+               request.url.compare(request.url.size() - 7, 7, "/cancel") == 0;
+    }
+    [[nodiscard]] static bool isSubmit(const GenerativeHttpRequest& request) {
+        return request.method == "POST" && !isCancel(request);
+    }
+    [[nodiscard]] static bool isResultFetch(const GenerativeHttpRequest& request) {
+        return request.method == "GET" && request.url.size() >= 7 &&
+               request.url.compare(request.url.size() - 7, 7, "/result") == 0;
+    }
+    [[nodiscard]] static bool isPoll(const GenerativeHttpRequest& request) {
+        return request.method == "GET" && !isResultFetch(request);
+    }
+
+    [[nodiscard]] std::size_t count(bool (*kind)(const GenerativeHttpRequest&)) const {
+        return static_cast<std::size_t>(std::count_if(requests.begin(), requests.end(),
+                                                      [kind](const GenerativeHttpRequest& r) {
+                                                          return kind(r);
+                                                      }));
+    }
+
+    std::vector<GenerativeHttpRequest> requests;
+};
+
+/// Replays scripted responses. Used for the two provider-side failures, which are
+/// entirely a matter of what the endpoint answers.
+class ScriptedTransport final : public RecordingTransport {
+public:
+    [[nodiscard]] Result<GenerativeHttpResponse> send(
+        const GenerativeHttpRequest& request) override {
+        requests.push_back(request);
+        if (responses.empty()) {
+            return err<GenerativeHttpResponse>(
+                makeError(ErrorCode::Internal, "the test script ran out of responses"));
+        }
+        GenerativeHttpResponse next = responses.front();
+        responses.erase(responses.begin());
+        return Result<GenerativeHttpResponse>(std::move(next));
+    }
+
+    std::vector<GenerativeHttpResponse> responses;
+};
+
+/// A provider that accepts the job and then never finishes it: every poll is
+/// answered `running`, and answering it advances the virtual clock. This is the
+/// timeout injection of Requirement 12.10 — the job reaches no terminal status,
+/// and the budget elapses on the clock the client was built with.
+class StallingTransport final : public RecordingTransport {
+public:
+    StallingTransport(VirtualClock& clock, std::chrono::milliseconds advancePerPoll,
+                      std::string jobId)
+        : clock_(clock), advancePerPoll_(advancePerPoll), jobId_(std::move(jobId)) {}
+
+    [[nodiscard]] Result<GenerativeHttpResponse> send(
+        const GenerativeHttpRequest& request) override {
+        requests.push_back(request);
+
+        if (isCancel(request)) {
+            // The provider accepts the cancellation the timeout issues (12.10).
+            return GenerativeHttpResponse{200, "{}"};
+        }
+        if (isSubmit(request)) {
+            return GenerativeHttpResponse{201, R"({"id":")" + jobId_ + R"("})"};
+        }
+        if (isResultFetch(request)) {
+            // A timed-out job is never fetched; seeing this would mean the client
+            // treated a non-terminal job as complete.
+            ADD_FAILURE() << "a stalled job must never have its result fetched";
+            return GenerativeHttpResponse{500, R"({"message":"not available"})"};
+        }
+
+        // A poll: still working, and answering took time on the virtual clock.
+        clock_.advance(advancePerPoll_);
+        return GenerativeHttpResponse{200, R"({"status":"running","progress":10})"};
+    }
+
+private:
+    VirtualClock& clock_;
+    std::chrono::milliseconds advancePerPoll_;
+    std::string jobId_;
+};
+
+// ---------------------------------------------------------------------------
+// Offline collaborators for the real auth gate
+// ---------------------------------------------------------------------------
+
+/// Accepts any well-formed BYOK credential; contacts no provider.
+class AcceptingProviderValidator final : public ByokProviderValidator {
+public:
+    [[nodiscard]] Result<void> validate(const ByokCredential& credential) override {
+        if (!credential.isWellFormed()) {
+            return err(makeError(ErrorCode::InvalidArgument,
+                                 "a BYOK credential needs a provider and a key"));
+        }
+        return ok();
+    }
+};
+
+/// The rig authorizes through BYOK, so the hosted login backend is never reached.
+class UnusedAuthBackend final : public AuthBackend {
+public:
+    [[nodiscard]] Result<BackendSession> authenticate(const LoginCredentials&) override {
+        ADD_FAILURE() << "the rig authorizes through BYOK and must never log in";
+        return err<BackendSession>(makeError(ErrorCode::Internal, "unused"));
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Seed project
+// ---------------------------------------------------------------------------
+
+Clip makeSeededClip(ClipId id, const MediaAssetRef& asset, Duration start, Duration in,
+                    Duration out) {
+    Clip clip;
+    clip.id = id;
+    clip.assetRef = asset;
+    clip.timelineStart = start;
+    clip.sourceIn = in;
+    clip.sourceOut = out;
+    return clip;
+}
+
+/// `videoTracks` seeded video lanes, one seeded audio lane, and one EMPTY video
+/// lane at the back which is the generation target — so any in-range position is a
+/// legal placement and a failure is never confused with a rejected placement.
+/// Every seeded clip's asset is registered in `Project.assets`, so the serialized
+/// document the property compares is one the `.palmier` store would accept.
+Project makeGenerationSeedProject(int videoTracks) {
+    Project project;
+    project.id = Uuid::generateV4();
+    project.name = "generative-atomicity";
+    project.timelineFps = FrameRate::fps30();
+    project.canvas = Resolution::hd1080();
+
+    const auto addSeededTrack = [&project](TrackKind kind) {
+        Track track;
+        track.id = Uuid::generateV4();
+        track.kind = kind;
+        const MediaAssetRef asset(Uuid::generateV4(), "mem://seed");
+        project.assets.push_back(asset);
+        track.clips.push_back(makeSeededClip(Uuid::generateV4(), asset, ms(0), ms(0), ms(1000)));
+        project.tracks.push_back(std::move(track));
+    };
+
+    for (int i = 0; i < videoTracks; ++i) addSeededTrack(TrackKind::Video);
+    addSeededTrack(TrackKind::Audio);
+
+    Track target;
+    target.id = Uuid::generateV4();
+    target.kind = TrackKind::Video;
+    project.tracks.push_back(std::move(target));
+    return project;
+}
+
+// ---------------------------------------------------------------------------
+// The generate hook (mirrors app/ApplicationComposition.cpp's makeGenerateHook)
+// ---------------------------------------------------------------------------
+
+[[nodiscard]] services::Tool::Handler makeGenerateHook(GenerativeMediaCoordinator& coordinator,
+                                                       const GenerativeBackend* backend) {
+    return [&coordinator, backend](const Json& input) -> Result<Json> {
+        if (backend != nullptr) {
+            const std::string unmet = backend->unmetPrecondition();
+            if (!unmet.empty()) {
+                return err<Json>(makeError(ErrorCode::FailedPrecondition, unmet));
+            }
+        }
+
+        GenerationRequest request;
+        request.model = input.stringOr("model");
+        request.prompt = input.stringOr("prompt");
+        request.mediaType = (input.stringOr("mediaType", "video") == "image")
+                                ? GenerationMediaType::Image
+                                : GenerationMediaType::Video;
+
+        GenerationPlacement placement;
+        const std::optional<Uuid> trackId = Uuid::parse(input.stringOr("trackId"));
+        if (!trackId.has_value()) {
+            return err<Json>(makeError(ErrorCode::InvalidArgument,
+                                       "generation.generate: 'trackId' must be a valid UUID"));
+        }
+        placement.trackId = *trackId;
+        placement.framePosition = input.intOr("framePosition", 0);
+        placement.sourceIn = Duration::fromNanoseconds(input.intOr("sourceInTicks", 0));
+        placement.sourceOut = Duration::fromNanoseconds(input.intOr("sourceOutTicks", 0));
+
+        Result<GeneratedMediaPlacement> placed =
+            coordinator.generateAndPlace(request, placement);
+        if (placed.isError()) {
+            return err<Json>(placed.error());
+        }
+
+        const GeneratedMediaPlacement& result = placed.value();
+        Json out = Json::object();
+        out.set("assetId", result.asset.assetId.toString());
+        out.set("sourcePath", result.asset.sourcePath);
+        out.set("clipId", result.clipId.toString());
+        out.set("timelineStartTicks",
+                static_cast<std::int64_t>(result.timelineStart.ticks()));
+        return out;
+    };
+}
+
+// ---------------------------------------------------------------------------
+// The rig: the whole generation.generate path over one injected transport,
+// with an injected timeout budget and an injected clock
+// ---------------------------------------------------------------------------
+
+class GenerationRig {
+public:
+    GenerationRig(GenerativeHttpTransport& transport, int videoTracks,
+                  std::chrono::milliseconds budget, services::GenerativeClient::Clock clock) {
+        const Result<void> stored =
+            secretStore_.store(HostedGenerativeBackend::credentialKey(kUserScope),
+                               kStoredHostedCredential);
+        EXPECT_TRUE(stored.isOk());
+
+        auth_.setByokManager(byok_);
+        for (const char* model : {kVideoModel, kImageModel}) {
+            const Result<void> saved =
+                auth_.saveByokCredentials(ByokCredential{model, kStoredProviderKey});
+            EXPECT_TRUE(saved.isOk());
+        }
+
+        GenerativeBackendRequest selection;
+        selection.id = std::string(services::kGenerativeBackendHosted);
+        selection.endpoint.baseUrl = kEndpointBase;
+        selection.secretStore = &secretStore_;
+        selection.transport = &transport;
+        selection.userId = kUserScope;
+        selection.credentials = [](std::string_view) { return true; };
+        selection_ = services::selectGenerativeBackend(selection);
+        EXPECT_EQ(selection_.id, "hosted");
+        EXPECT_TRUE(selection_.startupError.empty()) << selection_.startupError;
+        EXPECT_TRUE(selection_.backend->unmetPrecondition().empty());
+
+        // The injected budget and clock are the whole reason this rig exists apart
+        // from the lifecycle suite's: Requirement 12.10's timeout is reached on the
+        // clock the transport advances, never on wall time.
+        client_ = std::make_unique<GenerativeClient>(*selection_.backend, budget,
+                                                    std::move(clock));
+        runner_ = std::make_unique<GenerativeClientRunner>(*client_);
+
+        const CommandResult seeded =
+            session_.engine().reset(makeGenerationSeedProject(videoTracks));
+        EXPECT_TRUE(seeded.changed()) << seeded.message();
+
+        placer_ = std::make_unique<TimelineEnginePlacer>(session_.engine());
+        coordinator_ = std::make_unique<GenerativeMediaCoordinator>(
+            gate_, *runner_, session_.mediaLibrary(), *placer_);
+
+        ToolRegistryHooks hooks;
+        hooks.generate = makeGenerateHook(*coordinator_, selection_.backend.get());
+        registry_ = services::buildDefaultToolRegistry(&session_, std::move(hooks));
+        executor_ = std::make_unique<McpToolExecutor>(registry_, &session_);
+    }
+
+    [[nodiscard]] TimelineEngine& engine() noexcept { return session_.engine(); }
+    [[nodiscard]] MediaManager& library() noexcept { return session_.mediaLibrary(); }
+    [[nodiscard]] McpToolExecutor& executor() noexcept { return *executor_; }
+    [[nodiscard]] GenerativeMediaCoordinator& coordinator() noexcept { return *coordinator_; }
+
+    /// The generation target: the empty video lane at the back of the seed.
+    [[nodiscard]] Uuid targetTrackId() { return session_.engine().snapshot().tracks.back().id; }
+
+    /// The first seeded lane, used for the prior edits that vary the undo depth.
+    [[nodiscard]] Uuid seededTrackId() { return session_.engine().snapshot().tracks.front().id; }
+
+private:
+    UnusedAuthBackend authBackend_;
+    AcceptingProviderValidator validator_;
+    InMemorySecretStore secretStore_;
+    ByokCredentialManager byok_{validator_, secretStore_, kUserScope};
+    AuthenticationService auth_{authBackend_};
+    AuthServiceGenerationGate gate_{auth_};
+    GenerativeBackendSelection selection_;
+    std::unique_ptr<GenerativeClient> client_;
+    std::unique_ptr<GenerativeClientRunner> runner_;
+    ProjectSession session_;
+    std::unique_ptr<TimelineEnginePlacer> placer_;
+    std::unique_ptr<GenerativeMediaCoordinator> coordinator_;
+    ToolRegistry registry_;
+    std::unique_ptr<McpToolExecutor> executor_;
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+std::size_t totalClips(const Project& project) {
+    std::size_t clips = 0;
+    for (const Track& track : project.tracks) clips += track.clips.size();
+    return clips;
+}
+
+Duration lastClipEnd(const Project& project, const Uuid& trackId) {
+    Duration end = Duration::zero();
+    for (const Track& track : project.tracks) {
+        if (track.id != trackId) continue;
+        for (const Clip& clip : track.clips) {
+            if (clip.timelineEnd() > end) end = clip.timelineEnd();
+        }
+    }
+    return end;
+}
+
+/// A valid `generation.generate` argument object: every field inside the declared
+/// schema, so the ONLY thing that can fail the request is the job itself.
+Json validArguments(const Uuid& trackId, bool isVideo, const std::string& prompt,
+                    std::int64_t framePosition, std::int64_t sourceOutTicks) {
+    Json args = Json::object();
+    args.set("prompt", prompt);
+    args.set("model", isVideo ? kVideoModel : kImageModel);
+    args.set("mediaType", isVideo ? "video" : "image");
+    args.set("trackId", trackId.toString());
+    args.set("framePosition", framePosition);
+    args.set("sourceInTicks", static_cast<std::int64_t>(0));
+    args.set("sourceOutTicks", sourceOutTicks);
+    return args;
+}
+
+/// The accepted-submission prefix of a scripted exchange: the job is created, and
+/// then reports `nonTerminalPolls` in-flight transitions. Both provider failures
+/// below happen AFTER submission, which is Requirement 12.7's antecedent.
+void scriptSubmissionAndProgress(ScriptedTransport& transport, const std::string& jobId,
+                                 int nonTerminalPolls) {
+    transport.responses.push_back({201, std::string(R"({"id":")") + jobId + R"("})"});
+    for (int i = 0; i < nonTerminalPolls; ++i) {
+        const char* phase = (i % 2 == 0) ? "queued" : "running";
+        transport.responses.push_back(
+            {200, std::string(R"({"status":")") + phase + R"(","progress":)" +
+                      std::to_string(10 * (i + 1)) + "}"});
+    }
+}
+
+/// Which route the failed request is issued over. Both are the same product path;
+/// they differ only in whether the executor's invocation-level rollback is in
+/// front of it, which is what keeps the undo-stack assertion honest.
+enum class Route { ToolSurface, Coordinator };
+
+// Feature: end-to-end-editor-integration, Property 67: A failed or timed-out job
+// leaves nothing behind — a generation job that reports `failed` after
+// submission, whose result cannot be retrieved, or that reaches no terminal
+// status within the configured timeout, leaves no media-library entry, no
+// timeline clip and no undo-history entry, and reports the job identifier
+// together with the failure reason or the elapsed timeout limit.
+// Validates: Requirements 12.7, 12.10
+RC_GTEST_PROP(GenerativeAtomicityProperties, AFailedOrTimedOutJobLeavesNothingBehind, ()) {
+    // --- generated inputs ---------------------------------------------------
+    const int videoTracks = *rc::gen::inRange(1, 4);
+    const int priorEdits = *rc::gen::inRange(0, 4);        // varies the baseline undo depth
+    const int nonTerminalPolls = *rc::gen::inRange(0, 4);  // queued/running before the failure
+    const bool isVideo = *rc::gen::element(true, false);
+    const int promptLength = *rc::gen::inRange(1, 2001);
+    const std::int64_t clipSeconds = *rc::gen::inRange(1, 6);
+    const std::string failureReason = *rc::gen::element<std::string>(
+        "the provider rejected the prompt", "the model is overloaded",
+        "content policy refusal", "an internal provider error occurred");
+
+    // Requirement 12.10's configured job timeout: default 600 s, configurable
+    // between 10 and 3600 s. The whole range is generated, and the whole range is
+    // crossed on the virtual clock.
+    const std::int64_t budgetSeconds = *rc::gen::inRange<std::int64_t>(10, 3601);
+    const int pollsToTimeout = *rc::gen::inRange(1, 5);
+
+    const std::string prompt(static_cast<std::size_t>(promptLength), 'p');
+
+    // Runs ONE failed generation on a FRESH rig and asserts the whole of
+    // Requirement 12.7/12.10's "nothing left behind". Returns the error the
+    // surface reported, so the caller can additionally check what it names.
+    const auto runFailedGeneration = [&](GenerativeHttpTransport& transport,
+                                         services::GenerativeClient::Clock clock,
+                                         std::chrono::milliseconds budget,
+                                         Route route) -> Error {
+        GenerationRig rig(transport, videoTracks, budget, std::move(clock));
+        TimelineEngine& engine = rig.engine();
+
+        // Prior edits on a SEEDED lane (never the target), so the undo depth the
+        // failure must not change is an arbitrary number rather than always zero:
+        // a leftover entry shows up as a +1 rather than hiding in an empty history.
+        const Uuid seededTrack = rig.seededTrackId();
+        for (int i = 0; i < priorEdits; ++i) {
+            const Project staged = engine.snapshot();
+            const MediaAssetRef asset(Uuid::generateV4(), "mem://prior");
+            const Duration start = lastClipEnd(staged, seededTrack) + ms(100 * (i + 1));
+            const CommandResult applied = engine.apply(std::make_unique<AddClipCommand>(
+                seededTrack, makeSeededClip(Uuid::generateV4(), asset, start, ms(0), ms(500))));
+            RC_ASSERT(applied.changed());
+        }
+
+        // A placement inside [0, current timeline duration] on the empty target
+        // lane, so nothing about the placement itself can refuse this request.
+        const Uuid targetTrack = rig.targetTrackId();
+        const Project before = engine.snapshot();
+        const std::int64_t maxFrames =
+            before.timelineFps.framesForDuration(timelineDuration(before));
+        const std::int64_t framePosition = maxFrames > 0 ? maxFrames / 2 : 0;
+
+        // --- the exact pre-submission state ---------------------------------
+        const std::string beforeDocument = serializeProject(before);
+        const std::size_t undoBefore = engine.undoDepth();
+        const std::size_t redoBefore = engine.redoDepth();
+        const std::size_t libraryBefore = rig.library().assetCount();
+        const std::size_t clipsBefore = totalClips(before);
+        const std::size_t assetsBefore = before.assets.size();
+
+        Error reported;
+        if (route == Route::ToolSurface) {
+            const Json arguments = validArguments(targetTrack, isVideo, prompt, framePosition,
+                                                  clipSeconds * 1000000000);
+            const Result<Json> executed =
+                rig.executor().executeTool(kGenerateTool, arguments, InvocationSource::Mcp);
+            RC_ASSERT(executed.isError());
+            reported = executed.error();
+        } else {
+            GenerationRequest request;
+            request.model = isVideo ? kVideoModel : kImageModel;
+            request.mediaType =
+                isVideo ? GenerationMediaType::Video : GenerationMediaType::Image;
+            request.prompt = prompt;
+
+            GenerationPlacement where;
+            where.trackId = targetTrack;
+            where.framePosition = framePosition;
+            where.sourceIn = Duration::zero();
+            where.sourceOut = Duration::fromSeconds(static_cast<double>(clipSeconds));
+
+            const Result<GeneratedMediaPlacement> placed =
+                rig.coordinator().generateAndPlace(request, where);
+            RC_ASSERT(placed.isError());
+            reported = placed.error();
+        }
+
+        // --- nothing left behind, in each of the three places named ---------
+        const Project after = engine.snapshot();
+
+        // (1) no media-library entry — neither in the session's MediaManager nor in
+        //     the project's own asset table (the orphan a library-before-placement
+        //     ordering would leave behind).
+        RC_ASSERT(rig.library().assetCount() == libraryBefore);
+        RC_ASSERT(after.assets.size() == assetsBefore);
+
+        // (2) no timeline clip.
+        RC_ASSERT(totalClips(after) == clipsBefore);
+
+        // (3) no undo-stack entry. And no redo entry either: a mutation that was
+        //     applied and then rolled back would be visible there, so this is what
+        //     distinguishes "nothing happened" from "something was undone".
+        RC_ASSERT(engine.undoDepth() == undoBefore);
+        RC_ASSERT(engine.redoDepth() == redoBefore);
+
+        // The whole project, as a document and structurally: the pre-submission
+        // state, byte for byte (Requirements 12.7, 12.10).
+        RC_ASSERT(serializeProject(after) == beforeDocument);
+        RC_ASSERT(projectsEqual(after, before));
+
+        return reported;
+    };
+
+    const std::chrono::milliseconds budget(budgetSeconds * 1000);
+
+    for (const Route route : {Route::ToolSurface, Route::Coordinator}) {
+        // ===================================================================
+        // 12.7 — the job reports `failed` after submission.
+        // ===================================================================
+        {
+            VirtualClock clock;  // never advanced: this failure is not a timeout
+            const std::string jobId = "job-failed-1";
+            ScriptedTransport transport;
+            scriptSubmissionAndProgress(transport, jobId, nonTerminalPolls);
+            transport.responses.push_back(
+                {200, std::string(R"({"status":"failed","progress":40,"reason":")") +
+                          failureReason + R"("})"});
+
+            const Error reported =
+                runFailedGeneration(transport, clock.reader(), budget, route);
+
+            // 12.7 — the report identifies the job and carries the failure reason.
+            RC_ASSERT(reported.message().find(jobId) != std::string::npos);
+            RC_ASSERT(reported.message().find(failureReason) != std::string::npos);
+
+            // The job was submitted (so this really is a post-submission failure)
+            // and its result was never fetched, so there is no partially retrieved
+            // media to retain.
+            RC_ASSERT(transport.count(&RecordingTransport::isSubmit) == 1u);
+            RC_ASSERT(transport.count(&RecordingTransport::isResultFetch) == 0u);
+        }
+
+        // ===================================================================
+        // 12.7 — the job succeeded but its media cannot be retrieved. The
+        // "retain no partially retrieved media file" half: the retrieval is the
+        // only step that could have produced a partial file.
+        // ===================================================================
+        {
+            VirtualClock clock;
+            const std::string jobId = "job-failed-2";
+            ScriptedTransport transport;
+            scriptSubmissionAndProgress(transport, jobId, nonTerminalPolls);
+            transport.responses.push_back({200, R"({"status":"succeeded","progress":100})"});
+            transport.responses.push_back(
+                {503, std::string(R"({"message":")") + failureReason + R"("})"});
+
+            const Error reported =
+                runFailedGeneration(transport, clock.reader(), budget, route);
+
+            // 12.7 — reported against the job that produced it, with the provider's
+            // own reason preserved.
+            RC_ASSERT(reported.message().find(jobId) != std::string::npos);
+            RC_ASSERT(reported.message().find(failureReason) != std::string::npos);
+            RC_ASSERT(transport.count(&RecordingTransport::isResultFetch) == 1u);
+        }
+
+        // ===================================================================
+        // 12.10 — the job reaches no terminal status within the configured
+        // timeout. Injected entirely through the transport seam: it answers every
+        // poll `running` and advances the virtual clock as it does so.
+        // ===================================================================
+        {
+            VirtualClock clock;
+            const std::string jobId = "job-stalled";
+            const std::chrono::milliseconds advancePerPoll(
+                budget.count() / pollsToTimeout + 1);
+            StallingTransport transport(clock, advancePerPoll, jobId);
+
+            // Real time, so the claim "no wall-clock wait" is asserted rather than
+            // asserted-by-inspection.
+            const std::chrono::steady_clock::time_point realStart =
+                std::chrono::steady_clock::now();
+            const Error reported =
+                runFailedGeneration(transport, clock.reader(), budget, route);
+            const std::chrono::milliseconds realElapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - realStart);
+
+            // 12.10 — a failure identifying the job and stating that the timeout
+            // limit elapsed, naming the limit that was actually configured.
+            RC_ASSERT(reported.code() == ErrorCode::Timeout);
+            RC_ASSERT(reported.message().find(jobId) != std::string::npos);
+            RC_ASSERT(reported.message().find(std::to_string(budgetSeconds)) !=
+                      std::string::npos);
+            RC_ASSERT(reported.message().find("timeout limit elapsed") != std::string::npos);
+
+            // The timeout was reached on the virtual clock, and only there: the
+            // budget elapsed virtually while real time did not come close to it.
+            RC_ASSERT(clock.elapsed() >= budget);
+            RC_ASSERT(realElapsed < budget / 2);
+
+            // The exchange is exactly the polling loop the budget allows: the job
+            // was submitted, polled until the budget was crossed — the k-th poll is
+            // the first whose accumulated advance reaches it — and then cancelled at
+            // the provider, which is the last thing sent, because a timed-out job is
+            // no longer tracked (12.10's "stop tracking that job").
+            const std::size_t polls = transport.count(&RecordingTransport::isPoll);
+            RC_ASSERT(transport.count(&RecordingTransport::isSubmit) == 1u);
+            RC_ASSERT(polls >= 1u);
+            RC_ASSERT(static_cast<std::int64_t>(polls) * advancePerPoll.count() >=
+                      budget.count());
+            RC_ASSERT(static_cast<std::int64_t>(polls - 1u) * advancePerPoll.count() <
+                      budget.count());
+            RC_ASSERT(transport.count(&RecordingTransport::isCancel) == 1u);
+            RC_ASSERT(RecordingTransport::isCancel(transport.requests.back()));
+        }
+    }
+}
+
+}  // namespace property67
 
 }  // namespace
 }  // namespace palmier
