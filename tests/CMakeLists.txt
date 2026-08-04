@@ -1408,6 +1408,13 @@ add_executable(palmier_app_composition_tests
     # registry instead of defaulting to `makeUnconfiguredInterpreter()`.
     "${PROJECT_SOURCE_DIR}/src/services/AgentInterpreterRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/OfflineIntentInterpreter.cpp"
+    # Task 10.5: the composition root now selects its Generative_Backend through
+    # the registry instead of its own private offline stub, so all three backends
+    # and the transport seam join the compiled-in list (Requirements 12.1, 12.2).
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeBackendRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeHttpTransport.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
     # Task 9.7: the composition root now constructs the one Export_Coordinator and
     # the one Media_Import_Service of Requirement 1.1 and binds the
     # `timeline.export` / `media.import` hooks to them, so both sources join the
@@ -2342,6 +2349,50 @@ if(CMAKE_DL_LIBS)
 endif()
 
 palmier_register_test(palmier_services_agent_offline_tests)
+
+
+# ---------------------------------------------------------------------------
+# Generative backend registry + HTTPS clients (task 10.5; Requirements 12.1,
+# 12.2, 12.4, 12.6, 12.8).
+#
+# Everything above the network seam: id selection and its fallbacks, the offline
+# stub's immediate precondition-naming rejection, request construction, the
+# read-at-request-time credential policy, and the HTTP status -> ErrorCode mapping.
+# No endpoint, no TLS and no socket are involved — which is the point of the seam.
+#
+# The binary links ${CMAKE_DL_LIBS} for the same reason the offline interpreter
+# suite does: it interposes the C library's socket entry points via
+# dlsym(RTLD_NEXT, ...) so the "no network" claims are proven about the process
+# rather than asserted about a mock.
+#
+# Sources are listed explicitly (rather than linking Palmier::services) so this
+# binary needs neither libsecret, lcms2 nor Palmier::media, exactly as the other
+# service-layer test targets do.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_generative_backend_tests
+    services/generative_backend_registry_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeBackendRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeHttpTransport.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
+    # For the canonical `toStringView(GenerationMediaType)`: the wire body spells
+    # the media kind exactly the way the rest of the system does, rather than
+    # keeping a second copy of the vocabulary that could drift from it.
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_generative_backend_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_generative_backend_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+# dlsym(RTLD_NEXT, ...) for the socket interposers.
+if(CMAKE_DL_LIBS)
+    target_link_libraries(palmier_services_generative_backend_tests PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+palmier_register_test(palmier_services_generative_backend_tests)
 
 
 

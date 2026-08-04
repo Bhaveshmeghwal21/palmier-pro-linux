@@ -311,6 +311,42 @@ target_sources(palmier_services PRIVATE
     AgentInterpreterRegistry.cpp)
 
 
+# --- Task 10.5: the generative backend registry and its HTTPS clients --------
+#
+# Requirement 12.2 requires the hosted service backend, a BYOK provider backend
+# and the offline stub to be "each selectable at application start by a
+# configuration identifier without recompilation". That is a statement about THIS
+# list: all three are compiled into every build, so the choice is a string in a
+# configuration file and never a `-D` and a rebuild.
+#
+#   * services::GenerativeHttpTransport — the injectable network seam plus the
+#     submit -> poll -> fetch -> cancel wire protocol both HTTPS clients share.
+#     No HTTP client library is linked: the default transport reports the
+#     capability as absent without contacting anything, and a real one is a matter
+#     of implementing one interface. The seam is also what makes request
+#     construction, credential loading and error mapping testable with no endpoint,
+#     and what lets a test PROVE the offline backend never touches the network.
+#   * services::HostedGenerativeBackend / services::ByokGenerativeBackend — GPLv3
+#     client code only (Requirement 12.6: the hosted service implementation stays
+#     out of this repository). Each reads its credential from the SecretStore at
+#     REQUEST time, so no credential value is compiled in anywhere — which task
+#     10.8's Property 68 enforces by scanning the tree.
+#   * services::GenerativeBackendRegistry — ids `offline` (default), `hosted`,
+#     `byok`, replacing the composition root's private offline stub. An unknown id,
+#     or a credential-less `hosted`/`byok`, installs the offline stub and records a
+#     startup error naming the rejected id and the unmet requirement, while every
+#     other component is still constructed (Requirement 12.8).
+#
+# All four depend only on Palmier::core plus the service layer's Json and
+# SecretStore surfaces; no HTTP, no Qt and no new dependency enters here. Appended
+# so the existing source list above is preserved verbatim.
+target_sources(palmier_services PRIVATE
+    GenerativeHttpTransport.cpp
+    HostedGenerativeBackend.cpp
+    ByokGenerativeBackend.cpp
+    GenerativeBackendRegistry.cpp)
+
+
 
 # --- Task 9.4: the Export_Coordinator ----------------------------------------
 #

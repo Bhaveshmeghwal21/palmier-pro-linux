@@ -64,8 +64,10 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/Result.hpp"
@@ -76,7 +78,9 @@
 #include "services/AuthenticationService.hpp"    // AuthBackend
 #include "services/ByokCredentials.hpp"          // ByokProviderValidator
 #include "services/ExportCoordinator.hpp"        // ExportCoordinatorOptions, ExportToolOptions
+#include "services/GenerativeBackendRegistry.hpp" // generative backend ids (task 10.5)
 #include "services/GenerativeClient.hpp"         // IGenerativeBackend
+#include "services/GenerativeHttpTransport.hpp"   // GenerativeEndpoint, transport seam
 #include "services/LocalizationManager.hpp"      // Catalog, SystemLanguageProvider
 #include "services/McpProtocolHandler.hpp"        // MainThreadInvoker (design.md D5)
 #include "services/McpServer.hpp"                // kDefaultHost/kDefaultPort
@@ -178,8 +182,46 @@ struct AppConfig {
     /// `agentInterpreter` is supplied.
     std::string agentInterpreterId = std::string(services::defaultAgentInterpreterId());
 
+    /// Which Generative_Backend to install: `offline` (the default), `hosted` or
+    /// `byok` — all three compiled in and selected by this string with no
+    /// recompilation (task 10.5; Requirements 12.1, 12.2). An unrecognised id, or a
+    /// `hosted`/`byok` whose credentials are absent, installs the offline stub and
+    /// records a startup error naming the rejected id and the unmet requirement,
+    /// while every other component is still constructed (Requirement 12.8).
+    /// Ignored when `generativeBackend` is supplied.
+    std::string generativeBackendId = std::string(services::defaultGenerativeBackendId());
+
+    /// Where the selected HTTPS client sends its requests. A location, never a
+    /// credential (Requirement 12.6): credential VALUES are read from
+    /// `secretStore` at request time and appear nowhere in this repository. Empty
+    /// means unconfigured, which the selected client reports as the unmet
+    /// precondition "no reachable network".
+    services::GenerativeEndpoint generativeEndpoint;
+
+    /// The generative HTTPS clients' network seam. Null installs
+    /// `services::makeUnavailableGenerativeHttpTransport()`, so a build with no
+    /// HTTPS client library still SELECTS the configured id and reports the
+    /// capability as absent per request rather than failing to link. This is also
+    /// the seam a test uses to exercise request construction, credential loading
+    /// and error mapping with no endpoint (task 10.5).
+    services::GenerativeHttpTransport* generativeTransport = nullptr;
+
+    /// Overrides the credential-presence probe both registries consult when
+    /// deciding whether `hosted` or `byok` may be installed.
+    ///
+    /// The default probe reads the composed auth stack, which at CONSTRUCTION time
+    /// holds no session and no authorized provider — nobody has signed in yet. That
+    /// is correct for a cold start, and it is why the default composition demotes
+    /// `hosted`/`byok` to the offline fallback with a startup diagnostic. A shell
+    /// that restores a session before composing, and a test that needs the selected
+    /// client rather than the fallback, supplies the answer here instead. Left empty
+    /// the auth-stack probe applies (task 10.5; Requirements 11.8, 12.8).
+    std::function<bool(std::string_view id)> featureCredentials;
+
     /// BYOK provider ids that authorize the generative / agent features in
-    /// addition to an active subscription (used by the auth gates).
+    /// addition to an active subscription (used by the auth gates). The first
+    /// authorized entry is also the provider whose stored key the `byok` generative
+    /// backend reads at request time.
     std::vector<std::string> byokProviders;
 
     /// Remote MCP access (task 6.1; Requirements 10.1-10.3, 16.3). Default
@@ -484,10 +526,27 @@ public:
         return agentInterpreterId_;
     }
 
+    /// The Generative_Backend actually in force: `offline`, `hosted` or `byok`
+    /// (task 10.5; Requirement 12.2). As with the interpreter this is the id that
+    /// WON: an unrecognised id, or one whose credentials are absent, falls back to
+    /// `offline` and the reason appears in `startupErrors()` (Requirement 12.8).
+    [[nodiscard]] const std::string& generativeBackendId() const noexcept {
+        return generativeBackendId_;
+    }
+
+    /// The unmet precondition the selected Generative_Backend reports, or empty
+    /// when generation is available (Requirement 12.4). Computed without any
+    /// network activity, so the UI can call it to render the non-dismissable
+    /// "generation is unavailable" indication Requirement 12.5 asks for. Null only
+    /// when a raw `IGenerativeBackend` was injected, which is the caller's own
+    /// backend and reports nothing.
+    [[nodiscard]] std::string generationUnmetPrecondition() const;
+
     /// Non-fatal startup diagnostics: every condition that changed how a component
     /// was installed without preventing the application from coming up — currently
-    /// a rejected agent-interpreter id (Requirement 11.8). Empty for a fully
-    /// configured composition. Never contains a credential value.
+    /// a rejected agent-interpreter id (Requirement 11.8) or a rejected generative
+    /// backend id (Requirement 12.8). Empty for a fully configured composition.
+    /// Never contains a credential value.
     ///
     /// Distinct from the fatal path: a failure to construct a component named in
     /// Requirement 1.1 is not reported here, it prevents construction.
@@ -539,8 +598,17 @@ private:
     std::unique_ptr<services::AuthenticationService>  auth_;
 
     // --- Generative pipeline ----------------------------------------------
+    //
+    // `ownedGenerativeBackend_` is what the registry selected (task 10.5);
+    // `selectedGenerativeBackend_` is the same object seen through the richer
+    // `GenerativeBackend` interface, and is null exactly when the caller injected a
+    // raw `IGenerativeBackend` of its own. The `generation.generate` hook consults
+    // it before anything downstream runs, which is what makes the Requirement 12.4
+    // rejection immediate and side-effect-free.
     std::unique_ptr<services::IGenerativeBackend>          ownedGenerativeBackend_;
     services::IGenerativeBackend*                          generativeBackend_ = nullptr;
+    services::GenerativeBackend*                           selectedGenerativeBackend_ = nullptr;
+    std::unique_ptr<services::GenerativeHttpTransport>     ownedGenerativeTransport_;
     std::unique_ptr<services::GenerativeClient>            genClient_;
     std::unique_ptr<services::IGenerationGate>             genGate_;
     std::unique_ptr<services::IGenerationRunner>           genRunner_;
@@ -558,6 +626,7 @@ private:
     std::unique_ptr<services::IAgentAuthGate>   agentGate_;
     std::unique_ptr<services::AgentOrchestrator> agent_;
     std::string                                 agentInterpreterId_;
+    std::string                                 generativeBackendId_;
     std::vector<std::string>                    startupErrors_;
 
     // --- Localization ------------------------------------------------------

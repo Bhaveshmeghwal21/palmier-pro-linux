@@ -13,9 +13,18 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <string>
+#include <string_view>
 
 #include "app/ApplicationComposition.hpp"
+#include "core/MediaManager.hpp"
+#include "core/Project.hpp"
+#include "services/GenerativeBackendRegistry.hpp"
+#include "services/HostedGenerativeBackend.hpp"
+#include "services/SecretStore.hpp"
 #include "core/Error.hpp"
 #include "core/Result.hpp"
 #include "core/TimelineEngine.hpp"
@@ -356,6 +365,244 @@ TEST(ApplicationComposition, AnInjectedInterpreterOverridesTheRegistry) {
     ApplicationComposition demoted{withoutInjection};
     EXPECT_EQ(demoted.agentInterpreterId(), "offline");
     EXPECT_FALSE(demoted.startupErrors().empty());
+}
+
+// ---------------------------------------------------------------------------
+// Generative backend selection (task 10.5; Requirements 12.1, 12.2, 12.4, 12.8).
+// ---------------------------------------------------------------------------
+
+// Clips live per track, so "no clip was added" is a count over every track.
+std::size_t totalClips(const palmier::Project& project) {
+    std::size_t count = 0;
+    for (const palmier::Track& track : project.tracks) count += track.clips.size();
+    return count;
+}
+
+// The `generation.generate` arguments the tool surface accepts. A valid, complete
+// argument object, so that a rejection can only be about the backend rather than
+// about the arguments.
+Json generateArguments(const std::string& trackId) {
+    Json arguments = Json::object();
+    arguments.set("model", std::string("sota-video-1"));
+    arguments.set("prompt", std::string("a slow pan across a harbour at dawn"));
+    arguments.set("mediaType", std::string("video"));
+    arguments.set("trackId", trackId);
+    arguments.set("framePosition", static_cast<std::int64_t>(0));
+    arguments.set("sourceInTicks", static_cast<std::int64_t>(0));
+    arguments.set("sourceOutTicks", static_cast<std::int64_t>(1'000'000'000));
+    return arguments;
+}
+
+TEST(ApplicationComposition, DefaultsToTheOfflineGenerativeBackendWithNoStartupError) {
+    ApplicationComposition composition{ephemeralConfig()};
+
+    // Requirement 12.1/12.2: the offline stub is installed when nothing is
+    // configured, and the active id is reported through a public accessor.
+    EXPECT_EQ(composition.generativeBackendId(), "offline");
+    EXPECT_TRUE(composition.startupErrors().empty());
+
+    // Requirement 12.4/12.5: the unmet precondition is available for the
+    // non-dismissable indication, and it names the preconditions by name.
+    const std::string unmet = composition.generationUnmetPrecondition();
+    EXPECT_FALSE(unmet.empty());
+    EXPECT_NE(unmet.find("generation is unavailable"), std::string::npos) << unmet;
+}
+
+TEST(ApplicationComposition, AnUnknownGenerativeBackendIdFallsBackAndStillComposes) {
+    AppConfig config = ephemeralConfig();
+    config.generativeBackendId = "no-such-backend";
+
+    ApplicationComposition composition{config};
+
+    // Requirement 12.8: the offline stub is installed, the rejected id is named in
+    // `startupErrors()`, and every other component named in Requirement 1.1 is
+    // still constructed — including the endpoint, which still starts.
+    EXPECT_EQ(composition.generativeBackendId(), "offline");
+    ASSERT_EQ(composition.startupErrors().size(), 1u);
+    EXPECT_NE(composition.startupErrors()[0].find("no-such-backend"), std::string::npos);
+
+    (void)composition.projectSession();
+    (void)composition.timeline();
+    (void)composition.mediaLibrary();
+    (void)composition.projectSaveService();
+    (void)composition.auth();
+    (void)composition.generativeClient();
+    (void)composition.generativeCoordinator();
+    (void)composition.toolRegistry();
+    (void)composition.executor();
+    (void)composition.agent();
+    (void)composition.localization();
+    EXPECT_TRUE(composition.start().isOk());
+    composition.stop();
+}
+
+TEST(ApplicationComposition, CredentiallessHostedGenerativeBackendFallsBackToOffline) {
+    AppConfig config = ephemeralConfig();
+    config.generativeBackendId = "hosted";
+
+    ApplicationComposition composition{config};
+
+    // The offline auth backend grants no subscription, so `hosted` is unauthorized
+    // and the Requirement 12.8 fallback applies, naming the unmet requirement.
+    EXPECT_EQ(composition.generativeBackendId(), "offline");
+    ASSERT_EQ(composition.startupErrors().size(), 1u);
+    EXPECT_NE(composition.startupErrors()[0].find("hosted"), std::string::npos);
+    EXPECT_NE(composition.generationUnmetPrecondition().find("no authenticated account"),
+              std::string::npos);
+}
+
+TEST(ApplicationComposition, OfflineGenerationIsRejectedWithNoLibraryClipOrUndoEntry) {
+    // Requirement 12.4, through the ONE hook every caller reaches: the tool
+    // surface, the MCP endpoint and the agent all dispatch `generation.generate`
+    // through this registry, so a rejection here is a rejection for all three.
+    ApplicationComposition composition{ephemeralConfig()};
+
+    // A real track to aim at, so the request is otherwise entirely valid.
+    Json addTrack = Json::object();
+    addTrack.set("kind", std::string("video"));
+    addTrack.set("name", std::string("V1"));
+    const palmier::Result<Json> track =
+        composition.toolRegistry().invoke("timeline.add_track", addTrack);
+    ASSERT_TRUE(track.isOk()) << track.error().toString();
+    const std::string trackId = track.value().stringOr("trackId");
+    ASSERT_FALSE(trackId.empty());
+
+    const std::size_t assetsBefore = composition.mediaLibrary().assetCount();
+    const std::size_t clipsBefore = totalClips(composition.timeline().snapshot());
+    const bool canUndoBefore = composition.timeline().canUndo();
+
+    const auto started = std::chrono::steady_clock::now();
+    const palmier::Result<Json> generated =
+        composition.toolRegistry().invoke("generation.generate", generateArguments(trackId));
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    // Rejected within 1 s, with the unmet precondition named.
+    ASSERT_TRUE(generated.isError());
+    EXPECT_EQ(generated.error().code(), palmier::ErrorCode::FailedPrecondition);
+    EXPECT_NE(generated.error().message().find("generation is unavailable"), std::string::npos)
+        << generated.error().message();
+    EXPECT_LT(elapsed, std::chrono::seconds(1));
+
+    // And nothing was added: no media library entry, no clip, no undo entry.
+    EXPECT_EQ(composition.mediaLibrary().assetCount(), assetsBefore);
+    EXPECT_EQ(totalClips(composition.timeline().snapshot()), clipsBefore);
+    EXPECT_EQ(composition.timeline().canUndo(), canUndoBefore);
+}
+
+TEST(ApplicationComposition, OfflineModeKeepsEveryNonGenerationOperationWorking) {
+    // Requirement 12.5: with the offline stub in force the editor is not degraded.
+    // One representative operation from the surfaces Requirement 12.5 enumerates,
+    // all through the same registry the rejected generation went through.
+    ApplicationComposition composition{ephemeralConfig()};
+    ASSERT_EQ(composition.generativeBackendId(), "offline");
+
+    Json addTrack = Json::object();
+    addTrack.set("kind", std::string("video"));
+    addTrack.set("name", std::string("V1"));
+    ASSERT_TRUE(composition.toolRegistry().invoke("timeline.add_track", addTrack).isOk());
+
+    EXPECT_TRUE(composition.toolRegistry().invoke("timeline.read", Json::object()).isOk());
+    EXPECT_TRUE(composition.toolRegistry().invoke("project.info", Json::object()).isOk());
+    EXPECT_TRUE(composition.toolRegistry().invoke("media.list", Json::object()).isOk());
+
+    // Playback and the MCP endpoint are equally unaffected.
+    EXPECT_EQ(composition.playbackEngine().state(), palmier::ui::PlaybackState::Stopped);
+    ASSERT_TRUE(composition.start().isOk());
+    EXPECT_TRUE(composition.running());
+    composition.stop();
+}
+
+TEST(ApplicationComposition, AnInjectedGenerativeBackendOverridesTheRegistry) {
+    // The injection seam the existing suite uses keeps working, and reports the
+    // configured id rather than demoting it — exactly as an injected interpreter
+    // does. The injected backend then answers for itself, so the hook does not
+    // short-circuit on its behalf.
+    class NeverSucceedingBackend final : public palmier::services::IGenerativeBackend {
+    public:
+        [[nodiscard]] palmier::Result<palmier::services::JobId> submit(
+            const palmier::services::GenerationRequest&, std::string_view) override {
+            return palmier::err<palmier::services::JobId>(
+                palmier::makeError(palmier::ErrorCode::Io, "the injected backend declined"));
+        }
+        [[nodiscard]] palmier::Result<palmier::services::GenerationStatus> poll(
+            const palmier::services::JobId&, std::string_view) override {
+            return palmier::err<palmier::services::GenerationStatus>(
+                palmier::makeError(palmier::ErrorCode::Io, "the injected backend declined"));
+        }
+        [[nodiscard]] palmier::Result<palmier::services::MediaAsset> fetchResult(
+            const palmier::services::JobId&, std::string_view) override {
+            return palmier::err<palmier::services::MediaAsset>(
+                palmier::makeError(palmier::ErrorCode::Io, "the injected backend declined"));
+        }
+        [[nodiscard]] palmier::Result<void> cancel(const palmier::services::JobId&,
+                                                   std::string_view) override {
+            return palmier::ok();
+        }
+    };
+
+    NeverSucceedingBackend backend;
+    AppConfig config = ephemeralConfig();
+    config.generativeBackendId = "hosted";
+    config.generativeBackend = &backend;
+
+    ApplicationComposition composition{config};
+    EXPECT_EQ(composition.generativeBackendId(), "hosted");
+    EXPECT_TRUE(composition.startupErrors().empty());
+    EXPECT_TRUE(composition.generationUnmetPrecondition().empty());
+
+    // Sanity: the same configuration WITHOUT the injection is demoted, which is
+    // what makes the override observable rather than incidental.
+    AppConfig withoutInjection = ephemeralConfig();
+    withoutInjection.generativeBackendId = "hosted";
+    ApplicationComposition demoted{withoutInjection};
+    EXPECT_EQ(demoted.generativeBackendId(), "offline");
+    EXPECT_FALSE(demoted.startupErrors().empty());
+}
+
+TEST(ApplicationComposition, ASelectedHostedBackendIsInstalledWhenCredentialsArePresent) {
+    // Requirement 12.2's "without recompilation": with credentials present the
+    // configured id is installed, in the SAME binary, with no rebuild — the
+    // difference between this case and the demoted one above is two configuration
+    // fields.
+    //
+    // `featureCredentials` is the seam that makes this reachable at all: at
+    // construction nobody has signed in, so the auth-stack probe necessarily
+    // answers "no credentials".
+    palmier::services::InMemorySecretStore store;
+    ASSERT_TRUE(store.store(palmier::services::HostedGenerativeBackend::credentialKey("default"),
+                            "stored-hosted-account-token-placeholder")
+                    .isOk());
+
+    AppConfig config = ephemeralConfig();
+    config.generativeBackendId = "hosted";
+    config.secretStore = &store;
+    config.generativeEndpoint.baseUrl = "https://generative.invalid";
+    config.featureCredentials = [](std::string_view id) { return id == "hosted"; };
+
+    ApplicationComposition composition{config};
+
+    EXPECT_EQ(composition.generativeBackendId(), "hosted");
+    EXPECT_TRUE(composition.startupErrors().empty());
+
+    // The stored credential is present and the endpoint configured, so generation
+    // reports no unmet precondition — the hook no longer short-circuits.
+    EXPECT_TRUE(composition.generationUnmetPrecondition().empty());
+
+    // With no HTTPS transport injected the capability is reported per request, and
+    // still nothing is added to the project.
+    Json addTrack = Json::object();
+    addTrack.set("kind", std::string("video"));
+    addTrack.set("name", std::string("V1"));
+    const palmier::Result<Json> track =
+        composition.toolRegistry().invoke("timeline.add_track", addTrack);
+    ASSERT_TRUE(track.isOk()) << track.error().toString();
+
+    const std::size_t clipsBefore = totalClips(composition.timeline().snapshot());
+    const palmier::Result<Json> generated = composition.toolRegistry().invoke(
+        "generation.generate", generateArguments(track.value().stringOr("trackId")));
+    ASSERT_TRUE(generated.isError());
+    EXPECT_EQ(totalClips(composition.timeline().snapshot()), clipsBefore);
+    EXPECT_EQ(composition.mediaLibrary().assetCount(), 0u);
 }
 
 TEST(ApplicationComposition, LocalizationDefaultsToASupportedLanguage) {

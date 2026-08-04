@@ -99,25 +99,14 @@ public:
     }
 };
 
-class OfflineGenerativeBackend final : public services::IGenerativeBackend {
-public:
-    [[nodiscard]] Result<services::JobId> submit(const services::GenerationRequest&,
-                                                 std::string_view) override {
-        return err<services::JobId>(offlineError("generative"));
-    }
-    [[nodiscard]] Result<services::GenerationStatus> poll(const services::JobId&,
-                                                          std::string_view) override {
-        return err<services::GenerationStatus>(offlineError("generative"));
-    }
-    [[nodiscard]] Result<services::MediaAsset> fetchResult(const services::JobId&,
-                                                           std::string_view) override {
-        return err<services::MediaAsset>(offlineError("generative"));
-    }
-    [[nodiscard]] Result<void> cancel(const services::JobId&, std::string_view) override {
-        // Cancelling an unknown/never-submitted job is a harmless no-op.
-        return ok();
-    }
-};
+// The generative backend is no longer a local stub. Task 10.5 replaced this
+// file's private `OfflineGenerativeBackend` with
+// `services::selectGenerativeBackend()`, which compiles all three backends in —
+// `offline`, `hosted`, `byok` — selects one by configuration string with no
+// recompilation, and falls back to the offline STUB (a named, tested component
+// that holds no transport at all) whenever the requested id is unknown or its
+// credentials are absent (Requirements 12.1, 12.2, 12.8). See the construction
+// site below.
 
 class OfflineByokValidator final : public services::ByokProviderValidator {
 public:
@@ -144,10 +133,30 @@ public:
 // as JSON. Any coordinator error (unconfigured backend, unauthorized, invalid
 // prompt/bounds) is forwarded verbatim so the executor's rollback/error policy
 // applies uniformly.
+// Every `generation.generate` invocation — from the tool surface, from the MCP
+// endpoint and from the in-app agent — arrives HERE, because all three dispatch
+// through the one `ToolRegistry` this hook is registered on (Requirement 12.1).
+// That is why the Requirement 12.4 rejection is implemented as the hook's first
+// act rather than deeper down: asking the SELECTED backend for its unmet
+// precondition costs one secret-store read and no network activity, and returning
+// before the coordinator runs is what makes "no media library entry, no clip and
+// no undo-history entry" true by construction rather than by inspection.
+//
+// `backend` is null only when the caller injected a raw `IGenerativeBackend`; in
+// that case the injected backend answers for itself and the coordinator runs as
+// before.
 [[nodiscard]] services::Tool::Handler makeGenerateHook(
-    services::GenerativeMediaCoordinator& coordinator) {
-    return [&coordinator](const services::Json& input) -> Result<services::Json> {
+    services::GenerativeMediaCoordinator& coordinator,
+    const services::GenerativeBackend* backend) {
+    return [&coordinator, backend](const services::Json& input) -> Result<services::Json> {
         using namespace palmier::services;
+
+        if (backend != nullptr) {
+            const std::string unmet = backend->unmetPrecondition();
+            if (!unmet.empty()) {
+                return err<Json>(failedPrecondition(unmet));
+            }
+        }
 
         GenerationRequest request;
         request.model = input.stringOr("model");
@@ -342,11 +351,88 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     auth_ = std::make_unique<services::AuthenticationService>(*authBackend_);
     auth_->setByokManager(*byokManager_);
 
-    // --- Generative pipeline ----------------------------------------------
+    // --- Generative backend selection (task 10.5; Requirements 12.1, 12.2, 12.8)
+    //
+    // Exactly one implementation, named by a configuration string, exposed through
+    // `generativeBackendId()`. All three are compiled into this binary, so moving
+    // between them is a configuration change and never a rebuild
+    // (Requirement 12.2).
+    //
+    // An explicitly injected `config.generativeBackend` still wins — that is the
+    // seam the existing tests use — and in that case the reported id is the
+    // configured one, exactly as the agent interpreter behaves for an injected
+    // implementation.
+    //
+    // Otherwise the registry decides, and it never fails: an unknown id, or a
+    // `hosted`/`byok` whose credentials are absent, installs the offline stub,
+    // records the reason in `startupErrors()` naming the rejected id and the unmet
+    // requirement, and leaves every other component constructed (Requirement 12.8).
+    // Requirement 12.5 is the other half: with the stub in force, timeline editing,
+    // playback, save, open, export and the MCP endpoint are untouched by any of
+    // this — nothing below reaches into them.
+    //
+    // The credential probe reads the composed auth stack, never the network, and is
+    // the same question the agent interpreter's probe asks.
+    // At a cold start nobody has signed in, so the auth-stack answer is "no
+    // credentials" and both registries fall back. `config.featureCredentials` is the
+    // override a shell that restored a session — or a test that wants the selected
+    // client rather than the fallback — supplies instead.
+    std::function<bool(std::string_view)> credentialProbe = config.featureCredentials;
+    if (!credentialProbe) {
+        credentialProbe = [this, providers = config.byokProviders](
+                              std::string_view id) -> bool {
+            if (id == services::kGenerativeBackendHosted ||
+                id == services::kAgentInterpreterHosted) {
+                const std::optional<services::Session>& current = auth_->currentSession();
+                return current.has_value() &&
+                       current->entitlement == services::EntitlementStatus::Active;
+            }
+            if (id == services::kGenerativeBackendByok ||
+                id == services::kAgentInterpreterByok) {
+                for (const std::string& provider : providers) {
+                    if (auth_->isByokAuthorized(provider)) return true;
+                }
+            }
+            return false;
+        };
+    }
+
     if (config.generativeBackend != nullptr) {
         generativeBackend_ = config.generativeBackend;
+        generativeBackendId_ = config.generativeBackendId.empty()
+                                   ? std::string(services::defaultGenerativeBackendId())
+                                   : config.generativeBackendId;
     } else {
-        ownedGenerativeBackend_ = std::make_unique<OfflineGenerativeBackend>();
+        services::GenerativeBackendRequest backendRequest;
+        backendRequest.id = config.generativeBackendId;
+        backendRequest.credentials = credentialProbe;
+        backendRequest.secretStore = secretStore_;
+        backendRequest.transport = config.generativeTransport;
+        backendRequest.endpoint = config.generativeEndpoint;
+        // The provider whose stored key `byok` reads: the first configured one that
+        // is authorized. No key VALUE is involved here, only a provider name.
+        for (const std::string& provider : config.byokProviders) {
+            if (auth_->isByokAuthorized(provider)) {
+                backendRequest.byokProvider = provider;
+                break;
+            }
+        }
+        if (backendRequest.byokProvider.empty() && !config.byokProviders.empty()) {
+            // None is authorized yet — a cold start, or an injected probe answered
+            // for the auth stack. Name the first configured provider so the client
+            // reads the right key once one is filed, rather than reporting "no
+            // provider is configured" for a build that plainly configured one.
+            backendRequest.byokProvider = config.byokProviders.front();
+        }
+
+        services::GenerativeBackendSelection selection =
+            services::selectGenerativeBackend(backendRequest);
+        generativeBackendId_ = selection.id;
+        if (!selection.startupError.empty()) {
+            startupErrors_.push_back(selection.startupError);
+        }
+        selectedGenerativeBackend_ = selection.backend.get();
+        ownedGenerativeBackend_ = std::move(selection.backend);
         generativeBackend_ = ownedGenerativeBackend_.get();
     }
 
@@ -370,7 +456,7 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     // tool arguments to an `ExportRequest2` and from an `ExportOutcome` to the tool
     // result lives beside the coordinator and is the same for every caller.
     services::ToolRegistryHooks hooks;
-    hooks.generate = makeGenerateHook(*genCoordinator_);
+    hooks.generate = makeGenerateHook(*genCoordinator_, selectedGenerativeBackend_);
     hooks.exportTimeline = services::makeExportToolHandler(*exportCoordinator_, *session_,
                                                            config.exportToolOptions);
     hooks.importMedia = [service = mediaImportService_.get()](const std::filesystem::path& path) {
@@ -424,20 +510,11 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     // The credential probe reads the composed auth stack rather than the network:
     // `hosted` needs an active subscription entitlement, `byok` an authorized
     // provider credential among the configured ids. Neither call contacts anything.
-    interpreterRequest.credentials = [this, providers = config.byokProviders](
-                                         std::string_view id) -> bool {
-        if (id == services::kAgentInterpreterHosted) {
-            const std::optional<services::Session>& current = auth_->currentSession();
-            return current.has_value() &&
-                   current->entitlement == services::EntitlementStatus::Active;
-        }
-        if (id == services::kAgentInterpreterByok) {
-            for (const std::string& provider : providers) {
-                if (auth_->isByokAuthorized(provider)) return true;
-            }
-        }
-        return false;
-    };
+    // It is the SAME probe the generative backend selection above used, because it
+    // is the same question about the same auth stack — two copies of it could
+    // disagree, and then `hosted` would be selectable for one feature and not the
+    // other for no stated reason.
+    interpreterRequest.credentials = credentialProbe;
 
     services::AgentInterpreterSelection interpreter =
         services::selectAgentInterpreter(interpreterRequest);
@@ -656,6 +733,13 @@ std::string ApplicationComposition::gpuUnavailableNotice() const {
         if (notice.has_value()) return *notice;
     }
     return {};
+}
+
+std::string ApplicationComposition::generationUnmetPrecondition() const {
+    // One secret-store read at most, no network. Safe to call from a paint path,
+    // which is what Requirement 12.5's non-dismissable indication needs.
+    if (selectedGenerativeBackend_ == nullptr) return {};
+    return selectedGenerativeBackend_->unmetPrecondition();
 }
 
 }  // namespace palmier::app

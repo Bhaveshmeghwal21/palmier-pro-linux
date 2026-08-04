@@ -652,7 +652,7 @@ generated cases.
       `palmier_services_mention_resolver_tests` target)
     - _Requirements: 11.6, 11.7_
 
-  - [~] 10.5 Implement the generative backend registry and its clients
+  - [x] 10.5 Implement the generative backend registry and its clients
     - `src/services/GenerativeBackendRegistry.{hpp,cpp}`: ids `offline` | `hosted` | `byok`, all
       compiled in and selected by configuration string with no recompilation
     - `src/services/HostedGenerativeBackend.{hpp,cpp}` and
@@ -1302,9 +1302,80 @@ comment block and for credential literals, with `PALMIER_SOURCE_DIR` and `PALMIE
 as compile definitions so the checker can find its input from the build tree. The target is
 deliberately set up to be **extended** by task 12.3 with `target_sources()` rather than
 re-declared — 12.3 must not add a second `add_executable()` with that name, and must not call
-`palmier_register_test()` on it again. So stage 10 now stands at **10.1–10.4 and 10.8 done, with
-10.5, 10.6, 10.7 and 10.9 remaining**, and the stage-10 parent stays open.
-Stages 11 and 12 are untouched.
+`palmier_register_test()` on it again.
+
+**10.5 added the generative backend registry and its two HTTPS clients** — four new translation
+units in `src/services`, all four compiled into `palmier_services` so the choice between them is a
+configuration string and never a rebuild (Requirement 12.2):
+
+| File | What it owns |
+| --- | --- |
+| `GenerativeBackendRegistry.{hpp,cpp}` | ids `offline` (default) / `hosted` / `byok`, `selectGenerativeBackend()`, and the offline stub itself |
+| `GenerativeHttpTransport.{hpp,cpp}` | the injectable network seam plus the submit → poll → fetch → cancel wire protocol both clients share |
+| `HostedGenerativeBackend.{hpp,cpp}` | the hosted service client: bearer scheme, `palmier/hosted/<user>/session` key |
+| `ByokGenerativeBackend.{hpp,cpp}` | the BYOK provider client: `X-Api-Key` scheme, `palmier/byok/<user>/<provider>` key |
+
+`GenerativeBackend` is a new interface — `IGenerativeBackend` plus `backendId()` and
+`unmetPrecondition()` — and `unmetPrecondition()` is the mechanism behind Requirement 12.4. The
+`generation.generate` hook in `ApplicationComposition` asks the **selected** backend that question
+as its first act, before the coordinator's validate → gate → generate → place pipeline runs at all,
+which is what makes "no media library entry, no clip and no undo-history entry" true by
+construction rather than by inspection. Because the tool surface, the MCP endpoint and the in-app
+agent all dispatch through the one shared `ToolRegistry`, that single hook is the whole of
+Requirement 12.1's routing obligation, and `ApplicationCompositionTest.OfflineGenerationIsRejected
+WithNoLibraryClipOrUndoEntry` measures the rejection at well under 1 ms against the 1 s bound.
+
+`AppConfig` gained `generativeBackendId`, `generativeEndpoint`, `generativeTransport` and
+`featureCredentials`; `ApplicationComposition` gained `generativeBackendId()` and
+`generationUnmetPrecondition()`. The composition root's private `OfflineGenerativeBackend` stub was
+**removed** in favour of the registry's named, tested one, exactly as 10.1 removed
+`makeUnconfiguredInterpreter()`. The credential-presence probe is now written **once** and shared by
+both registries — two copies could disagree, and then `hosted` would be selectable for the agent and
+not for generation with no stated reason.
+
+**Three things about 10.5 that a reader should not have to infer.**
+
+1. **`featureCredentials` is a new seam, and it exists because `hosted`/`byok` were otherwise
+   unreachable through the composition root.** The default probe reads the composed auth stack,
+   which at *construction* time necessarily holds no session and no authorized provider — nobody has
+   signed in yet — so a cold start always demotes to `offline`. That is correct for a cold start,
+   and it is the same limitation task 10.1 shipped with for the agent interpreter, but it also means
+   the selected-client path could never be entered or tested. `AppConfig::featureCredentials`
+   overrides the probe for both registries, so a shell that restores a session before composing, and
+   `ApplicationComposition.ASelectedHostedBackendIsInstalledWhenCredentialsArePresent`, can reach it.
+2. **No endpoint credential value is checked in, and the endpoint default is empty rather than
+   real.** Credentials are read from `SecretStore` on *every* call rather than captured at
+   construction — a session that expires or a user who signs out must stop authorizing requests
+   without the composition root being rebuilt, and a cached value would outlive the fact.
+   `HostedGenerativeBackend.ReadsTheCredentialAtRequestTimeNotAtConstruction` pins that by filing a
+   credential *after* the backend is built and then removing it again. A plaintext `http://`
+   endpoint is refused at request-construction time rather than sent to, so a misconfiguration
+   cannot put a credential on the wire in the clear.
+3. **`offline` is genuinely usable, not inert (Requirement 12.5).** The stub holds no transport, no
+   endpoint and no credential at all — a class with no route to the network cannot take one — and
+   `ApplicationComposition.OfflineModeKeepsEveryNonGenerationOperationWorking` drives
+   `timeline.add_track`, `timeline.read`, `project.info` and `media.list` plus the MCP endpoint's
+   start/stop with the stub in force. Requirement 12.9's "never reach the network" and 12.3's
+   single-undoable-edit property are tasks 10.6/10.7 and remain open.
+
+**What the network seam does and does not cover.** It covers everything above the socket: request
+construction (method, URL, headers, JSON body, and *where* the credential lands for each scheme),
+credential loading, the HTTP-status → `ErrorCode` mapping for twelve statuses, malformed and
+incomplete response bodies, provider-reported failure reasons, transport-error forwarding, and the
+refusal paths (empty job id, unconfigured endpoint, plaintext endpoint) that must send nothing. It
+also covers the *negative* claims: `tests/services/generative_backend_registry_test.cpp` interposes
+the C library's `socket`, `connect`, `getaddrinfo` and `sendto` via `dlsym(RTLD_NEXT, …)` — the same
+technique the offline interpreter suite uses — and asserts a zero count around the offline stub's
+whole surface, with a companion case that opens a real socket to prove the interposers are live and
+the zero is not vacuous. **It does not cover any real TLS handshake, certificate validation, DNS,
+connection reset or wire timeout**, because this repository links no HTTP client library and the
+hosted service is out of tree by Requirement 12.6. `makeUnavailableGenerativeHttpTransport()` is the
+honest default: it reports `Unsupported` per request without contacting anything, so selecting
+`hosted` on such a build yields a descriptive error rather than a link failure. Supplying a real
+transport is a matter of implementing one interface, and nothing above it changes.
+
+So stage 10 now stands at **10.1–10.5 and 10.8 done, with 10.6, 10.7 and 10.9 remaining**, and the
+stage-10 parent stays open. Stages 11 and 12 are untouched.
 
 **One source fix came out of task 10.4: `MentionResolver`'s two refusal messages now state the
 number of matching assets.** Requirement 11.7 asks for "an error that names the mention text **and
@@ -1332,10 +1403,24 @@ Rather than drop the mandated phrases, the missing tool surface was added:
 `edit.undo` and `edit.redo` expose the already-existing history stack through the tool surface and
 add no new edit semantics.
 
-**Test count (authoritative): 1072 registered tests, 100% passing in both trees.**
-`100% tests passed, 0 tests failed out of 1072` in `build-nogui` and the identical
-`100% tests passed, 0 tests failed out of 1072` in `build-ui` under `xvfb-run -a`, about 10 seconds
-of wall clock each. The +23 over the previous 1049 is tasks 9.7, 10.8 and 9.8. **2 from 9.8** (the
+**Test count (authoritative): 1106 registered tests, 100% passing in both trees.**
+`100% tests passed, 0 tests failed out of 1106` in `build-nogui` and the identical
+`100% tests passed, 0 tests failed out of 1106` in `build-ui` under `xvfb-run -a`, about 10-12
+seconds of wall clock each. **The +34 over the previous 1072 is task 10.5**: 27 on the new
+`palmier_services_generative_backend_tests` target (the id set, the four selection outcomes, the
+offline stub's rejection code / message / timing / zero-socket proof, request construction and
+credential placement for both schemes, the read-at-request-time credential policy, the BYOK-vs-
+`ByokCredentialManager` key-derivation agreement, a full submit → poll → fetch lifecycle over the
+seam, the twelve-status error mapping, malformed-body handling, transport-error forwarding, and the
+cancel semantics) and 7 added to `palmier_app_composition_tests` (the offline default, the
+unknown-id fallback that still composes and still starts the endpoint, the credential-less `hosted`
+demotion, the Requirement 12.4 rejection with no library/clip/undo entry, the Requirement 12.5
+offline-availability sweep, the injected-backend override, and the selected-`hosted` path). The new
+tests were run **five times in each tree** with no variation: 47/47 in `build-nogui` and 61/61 in
+`build-ui` (the latter also sweeping the `RepositoryHygiene*` cases, because 10.5 adds four source
+files that Property 68 must accept), five runs each, all green.
+
+The preceding **+23 over 1049** was tasks 9.7, 10.8 and 9.8. **2 from 9.8** (the
 Requirement 8.6 comparison, which skips here, plus the guard case that proves the gate is
 conditional). **7 from 9.7**
 (`ExportToolSchema.MatchesTheCoordinatorRanges`, five `ExportCoordinatorTest` cases covering the
@@ -1365,7 +1450,7 @@ configuration problem rather than a UI-only test.
    and for what remains unverified.
 
 Earlier runs in this session reported **975** and **1029** from two concurrent agents. Of those two,
-**1029 was the correct number** (it is now 1070, after 9.5, 9.6, 10.3, 10.4, 9.7 and 10.8); 975 was a tree in
+**1029 was the correct number** (it is now 1106, after 9.5, 9.6, 10.3, 10.4, 9.7, 10.8 and 10.5); 975 was a tree in
 which the FFmpeg paths had compiled as stubs against a stale cache, as described in the warning
 above. The lesson stands: a count *below* the authoritative number is a stub build, not a
 regression, and calls for a from-scratch reconfigure rather than acceptance.
