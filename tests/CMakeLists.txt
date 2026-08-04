@@ -2544,3 +2544,36 @@ target_link_libraries(palmier_docs_tests PRIVATE
     Palmier::test_support)
 
 palmier_register_test(palmier_docs_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Hardware-versus-software export comparison (task 9.8; Requirements 8.6, 15.5).
+#
+# On its own target rather than appended to
+# `palmier_services_export_coordinator_tests`, because it is the opposite kind of
+# test: that binary is documented as needing "no GPU, no vendor SDK, no FFmpeg and
+# no media fixture" and drives a mock encode backend, whereas this one requires the
+# REAL FFmpeg encode and decode paths and a real vendor encoder — a mocked backend
+# cannot produce the decodable output Requirement 8.6 compares. Keeping them apart
+# keeps that binary's premise true and makes this one's dependency on the host
+# obvious.
+#
+# Links Palmier::services (which carries ExportCoordinator.cpp and pulls in
+# Palmier::media for the encode/decode/probe surface) plus the shared test support
+# target, which is where `support/HardwareSkip.hpp` — task 9.1's
+# PALMIER_SKIP_WITHOUT_HW — lives.
+#
+# This test SKIPS, with a recorded reason naming what is absent, on any host that
+# lacks either a vendor hardware encoder or a software H.264 encoder to compare
+# against (Requirement 15.5). It skips on the current sandbox for BOTH reasons.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_export_hw_sw_comparison_tests
+    services/export_hardware_software_comparison_test.cpp)
+target_include_directories(palmier_services_export_hw_sw_comparison_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/tests")
+target_link_libraries(palmier_services_export_hw_sw_comparison_tests PRIVATE
+    Palmier::services
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_export_hw_sw_comparison_tests)

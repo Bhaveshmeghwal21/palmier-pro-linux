@@ -520,7 +520,7 @@ generated cases.
 
 ### Stage 9 — Export
 
-- [ ] 9. Complete encode, mux and the export coordinator
+- [x] 9. Complete encode, mux and the export coordinator
   - [x] 9.1 Implement `media::EncoderSelector` and the hardware-skip helper
     - `src/media/EncoderSelector.{hpp,cpp}`: `EncoderSelection` with only the
       `EncoderSelection::hardware(...)` and `EncoderSelection::software(codec, reason)`
@@ -601,7 +601,7 @@ generated cases.
       any selection or export state
     - _Requirements: 1.1, 3.1, 7.2, 8.7_
 
-  - [ ]* 9.8 Write the hardware-versus-software output comparison test
+  - [x]* 9.8 Write the hardware-versus-software output comparison test
     - Export the ≥300-frame 1920×1080/30 fps fixture once with hardware and once with software
       encoding, asserting both outputs decode, both frame counts equal the fixture count, and the
       durations differ by at most one frame interval; guard with `PALMIER_SKIP_WITHOUT_HW`
@@ -1128,7 +1128,59 @@ itself. 9.7 wired export into the tool surface and the composition root:
 shared `ToolRegistry` the GUI, the MCP endpoint and the in-app agent dispatch through, and gained
 `codecBackendReport()` / `kCodecBackendReportBudget{3000}`; `AppConfig` gained `exportOptions`,
 `exportToolOptions` and `mediaProbeBackend` as injection seams. 9.9 closed the stage-9 checkpoint on
-a green suite in both trees. **Only 9.8 remains**, so the stage-9 parent stays open.
+a green suite in both trees. 9.8 added
+`tests/services/export_hardware_software_comparison_test.cpp` — Requirement 8.6's comparison — on the
+new `palmier_services_export_hw_sw_comparison_tests` target. **Stage 9 is now closed**, with the
+caveat on 9.8 recorded below.
+
+**Task 9.8 is written but SKIPS on this host, and its assertions are therefore UNVERIFIED.** The
+test exports the 300-frame 1920×1080/30 fps fixture timeline twice through the same
+`ExportCoordinator::begin()` API — once with `preferHardware = true`, once with `false` — and then
+asserts on the two files: that each probes and decodes, that each yields exactly 300 decoded video
+frames, and that the two container durations agree to within one frame interval (33 ms), with each
+also matching the timeline duration so two equally wrong outputs cannot satisfy the comparison.
+Everything on the encode and decode side is real — `media::ffmpegEncodeBackendFactory()`,
+`media::probeMediaFile` and a real `media::MediaDecoder` — because a mocked encode backend cannot
+produce a decodable output and so could not answer Requirement 8.6 at all. The one injected
+collaborator is the clip-frame provider, which paints a deterministic per-position colour ramp; that
+is what makes the pixel sequence provably identical across the two runs, and it avoids the circular
+need for a 1080p input fixture that would itself have to be encoded first.
+**It cannot run here for TWO independent reasons, and the recorded skip reason names both,
+separately labelled** (Requirement 15.5):
+
+```
+Requirement 8.6's hardware-versus-software comparison cannot run on this host,
+because neither half of the comparison is available:
+  * no hardware encoder: no vendor hardware encode path is compiled in
+    (PALMIER_HAVE_NVENC, PALMIER_HAVE_VAAPI and PALMIER_HAVE_QSV are all
+    undefined), so H.264 hardware encode cannot be exercised on this build
+  * no software encoder to compare against: libavcodec on this host carries no
+    software H.264 encoder ("libx264"): opening a software encode route failed
+    with "encoder not found: libx264", so a hardware encode has nothing to be
+    compared against
+The comparison needs BOTH, so it is reported as skipped rather than failed
+(Requirement 15.5).
+```
+
+The hardware half is gated by task 9.1's `PALMIER_SKIP_WITHOUT_HW`, as the task specifies. The
+software half is a *different* missing thing that macro says nothing about, so the test probes it
+directly by asking the production encode backend factory to open a software route at the fixture's
+geometry — the same call the export itself makes — and reports its own distinct reason.
+
+**Because a test that only ever skips is indistinguishable from a broken one, the guard is itself
+asserted** by a second case, `ExportHardwareSoftwareComparisonGuard.DistinguishesMissingHardwareFrom
+MissingSoftware`, which runs on every host: driven with synthetic "NVENC compiled in and the device
+reports H.264 encode" values it asserts the hardware gate produces **no** skip reason, which is what
+proves the comparison body is reachable on real hardware rather than dead code; it also pins the
+"no vendor path" and "no capable device" reasons to naming the defines and the device respectively,
+and asserts the combined message keeps the two causes separately labelled. That case passes here.
+
+**What is still owed on 9.8:** the comparison's own assertions — that both outputs decode, that both
+frame counts equal 300, and that the durations agree within one frame interval — have **never been
+executed**, because no host in this sandbox can encode H.264. They must be exercised on a machine
+with a real vendor encoder *and* a software H.264 encoder before 9.8 counts as verified rather than
+merely written. The stage-9 parent is ticked on the basis that every task is implemented and the
+suite is green; 9.8's runtime behaviour on real hardware remains unproven.
 
 **Tasks 9.7 and 10.8 were reviewed after the fact, because the two agents that wrote them lost
 their reports before anything was verified or committed.** The review is recorded here because it
@@ -1280,10 +1332,12 @@ Rather than drop the mandated phrases, the missing tool surface was added:
 `edit.undo` and `edit.redo` expose the already-existing history stack through the tool surface and
 add no new edit semantics.
 
-**Test count (authoritative): 1070 registered tests, 100% passing in both trees.**
-`100% tests passed, 0 tests failed out of 1070` in `build-nogui` and the identical
-`100% tests passed, 0 tests failed out of 1070` in `build-ui` under `xvfb-run -a`, about 10 seconds
-of wall clock each. The +21 over the previous 1049 is tasks 9.7 and 10.8: **7 from 9.7**
+**Test count (authoritative): 1072 registered tests, 100% passing in both trees.**
+`100% tests passed, 0 tests failed out of 1072` in `build-nogui` and the identical
+`100% tests passed, 0 tests failed out of 1072` in `build-ui` under `xvfb-run -a`, about 10 seconds
+of wall clock each. The +23 over the previous 1049 is tasks 9.7, 10.8 and 9.8. **2 from 9.8** (the
+Requirement 8.6 comparison, which skips here, plus the guard case that proves the gate is
+conditional). **7 from 9.7**
 (`ExportToolSchema.MatchesTheCoordinatorRanges`, five `ExportCoordinatorTest` cases covering the
 tool's reported fields, its project-derived defaults, its agreement with the dialog for the same
 request, its forwarding of admission rejections without creating a file, and its route through the
@@ -1298,11 +1352,17 @@ adds only the `palmier-pro` executable (`build-ui/bin/palmier-pro`), which regis
 The difference is therefore zero, and any divergence between the trees should be read as a build
 configuration problem rather than a UI-only test.
 
-One test is reported as `Skipped` rather than run, in both trees:
-`ExportCoordinatorValidate.RejectsAnUnwritableParentDirectory`. This is the test's own pre-existing
-`GTEST_SKIP()`, taken because the suite runs as **root**, and root bypasses the directory
-permission bits the case needs in order to make a parent unwritable. It is a property of the
-sandbox user, not of the code, and the test was left untouched.
+**Two** tests are reported as `Skipped` rather than run, in both trees, and both skips are expected:
+
+1. `ExportCoordinatorValidate.RejectsAnUnwritableParentDirectory` — the test's own pre-existing
+   `GTEST_SKIP()`, taken because the suite runs as **root**, and root bypasses the directory
+   permission bits the case needs in order to make a parent unwritable. It is a property of the
+   sandbox user, not of the code, and the test was left untouched.
+2. `ExportHardwareSoftwareComparisonTest.HardwareAndSoftwareExportsOfTheFixtureAgreeOnFrameCountAndDuration`
+   — task 9.8, skipped because this host has neither a vendor hardware encoder nor a software H.264
+   encoder to compare against. Requirement 15.5 requires exactly this: skipped with a recorded
+   reason naming what is absent, never failed. See the 9.8 paragraph above for the full reason text
+   and for what remains unverified.
 
 Earlier runs in this session reported **975** and **1029** from two concurrent agents. Of those two,
 **1029 was the correct number** (it is now 1070, after 9.5, 9.6, 10.3, 10.4, 9.7 and 10.8); 975 was a tree in
