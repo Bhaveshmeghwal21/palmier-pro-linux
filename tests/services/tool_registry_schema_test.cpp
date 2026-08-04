@@ -199,11 +199,28 @@ std::vector<ToolExpectation> expectedSurface() {
           {"framePosition", "integer", false},
           {"sourceInTicks", "integer", false},
           {"sourceOutTicks", "integer", false}}},
+        // Task 9.7 — `timeline.export` is now wired to services::ExportCoordinator,
+        // and Requirement 7.2 lists what a caller may ask for: "an output path,
+        // container format, video codec, resolution, frame rate and bit rate".
+        // `codec`, `fps` and `bitrateKbps` had no argument to arrive in, and the
+        // three booleans below express rules the export requirements make the caller
+        // responsible for: the audio stream, hardware encoding (Requirement 8.2) and
+        // the overwrite acknowledgement (Requirement 7.11), which must be
+        // expressible or an existing destination could never be replaced through the
+        // tool surface. Every addition is OPTIONAL, so every argument object that
+        // validated before task 9.7 still validates and still means the same thing;
+        // `outputPath` and `format` are untouched, including their required flags.
         {"timeline.export",
          {{"outputPath", "string", true},
           {"format", "string", true},
           {"width", "integer", false},
-          {"height", "integer", false}}},
+          {"height", "integer", false},
+          {"codec", "string", false},
+          {"fps", "number", false},
+          {"bitrateKbps", "integer", false},
+          {"includeAudio", "boolean", false},
+          {"preferHardware", "boolean", false},
+          {"overwrite", "boolean", false}}},
         // Task 10.1 — the tool-surface expression of the engine's undo/redo stack,
         // which the offline interpreter's `undo` and `redo` phrases resolve to.
         // Neither takes an argument.
@@ -541,6 +558,79 @@ TEST(ToolRegistrySchema, CrossFieldSourceRangeRuleRemainsHandlerEnforced) {
     const Result<Json> rejected = registry.invoke("timeline.add_clip", inverted);
     ASSERT_TRUE(rejected.isError());
     EXPECT_EQ(rejected.error().code(), ErrorCode::InvalidArgument);
+}
+
+// ---------------------------------------------------------------------------
+// Task 9.7 — the arguments `timeline.export` gained when the hook was wired to
+// services::ExportCoordinator, and the bounds `width`/`height` gained.
+//
+// The additions are asserted here, next to the surface expectation above, so the
+// schema change is described by a test rather than only by a comment: what is
+// published, that it is optional, and — the compatibility claim that matters —
+// that the argument object accepted before task 9.7 is still accepted unchanged.
+// ---------------------------------------------------------------------------
+
+TEST(ToolRegistrySchema, ExportPublishesTheRequirement72ArgumentsAndTheirRanges) {
+    Uuid trackId, assetId;
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, assetId));
+    const ToolRegistry registry = buildDefaultToolRegistry(session);
+
+    const Tool* exportTool = registry.find("timeline.export");
+    ASSERT_NE(exportTool, nullptr);
+    const Json  schema = exportTool->inputSchema();
+    const Json* props = schema.find("properties");
+    ASSERT_NE(props, nullptr);
+
+    // Requirement 7.1's accepted ranges, published rather than only enforced.
+    EXPECT_EQ(props->find("width")->find("minimum")->asInt(), 128);
+    EXPECT_EQ(props->find("width")->find("maximum")->asInt(), 3840);
+    EXPECT_EQ(props->find("height")->find("minimum")->asInt(), 128);
+    EXPECT_EQ(props->find("height")->find("maximum")->asInt(), 2160);
+    EXPECT_EQ(props->find("fps")->find("minimum")->asDouble(), 1.0);
+    EXPECT_EQ(props->find("fps")->find("maximum")->asDouble(), 120.0);
+    EXPECT_EQ(props->find("bitrateKbps")->find("minimum")->asInt(), 100);
+    EXPECT_EQ(props->find("bitrateKbps")->find("maximum")->asInt(), 200'000);
+
+    // The three codecs the Encoder_Selector supports (Requirement 8.2).
+    EXPECT_EQ(enumValues(*props->find("codec")),
+              (std::vector<std::string>{"h264", "hevc", "vp9"}));
+
+    // Only `outputPath` and `format` are required: nothing task 9.7 added is.
+    EXPECT_EQ(requiredNames(schema), (std::vector<std::string>{"outputPath", "format"}));
+
+    // Backwards compatibility, asserted rather than asserted-about: the exact
+    // argument object callers sent before task 9.7 still validates.
+    Json legacy = Json::object();
+    legacy.set("outputPath", std::string("/tmp/palmier-schema-test-out.mp4"));
+    legacy.set("format", std::string("mp4"));
+    EXPECT_TRUE(exportTool->schema.validate(legacy).isOk());
+
+    // And the new arguments validate together, at their bounds.
+    Json full = legacy;
+    full.set("width", static_cast<std::int64_t>(1920));
+    full.set("height", static_cast<std::int64_t>(1080));
+    full.set("codec", std::string("hevc"));
+    full.set("fps", 120.0);
+    full.set("bitrateKbps", static_cast<std::int64_t>(100));
+    full.set("includeAudio", false);
+    full.set("preferHardware", false);
+    full.set("overwrite", true);
+    EXPECT_TRUE(exportTool->schema.validate(full).isOk());
+
+    // Each published bound is enforced by the same declaration.
+    Json tooSmall = full;
+    tooSmall.set("width", static_cast<std::int64_t>(127));
+    EXPECT_TRUE(exportTool->schema.validate(tooSmall).isError());
+    Json tooFast = full;
+    tooFast.set("fps", 121.0);
+    EXPECT_TRUE(exportTool->schema.validate(tooFast).isError());
+    Json unknownCodec = full;
+    unknownCodec.set("codec", std::string("av1"));
+    EXPECT_TRUE(exportTool->schema.validate(unknownCodec).isError());
+    Json notABool = full;
+    notABool.set("overwrite", std::string("yes"));
+    EXPECT_TRUE(exportTool->schema.validate(notABool).isError());
 }
 
 }  // namespace

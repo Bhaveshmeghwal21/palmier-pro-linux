@@ -69,7 +69,10 @@
 #include "media/EncoderSelector.hpp"
 #include "media/MediaEncoder.hpp"
 #include "services/ExportCoordinator.hpp"
+#include "services/Json.hpp"
 #include "services/ProjectSession.hpp"
+#include "services/ToolRegistry.hpp"
+#include "services/ToolSchema.hpp"
 
 namespace palmier::services {
 namespace {
@@ -1240,6 +1243,292 @@ TEST_F(ExportCoordinatorTest, ADestroyedCoordinatorCancelsAndLeavesNoPartialFile
     coordinator_.reset(); // cancels, joins — must not hang.
     EXPECT_FALSE(std::filesystem::exists(out));
     EXPECT_TRUE(script.created.load());
+}
+
+// ===========================================================================
+// The `timeline.export` tool-surface adapter (task 9.7; Requirements 3.1, 7.2)
+//
+// Requirement 7.2 asks the tool to "perform the same export as criterion 1" and
+// to return the output path, the encoded frame count, the selected encoder name
+// and whether hardware encode was used. These cases check both halves:
+//
+//   * "the same export" — the tool enters through the same `begin()`, so the same
+//     request yields outcome fields equal to the dialog's, and every admission
+//     rejection reaches the caller unchanged with no file created.
+//   * "and returns" — every field named above appears in the result, taken from
+//     the ExportOutcome rather than recomputed.
+//
+// The encode backend is still the mock that writes real bytes: this host's
+// libavcodec carries no H.264, HEVC or VP9 encoder, so the seam is the only way an
+// export runs here at all.
+// ===========================================================================
+
+/// The three codec spellings the schema publishes must be exactly the three the
+/// translation parses, and the numeric ranges it publishes must be the
+/// coordinator's own constants — the declarations are in two files (the tool
+/// surface depends only on Palmier::core) and this is what stops them drifting.
+TEST(ExportToolSchema, MatchesTheCoordinatorRanges) {
+    ProjectSession     session;
+    const ToolRegistry registry = buildDefaultToolRegistry(session);
+    const Tool*        tool = registry.find("timeline.export");
+    ASSERT_NE(tool, nullptr);
+
+    const ArgSpec* width = tool->schema.find("width");
+    ASSERT_NE(width, nullptr);
+    EXPECT_EQ(width->minInt, static_cast<std::int64_t>(kMinExportWidth));
+    EXPECT_EQ(width->maxInt, static_cast<std::int64_t>(kMaxExportWidth));
+
+    const ArgSpec* height = tool->schema.find("height");
+    ASSERT_NE(height, nullptr);
+    EXPECT_EQ(height->minInt, static_cast<std::int64_t>(kMinExportHeight));
+    EXPECT_EQ(height->maxInt, static_cast<std::int64_t>(kMaxExportHeight));
+
+    const ArgSpec* fps = tool->schema.find("fps");
+    ASSERT_NE(fps, nullptr);
+    EXPECT_EQ(fps->minNum, kMinExportFps);
+    EXPECT_EQ(fps->maxNum, kMaxExportFps);
+
+    const ArgSpec* bitrate = tool->schema.find("bitrateKbps");
+    ASSERT_NE(bitrate, nullptr);
+    EXPECT_EQ(bitrate->minInt, kMinExportBitrateKbps);
+    EXPECT_EQ(bitrate->maxInt, kMaxExportBitrateKbps);
+
+    // Every published codec spelling translates to a codec the coordinator
+    // supports, and the set is exactly the supported three.
+    const ArgSpec* codec = tool->schema.find("codec");
+    ASSERT_NE(codec, nullptr);
+    ASSERT_EQ(codec->enumValues.size(), 3u);
+    Project probe;
+    for (const std::string& value : codec->enumValues) {
+        Json args = Json::object();
+        args.set("outputPath", std::string("/tmp/palmier-codec-probe.mp4"));
+        args.set("format", std::string("mp4"));
+        args.set("codec", value);
+        const Result<ExportRequest2> translated = exportRequestFromToolArguments(args, probe);
+        ASSERT_TRUE(translated.isOk()) << value;
+        EXPECT_TRUE(isSupportedExportCodec(translated.value().codec)) << value;
+    }
+}
+
+TEST_F(ExportCoordinatorTest, ExportToolReportsEveryFieldRequirement72Names) {
+    BackendScript               script;
+    const std::filesystem::path out = scratchPath("tool_success");
+    script.outputPath = out;
+    makeCoordinator(&script);
+
+    const Tool::Handler handler = makeExportToolHandler(*coordinator_, session_);
+    Json                args = Json::object();
+    args.set("outputPath", out.string());
+    args.set("format", std::string("mp4"));
+    args.set("width", static_cast<std::int64_t>(kRes.width));
+    args.set("height", static_cast<std::int64_t>(kRes.height));
+    args.set("codec", std::string("h264"));
+    args.set("fps", 30.0);
+    args.set("bitrateKbps", static_cast<std::int64_t>(4'000));
+    args.set("preferHardware", false);
+
+    const Result<Json> result = handler(args);
+    ASSERT_TRUE(result.isOk()) << result.error().toString();
+    const Json& out_json = result.value();
+
+    EXPECT_EQ(out_json.stringOr("outputPath"), out.string());
+    // The seeded timeline is four frames at 30 fps, and the count the tool reports
+    // is the count the planner predicted.
+    EXPECT_EQ(out_json.intOr("framesEncoded"), 4);
+    EXPECT_EQ(out_json.intOr("plannedFrames"), 4);
+    EXPECT_EQ(out_json.intOr("framesEncoded"), out_json.intOr("plannedFrames"));
+    // One encoder name, and it is the software encoder this host selects.
+    EXPECT_EQ(out_json.stringOr("encoderName"), "libx264");
+    EXPECT_FALSE(out_json.boolOr("usedHardwareEncode", true));
+    // preferHardware was false, so software is what was asked for — not a fallback.
+    EXPECT_FALSE(out_json.boolOr("usedSoftwareFallback", true));
+    EXPECT_TRUE(out_json.boolOr("containsAudio"));
+    EXPECT_EQ(out_json.intOr("durationNs"),
+              static_cast<std::int64_t>(FrameRate::fps30().durationForFrames(4).nanoseconds()));
+    // Requirement 7.2's "leaves the project state unchanged", reported so it can be
+    // asserted rather than assumed — and checked here against the session too.
+    EXPECT_FALSE(out_json.boolOr("projectModified", true));
+    EXPECT_FALSE(session_.modified());
+    EXPECT_EQ(session_.revision(), revisionBeforeExport_);
+
+    // The file the export produced is really there, with the bytes the backend wrote.
+    ASSERT_TRUE(std::filesystem::exists(out));
+    EXPECT_FALSE(readAllBytes(out).empty());
+}
+
+TEST_F(ExportCoordinatorTest, ExportToolDefaultsGeometryAndCadenceFromTheProject) {
+    BackendScript               script;
+    const std::filesystem::path out = scratchPath("tool_defaults");
+    script.outputPath = out;
+    makeCoordinator(&script);
+
+    // Only the two arguments that were required before task 9.7 — exactly what a
+    // pre-9.7 caller (and the offline interpreter's "export as mp4 to <path>"
+    // phrase) sends.
+    const Tool::Handler handler = makeExportToolHandler(*coordinator_, session_);
+    Json                args = Json::object();
+    args.set("outputPath", out.string());
+    args.set("format", std::string("mp4"));
+
+    const Result<Json> result = handler(args);
+    ASSERT_TRUE(result.isOk()) << result.error().toString();
+
+    // The omitted geometry and cadence came from the project, not from a constant.
+    const Project project = session_.engine().snapshot();
+    std::lock_guard<std::mutex> lock(script.mutex);
+    EXPECT_EQ(script.spec.resolution.width, project.canvas.width);
+    EXPECT_EQ(script.spec.resolution.height, project.canvas.height);
+    EXPECT_EQ(script.spec.frameRate.numerator(), project.timelineFps.numerator());
+    EXPECT_EQ(script.spec.frameRate.denominator(), project.timelineFps.denominator());
+    // The container came from `format`, and the default codec for mp4 is H.264.
+    EXPECT_EQ(script.spec.containerFormat, "mp4");
+    EXPECT_EQ(script.spec.codec, gpu::CodecId::H264);
+    // `includeAudio` defaults to true, so the encoder was given an audio stream.
+    EXPECT_TRUE(script.spec.audio.has_value());
+}
+
+TEST_F(ExportCoordinatorTest, ExportToolMatchesTheDialogForTheSameRequest) {
+    BackendScript               script;
+    const std::filesystem::path viaDialog = scratchPath("tool_vs_dialog_a");
+    script.outputPath = viaDialog;
+    makeCoordinator(&script);
+
+    // (1) The dialog path: begin() directly.
+    ASSERT_TRUE(coordinator_->begin(request(viaDialog)).isOk());
+    ASSERT_GT(runToCompletion(), 0u);
+    ASSERT_TRUE(coordinator_->lastOutcome().has_value());
+    const ExportOutcome dialogOutcome = *coordinator_->lastOutcome();
+
+    // (2) The tool path: the same parameters, expressed as tool arguments.
+    const std::filesystem::path viaTool = scratchPath("tool_vs_dialog_b");
+    {
+        std::lock_guard<std::mutex> lock(script.mutex);
+        script.outputPath = viaTool;
+    }
+    const Tool::Handler handler = makeExportToolHandler(*coordinator_, session_);
+    Json                args = Json::object();
+    args.set("outputPath", viaTool.string());
+    args.set("format", std::string("mp4"));
+    args.set("width", static_cast<std::int64_t>(kRes.width));
+    args.set("height", static_cast<std::int64_t>(kRes.height));
+    args.set("codec", std::string("h264"));
+    args.set("fps", 30.0);
+    args.set("bitrateKbps", static_cast<std::int64_t>(4'000));
+    args.set("includeAudio", true);
+    args.set("preferHardware", false);
+
+    const Result<Json> toolResult = handler(args);
+    ASSERT_TRUE(toolResult.isOk()) << toolResult.error().toString();
+
+    // Every outcome field but the path is equal: the two callers really did run the
+    // same export through the same coordinator.
+    const Json expected = exportOutcomeToJson(dialogOutcome);
+    for (const char* field : {"framesEncoded", "plannedFrames", "encoderName",
+                              "usedHardwareEncode", "usedSoftwareFallback", "containsAudio",
+                              "audioFrames", "durationNs", "projectModified"}) {
+        ASSERT_EQ(expected.contains(field), toolResult.value().contains(field)) << field;
+        if (expected.contains(field)) {
+            EXPECT_EQ(expected.find(field)->dump(), toolResult.value().find(field)->dump())
+                << field;
+        }
+    }
+    EXPECT_NE(expected.stringOr("outputPath"), toolResult.value().stringOr("outputPath"));
+}
+
+TEST_F(ExportCoordinatorTest, ExportToolForwardsAdmissionRejectionsAndCreatesNoFile) {
+    BackendScript               script;
+    const std::filesystem::path out = scratchPath("tool_rejected");
+    script.outputPath = out;
+    makeCoordinator(&script);
+    const Tool::Handler handler = makeExportToolHandler(*coordinator_, session_);
+
+    // A missing destination is refused by the translation, before the coordinator.
+    Json noPath = Json::object();
+    noPath.set("format", std::string("mp4"));
+    const Result<Json> missing = handler(noPath);
+    ASSERT_TRUE(missing.isError());
+    EXPECT_EQ(missing.error().code(), ErrorCode::InvalidArgument);
+
+    // An unsupported container is refused by ExportCoordinator::validate, whose
+    // message names the supported set (Requirement 7.9) — the translation does not
+    // duplicate that rule.
+    Json badContainer = Json::object();
+    badContainer.set("outputPath", out.string());
+    badContainer.set("format", std::string("avi"));
+    const Result<Json> unsupportedContainer = handler(badContainer);
+    ASSERT_TRUE(unsupportedContainer.isError());
+    EXPECT_EQ(unsupportedContainer.error().code(), ErrorCode::Unsupported);
+    EXPECT_NE(unsupportedContainer.error().message().find("mp4"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(out));
+
+    // A parent directory that does not exist (Requirement 7.9).
+    const std::filesystem::path absent = scratchRoot() / "no_such_dir" / "out.mp4";
+    Json missingParent = Json::object();
+    missingParent.set("outputPath", absent.string());
+    missingParent.set("format", std::string("mp4"));
+    const Result<Json> notFound = handler(missingParent);
+    ASSERT_TRUE(notFound.isError());
+    EXPECT_EQ(notFound.error().code(), ErrorCode::NotFound);
+    EXPECT_FALSE(std::filesystem::exists(absent));
+
+    // Requirement 7.11: an existing destination without acknowledgement is refused
+    // and preserved byte-for-byte; the same request WITH `overwrite` is accepted.
+    const std::filesystem::path existing = scratchPath("tool_existing");
+    {
+        std::ofstream seed(existing, std::ios::binary | std::ios::trunc);
+        seed << "ORIGINAL-CONTENT";
+    }
+    const std::string before = readAllBytes(existing);
+    Json              exists = Json::object();
+    exists.set("outputPath", existing.string());
+    exists.set("format", std::string("mp4"));
+    const Result<Json> alreadyExists = handler(exists);
+    ASSERT_TRUE(alreadyExists.isError());
+    EXPECT_EQ(alreadyExists.error().code(), ErrorCode::AlreadyExists);
+    EXPECT_EQ(readAllBytes(existing), before);
+
+    {
+        std::lock_guard<std::mutex> lock(script.mutex);
+        script.outputPath = existing;
+    }
+    exists.set("overwrite", true);
+    exists.set("preferHardware", false);
+    const Result<Json> acknowledged = handler(exists);
+    ASSERT_TRUE(acknowledged.isOk()) << acknowledged.error().toString();
+    EXPECT_NE(readAllBytes(existing), before);
+
+    // Requirement 7.2 again: no rejection and no acceptance touched the project.
+    EXPECT_FALSE(session_.modified());
+    EXPECT_EQ(session_.revision(), revisionBeforeExport_);
+}
+
+TEST_F(ExportCoordinatorTest, ExportToolRunsThroughTheSharedToolRegistry) {
+    BackendScript               script;
+    const std::filesystem::path out = scratchPath("tool_registry");
+    script.outputPath = out;
+    makeCoordinator(&script);
+
+    // The composition root wires exactly this hook, so this is the path the MCP
+    // endpoint, the GUI and the in-app agent all take (Requirement 3.1).
+    ToolRegistryHooks hooks;
+    hooks.exportTimeline = makeExportToolHandler(*coordinator_, session_);
+    const ToolRegistry registry = buildDefaultToolRegistry(session_, std::move(hooks));
+
+    const Tool* tool = registry.find("timeline.export");
+    ASSERT_NE(tool, nullptr);
+
+    Json args = Json::object();
+    args.set("outputPath", out.string());
+    args.set("format", std::string("mp4"));
+    args.set("preferHardware", false);
+    // The arguments validate against the very schema `tools/list` publishes.
+    ASSERT_TRUE(tool->schema.validate(args).isOk());
+
+    const Result<Json> result = registry.invoke("timeline.export", args);
+    ASSERT_TRUE(result.isOk()) << result.error().toString();
+    EXPECT_EQ(result.value().stringOr("outputPath"), out.string());
+    EXPECT_EQ(result.value().intOr("framesEncoded"), 4);
+    EXPECT_TRUE(std::filesystem::exists(out));
 }
 
 } // namespace

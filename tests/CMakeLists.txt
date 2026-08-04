@@ -1408,6 +1408,13 @@ add_executable(palmier_app_composition_tests
     # registry instead of defaulting to `makeUnconfiguredInterpreter()`.
     "${PROJECT_SOURCE_DIR}/src/services/AgentInterpreterRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/OfflineIntentInterpreter.cpp"
+    # Task 9.7: the composition root now constructs the one Export_Coordinator and
+    # the one Media_Import_Service of Requirement 1.1 and binds the
+    # `timeline.export` / `media.import` hooks to them, so both sources join the
+    # compiled-in list. `makeExportToolHandler` lives in ExportCoordinator.cpp.
+    # The decode/encode sides they call are already supplied by Palmier::media.
+    "${PROJECT_SOURCE_DIR}/src/services/ExportCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/MediaImportService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/LocalizationManager.cpp")
 target_include_directories(palmier_app_composition_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -2487,3 +2494,53 @@ target_link_libraries(palmier_services_agent_equivalence_tests PRIVATE
     Palmier::test_support)
 
 palmier_register_test(palmier_services_agent_equivalence_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Documentation, report and repository-hygiene checkers — `palmier_docs_tests`
+# (design.md "test targets": Properties 68-72, 76, 77, 80).
+#
+# Created by task 10.8 with the repository hygiene property (Property 68,
+# Requirement 12.6) as its first source. THIS TARGET IS SHARED: task 12.3 owns
+# the same target name for the Parity_Report / Port_Backlog checkers, so it is
+# deliberately set up to be EXTENDED rather than re-declared. To add sources to
+# it, append with target_sources(), e.g.
+#
+#     target_sources(palmier_docs_tests PRIVATE
+#         docs/parity_report_property_test.cpp
+#         support/ReportParser.cpp)
+#
+# and, if a checker needs core's Result/Error, add to it additively with
+# target_link_libraries(palmier_docs_tests PRIVATE Palmier::core). Do NOT add a
+# second add_executable() with this name, and do NOT call palmier_register_test()
+# on it again — it is registered once, below, and discovery picks up whatever
+# test cases the accumulated sources define.
+#
+# Both source-tree paths these checkers need are injected as compile definitions
+# here, because ctest's working directory is the BUILD tree, so neither a
+# relative path nor a runtime guess would find the sources — and a checker that
+# cannot find its input would pass vacuously:
+#
+#   * PALMIER_SOURCE_DIR — the repository root, walked by the hygiene property
+#     (task 10.8) to discover src/, tests/ and cmake/.
+#   * PALMIER_DOCS_DIR   — ${PROJECT_SOURCE_DIR}/docs, read by the report
+#     checkers (task 12.3). Defined here so 12.3 needs no edit to this block.
+#
+# The hygiene checker is standard-library only (std::filesystem + std::regex), so
+# the target links just the shared GoogleTest/RapidCheck support target; the
+# tests/ include directory is on the path so `support/...` headers resolve the
+# way the other test targets have them.
+# ---------------------------------------------------------------------------
+add_executable(palmier_docs_tests
+    docs/repository_hygiene_property_test.cpp)
+target_include_directories(palmier_docs_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/tests")
+target_compile_definitions(palmier_docs_tests PRIVATE
+    PALMIER_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    PALMIER_DOCS_DIR="${PROJECT_SOURCE_DIR}/docs")
+target_link_libraries(palmier_docs_tests PRIVATE
+    Palmier::test_support)
+
+palmier_register_test(palmier_docs_tests)

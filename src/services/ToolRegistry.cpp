@@ -86,6 +86,32 @@ constexpr const char* kRedo           = "edit.redo";
 constexpr std::size_t kMinPathLength = 1;
 constexpr std::size_t kMaxPathLength = 4096;
 
+// `timeline.export`'s accepted ranges (task 9.7; Requirement 7.1). These are the
+// `services::ExportCoordinator` constants — `kMinExportWidth`, `kMaxExportWidth`,
+// `kMinExportHeight`, `kMaxExportHeight`, `kMinExportFps`, `kMaxExportFps`,
+// `kMinExportBitrateKbps`, `kMaxExportBitrateKbps` — restated rather than included
+// so this tool surface keeps depending only on `Palmier::core`. The unit test
+// `ExportToolSchema.MatchesTheCoordinatorRanges` (which links both) asserts each
+// pair is equal, so the two declarations cannot drift.
+constexpr std::int64_t kMinExportWidthPixels = 128;
+constexpr std::int64_t kMaxExportWidthPixels = 3840;
+constexpr std::int64_t kMinExportHeightPixels = 128;
+constexpr std::int64_t kMaxExportHeightPixels = 2160;
+constexpr double       kMinExportFramesPerSecond = 1.0;
+constexpr double       kMaxExportFramesPerSecond = 120.0;
+constexpr std::int64_t kMinExportBitrateKilobits = 100;
+constexpr std::int64_t kMaxExportBitrateKilobits = 200'000;
+
+/// The accepted `timeline.export` `codec` values, declared once: this list is both
+/// the `ArgSpec::enumValues` the schema publishes and the exact set
+/// `services::exportRequestFromToolArguments` parses, so the advertised enum and
+/// the translation agree (Requirement 9.12). They are the three codecs the
+/// Encoder_Selector supports (Requirement 8.2).
+const std::vector<std::string>& exportCodecValues() {
+    static const std::vector<std::string> values = {"h264", "hevc", "vp9"};
+    return values;
+}
+
 // ---------------------------------------------------------------------------
 // "No project is open" (Requirement 3.5)
 // ---------------------------------------------------------------------------
@@ -951,12 +977,37 @@ Tool makeGenerateTool(ProjectSession* session, Tool::Handler hook) {
 Tool makeExportTool(ProjectSession* session, Tool::Handler hook) {
     Tool t;
     t.name = kExport;
-    t.description = "Render the timeline to an output file at a selected format/resolution.";
-    // No export hook is wired yet (the Export Engine is a later stage), so there is
-    // no handler whose private rules could be lifted: the declaration is today's
-    // argument list, unchanged, with a non-empty destination path and positive
-    // output dimensions. The full container/codec/bitrate vocabulary arrives with
-    // the hook.
+    t.description = "Render the timeline to an output file at a selected container, codec, "
+                    "resolution, frame rate and bit rate.";
+    // Task 9.7 wires the hook to `services::ExportCoordinator`, and Requirement 7.2
+    // states what a caller may ask for: "an output path, container format, video
+    // codec, resolution, frame rate and bit rate". Three of those six had no
+    // argument to arrive in, so the declaration below ADDS `codec`, `fps` and
+    // `bitrateKbps`, plus the three booleans the export requirements make a caller
+    // responsible for: `includeAudio`, `preferHardware` (Requirement 8.2's "an
+    // export request specifies hardware encoding") and `overwrite` (Requirement
+    // 7.11's explicit acknowledgement, which must be expressible or an existing
+    // destination could never be replaced through the tool surface). Every addition
+    // is OPTIONAL, so every argument object that was valid before this task is
+    // still valid and means the same thing; each omitted argument is defaulted from
+    // the CURRENT PROJECT (canvas, timeline frame rate) or from the documented
+    // default in `services::exportRequestFromToolArguments`.
+    //
+    // `width` and `height` also gain their real bounds. They previously published
+    // `minimum: 1`, which advertised resolutions the Export_Coordinator has always
+    // rejected; the published range is now exactly Requirement 7.1's, so an
+    // out-of-range geometry is refused by the advertised schema instead of only by
+    // the handler (design.md D3). The numbers are the `ExportCoordinator` constants
+    // (`kMinExportWidth` … `kMaxExportBitrateKbps`); they are restated here rather
+    // than included so this surface keeps depending only on `Palmier::core`, and
+    // `ExportToolSchema.MatchesTheCoordinatorRanges` asserts the two agree.
+    //
+    // NOT expressible, and therefore still checked by `ExportCoordinator::validate`
+    // (which owns the message naming the parameter and its accepted values):
+    // the container vocabulary (mp4 | mov | mkv | webm) — `format` has always been
+    // published as a free string and narrowing it would invalidate argument objects
+    // that are accepted today — the parent directory's existence and writability,
+    // and whether the destination already exists.
     t.schema
         .arg(ArgSpec{.name = "outputPath",
                      .kind = JsonKind::String,
@@ -964,8 +1015,46 @@ Tool makeExportTool(ProjectSession* session, Tool::Handler hook) {
                      .description = "Destination file path for the rendered output.",
                      .minLength = 1})
         .arg(stringArg("format", true, "Output container/codec format."))
-        .arg(intArg("width", false, "Output width in pixels.", 1))
-        .arg(intArg("height", false, "Output height in pixels.", 1));
+        .arg(ArgSpec{.name = "width",
+                     .kind = JsonKind::Integer,
+                     .description = "Output width in pixels (128..3840); defaults to the "
+                                    "project canvas width.",
+                     .minInt = kMinExportWidthPixels,
+                     .maxInt = kMaxExportWidthPixels})
+        .arg(ArgSpec{.name = "height",
+                     .kind = JsonKind::Integer,
+                     .description = "Output height in pixels (128..2160); defaults to the "
+                                    "project canvas height.",
+                     .minInt = kMinExportHeightPixels,
+                     .maxInt = kMaxExportHeightPixels})
+        .arg(ArgSpec{.name = "codec",
+                     .kind = JsonKind::String,
+                     .description = "Video codec; defaults to vp9 for a webm container and "
+                                    "h264 otherwise.",
+                     .enumValues = exportCodecValues()})
+        .arg(ArgSpec{.name = "fps",
+                     .kind = JsonKind::Number,
+                     .description = "Output frame rate in frames per second (1..120); "
+                                    "defaults to the project timeline frame rate.",
+                     .minNum = kMinExportFramesPerSecond,
+                     .maxNum = kMaxExportFramesPerSecond})
+        .arg(ArgSpec{.name = "bitrateKbps",
+                     .kind = JsonKind::Integer,
+                     .description = "Video bit rate in kilobits per second (100..200000); "
+                                    "defaults to 8000.",
+                     .minInt = kMinExportBitrateKilobits,
+                     .maxInt = kMaxExportBitrateKilobits})
+        .arg(ArgSpec{.name = "includeAudio",
+                     .kind = JsonKind::Bool,
+                     .description = "Write an audio stream; defaults to true."})
+        .arg(ArgSpec{.name = "preferHardware",
+                     .kind = JsonKind::Bool,
+                     .description = "Request hardware encoding when a compiled-in vendor path "
+                                    "and a capable device are present; defaults to true."})
+        .arg(ArgSpec{.name = "overwrite",
+                     .kind = JsonKind::Bool,
+                     .description = "Acknowledge replacing an existing destination file; "
+                                    "defaults to false, which preserves it."});
     t.handler = guardedHookHandler(
         session, kExport, std::move(hook),
         "timeline.export is not available: no export engine is configured");

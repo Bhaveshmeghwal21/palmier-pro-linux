@@ -62,6 +62,7 @@
 #ifndef PALMIER_APP_APPLICATIONCOMPOSITION_HPP
 #define PALMIER_APP_APPLICATIONCOMPOSITION_HPP
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -69,10 +70,12 @@
 
 #include "core/Result.hpp"
 #include "gpu/GpuTypes.hpp"
+#include "media/MediaProbe.hpp"                   // MediaProbeBackend (task 9.7 seam)
 #include "services/AgentInterpreterRegistry.hpp"  // agent interpreter ids (task 10.1)
 #include "services/AgentOrchestrator.hpp"       // IntentInterpreter, IAgentAuthGate
 #include "services/AuthenticationService.hpp"    // AuthBackend
 #include "services/ByokCredentials.hpp"          // ByokProviderValidator
+#include "services/ExportCoordinator.hpp"        // ExportCoordinatorOptions, ExportToolOptions
 #include "services/GenerativeClient.hpp"         // IGenerativeBackend
 #include "services/LocalizationManager.hpp"      // Catalog, SystemLanguageProvider
 #include "services/McpProtocolHandler.hpp"        // MainThreadInvoker (design.md D5)
@@ -109,6 +112,8 @@ class PreviewController;
 namespace palmier::services {
 class ProjectSession;
 class ProjectSaveService;
+class ExportCoordinator;
+class MediaImportService;
 class ByokCredentialManager;
 class GenerativeClient;
 class GenerativeMediaCoordinator;
@@ -182,6 +187,28 @@ struct AppConfig {
     /// `app::AppSettings`; validated and enforced by `services::RemoteAccessGate`
     /// (task 6.2). Nothing here binds a non-loopback address on its own.
     services::RemoteAccessConfig remote;
+
+    /// The Export_Coordinator's injectable collaborators (task 9.7; Requirement
+    /// 1.1). Default constructed = the production defaults: the FFmpeg encode
+    /// backend, an export-local decoder-backed frame provider, an export-local GPU
+    /// context and the real steady clock. A headless driver or a test overrides the
+    /// encode backend factory and the frame provider here, which is the ONLY way an
+    /// export can be driven end to end on a host whose FFmpeg carries no H.264,
+    /// HEVC or VP9 encoder. Whatever is supplied, the audio range renderer is bound
+    /// to the composed `media::AudioEngine` unless it is set here, so the exported
+    /// mix is the same one playback produces (Requirement 6.5).
+    services::ExportCoordinatorOptions exportOptions;
+
+    /// How long the `timeline.export` tool waits for its own export before
+    /// cancelling it and reporting a timeout (Requirement 7.2's synchronous tool
+    /// contract). Defaults to 55 s, inside the executor's 60 s budget.
+    services::ExportToolOptions exportToolOptions;
+
+    /// The probe backend the one Media_Import_Service validates imports through
+    /// (Requirements 1.1, 2.2). Empty means `media::ffmpegProbeBackend()`. A test
+    /// injects a synthetic prober so `media.import` is exercisable with no media
+    /// fixture and no FFmpeg.
+    media::MediaProbeBackend mediaProbeBackend;
 
     /// How work is marshalled onto the thread that owns the project session
     /// (design.md D5; Requirement 9.16) — the seam declared alongside
@@ -333,6 +360,33 @@ public:
         return audioUnavailableNotice_;
     }
 
+    // --- Export_Coordinator + Media_Import_Service (task 9.7; Req. 1.1) ----
+    //
+    // Requirement 1.1 names six components the Composition_Root must construct
+    // exactly once and expose through an accessor returning "that same instance for
+    // the lifetime of the application". These are the last two: exactly one
+    // `services::ExportCoordinator` over the one session, the one live
+    // `gpu::GpuContext` and the one `media::DecoderTeardownQueue`, and exactly one
+    // `services::MediaImportService` importing into the one session's media
+    // library. Both are constructed unconditionally, both are reachable here, and
+    // both are wired into the SAME shared `ToolRegistry` the GUI, the MCP endpoint
+    // and the in-app agent dispatch through — so `timeline.export` and
+    // `media.import` are no longer "advertised but unconfigured" in a real
+    // application (Requirements 3.1, 3.6, 7.2).
+
+    /// The one Export_Coordinator of the application (Requirement 1.1). The same
+    /// object the `timeline.export` tool drives, so a GUI export dialog and a tool
+    /// call contend for one export slot exactly as Requirement 7.10 describes.
+    [[nodiscard]] services::ExportCoordinator& exportCoordinator() noexcept {
+        return *exportCoordinator_;
+    }
+
+    /// The one Media_Import_Service of the application (Requirement 1.1), importing
+    /// into the one session's media library.
+    [[nodiscard]] services::MediaImportService& mediaImportService() noexcept {
+        return *mediaImportService_;
+    }
+
     /// The status-bar notice stating that software compositing is in use after a
     /// runtime GPU compositing failure, or empty while the GPU path is in use
     /// (Requirement 5.6). Distinct from `gpuUnavailableNotice()`, which reports
@@ -374,6 +428,48 @@ public:
     [[nodiscard]] const std::string& remoteAccessWarning() const noexcept {
         return remoteAccessWarning_;
     }
+
+    // --- Codec backend report (task 9.7; Requirement 8.7) -------------------
+
+    /// One backend's two booleans, as Requirement 8.7 words them.
+    struct CodecBackendStatus {
+        /// The backend's stable name: "vaapi", "nvenc-nvdec", "qsv" or
+        /// "ffmpeg-software".
+        std::string name;
+        /// Compiled in: the `PALMIER_HAVE_*` state this binary was built with
+        /// (Requirement 8.1). Always true for the software backend.
+        bool compiledIn = false;
+        /// Usable on THIS host: compiled in AND the probed device reports hardware
+        /// encode for this vendor. Always true for the software backend.
+        bool usableOnHost = false;
+        /// Why `usableOnHost` is what it is, in one human-readable clause — the SDK
+        /// was not found at configure time, the device is a different vendor, the
+        /// device reports no hardware encode, or the path is available. Never empty.
+        std::string detail;
+    };
+
+    /// Report, for each of the VAAPI, NVENC/NVDEC, QSV and FFmpeg software
+    /// backends, whether it is compiled in and whether it is usable on this host
+    /// (Requirement 8.7). The FFmpeg software backend is always both, because
+    /// software encoding is the fallback every other path degrades to.
+    ///
+    /// **Changes nothing.** It is `const`, it touches neither the
+    /// `ExportCoordinator` nor `media::EncoderSelector`, and it starts no
+    /// capability probe: the hardware answers are read from the `PALMIER_HAVE_*`
+    /// build state and from the `gpu::GpuCaps` the one `gpu::GpuContext` probed at
+    /// construction. There is therefore no encoder selection or export state it
+    /// could perturb, and nothing for it to wait on — which is also why it answers
+    /// far inside `kCodecBackendReportBudget`. A caller may assert both halves: the
+    /// budget by measuring, and the no-change half by comparing the coordinator's
+    /// `running()`, `lastOutcome()`, `lastSelection()` and `deliveredProgress()`,
+    /// and the session's project and revision, across the call.
+    ///
+    /// The order is fixed — VAAPI, NVENC/NVDEC, QSV, FFmpeg software — so a caller
+    /// may index it as well as search it.
+    [[nodiscard]] std::vector<CodecBackendStatus> codecBackendReport() const;
+
+    /// The ceiling Requirement 8.7 sets on `codecBackendReport()`.
+    static constexpr std::chrono::milliseconds kCodecBackendReportBudget{3000};
 
     /// The user-facing "GPU acceleration unavailable" notice from the GPU layer
     /// (Requirement 10.4), or empty when hardware acceleration is active. Surfaced
@@ -427,6 +523,10 @@ private:
 
     // --- Project I/O -------------------------------------------------------
     std::unique_ptr<services::ProjectSaveService> saveService_;
+
+    // --- Export_Coordinator + Media_Import_Service (task 9.7) --------------
+    std::unique_ptr<services::ExportCoordinator>  exportCoordinator_;
+    std::unique_ptr<services::MediaImportService> mediaImportService_;
 
     // --- Auth stack (secret store -> byok -> auth) -------------------------
     std::unique_ptr<services::SecretStore>            ownedSecretStore_;

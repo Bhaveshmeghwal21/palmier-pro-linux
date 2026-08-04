@@ -591,7 +591,7 @@ generated cases.
       `palmier_media_export_ordering_property_tests` target)
     - _Requirements: 7.8_
 
-  - [~] 9.7 Wire export into the tool surface and the composition root
+  - [x] 9.7 Wire export into the tool surface and the composition root
     - Connect the `timeline.export` hook to `ExportCoordinator` so the tool returns the output path,
       encoded frame count, selected encoder name, hardware/fallback flags, audio presence and
       duration; expose `exportCoordinator()`
@@ -607,7 +607,7 @@ generated cases.
       durations differ by at most one frame interval; guard with `PALMIER_SKIP_WITHOUT_HW`
     - _Requirements: 8.6, 15.5_
 
-  - [~] 9.9 Checkpoint
+  - [x] 9.9 Checkpoint
     - Ensure all tests pass, ask the user if questions arise. The headless sequence of Requirement
       3.6 now completes end to end.
 
@@ -682,7 +682,7 @@ generated cases.
     - File: `tests/services/generative_atomicity_property_test.cpp` (extends the existing test)
     - _Requirements: 12.7, 12.10_
 
-  - [ ]* 10.8 Write the repository hygiene property test
+  - [x]* 10.8 Write the repository hygiene property test
     - **Property 68: Every source file carries the GPLv3 SPDX header and no credentials** —
       **Validates: Requirements 12.6**
     - File: `tests/docs/repository_hygiene_property_test.cpp`
@@ -1121,7 +1121,112 @@ Property 38 (two successive exports are identical) to
 `tests/media_export_ordering_property_test.cpp`, comparing frame count, per-frame presentation
 timestamps and the bound encoder route across four containers, three codecs and both encoder
 selections, from a **test-owned trace** rather than from anything the code under test reports about
-itself. **9.7, 9.8 and 9.9 remain**, so the stage-9 parent stays open.
+itself. 9.7 wired export into the tool surface and the composition root:
+`ApplicationComposition` now constructs the one `services::ExportCoordinator` and the one
+`services::MediaImportService` of Requirement 1.1, exposes them through `exportCoordinator()` /
+`mediaImportService()`, binds the `timeline.export` and `media.import` hooks to them on the SAME
+shared `ToolRegistry` the GUI, the MCP endpoint and the in-app agent dispatch through, and gained
+`codecBackendReport()` / `kCodecBackendReportBudget{3000}`; `AppConfig` gained `exportOptions`,
+`exportToolOptions` and `mediaProbeBackend` as injection seams. 9.9 closed the stage-9 checkpoint on
+a green suite in both trees. **Only 9.8 remains**, so the stage-9 parent stays open.
+
+**Tasks 9.7 and 10.8 were reviewed after the fact, because the two agents that wrote them lost
+their reports before anything was verified or committed.** The review is recorded here because it
+found a build failure and two coverage gaps that the code comments alone would not have revealed.
+
+**9.7 did not compile.** `palmier_app_composition_tests` compiles `src/app/ApplicationComposition.cpp`
+directly into the test binary rather than linking `Palmier::services`, and its source list was never
+given the two translation units the task added calls into — so the target failed to link with
+undefined references to `ExportCoordinator`'s constructor and destructor,
+`MediaImportService`'s constructor and `import()`, and `makeExportToolHandler`. The fix is the
+minimal one: `src/services/ExportCoordinator.cpp` and `src/services/MediaImportService.cpp` joined
+that target's source list. Nothing in `src/` was changed. Because the link failed, **neither 9.7 nor
+10.8 had ever been built or run** before this review.
+
+**`timeline.export`'s published `ToolSchema` did change, and the change is deliberate rather than
+silent.** Six optional arguments were added — `codec` (enum `h264` | `hevc` | `vp9`), `fps`
+(1..120), `bitrateKbps` (100..200000), `includeAudio`, `preferHardware` and `overwrite` — because
+Requirement 7.2 names six things a caller may ask for and three of them had no argument to arrive
+in, while `preferHardware` and `overwrite` express rules Requirements 8.2 and 7.11 make the caller
+responsible for. The byte-stability expectation in `tests/services/tool_registry_schema_test.cpp`
+was updated in the same change, and a new test,
+`ToolRegistrySchema.ExportPublishesTheRequirement72ArgumentsAndTheirRanges`, asserts each published
+bound, the codec enum, that the required set is still exactly `{outputPath, format}`, that the
+pre-9.7 argument object still validates, and that each new bound is enforced. Properties 45 and 46
+needed no edit because `mcp_protocol_property_test.cpp`'s `validValue` derives values generically
+from each `ArgSpec`'s `minInt` / `maxInt` / `minNum` / `maxNum` / `enumValues` / `Bool` kind, so the
+additions are covered automatically. **One caveat worth carrying forward:** `width` and `height` are
+a *narrowing*, not a widening — they published `minimum: 1` with no maximum and now publish
+Requirement 7.1's 128..3840 and 128..2160, so `width: 1` was schema-valid before this task and is
+refused now. The observable outcome is unchanged, because `ExportCoordinator::validate` always
+rejected those geometries, but the refusal moved from the handler to schema validation and a client
+therefore sees a different error for them. The in-source comment's blanket claim that "every
+argument object that validated before task 9.7 still validates" is accurate only for objects that
+omit `width`/`height` or supply in-range values.
+
+> ### ⚠️ `codecBackendReport()` is implemented but **not asserted by any test**
+>
+> Requirement 8.7 is the one part of task 9.7 that verification does not reach.
+> `codecBackendReport`, `CodecBackendStatus` and `kCodecBackendReportBudget` appear **only** in
+> `src/app/ApplicationComposition.hpp` and `.cpp` — no test references any of them. So none of
+> Requirement 8.7's four obligations is pinned: that all four backends (VAAPI, NVENC/NVDEC, QSV,
+> FFmpeg software) are reported, that the software backend is *always* both compiled in and usable,
+> that the answer arrives inside 3000 ms, and that the call changes no encoder selection or export
+> state. The header comment even spells out what "a caller may assert" — the budget by measuring,
+> the no-change half by comparing the coordinator's `running()`, `lastOutcome()`, `lastSelection()`
+> and `deliveredProgress()` and the session's project and revision across the call — and no caller
+> does any of it. Reading the implementation, it looks correct by construction: it is `const`, the
+> order is fixed, the software entry is hard-coded to both true, and the vendor answers are read
+> from `gpu::BridgeAvailability::fromBuildConfig()` and the already-probed `gpu::GpuCaps`, so no
+> probe is started and there is nothing to wait on. **"Looks correct by construction" is not
+> verification.** A test over the composed `ApplicationComposition` is still owed before
+> Requirement 8.7 can be called covered.
+
+**Property 68 (task 10.8) is non-vacuous, and the credential half of it is genuinely exercised.**
+`performScan()` discovers its input with a `recursive_directory_iterator` over
+`PALMIER_SOURCE_DIR / {src, tests, cmake}` — injected as a compile definition because ctest's
+working directory is the build tree — not from any hard-coded file list, and it fails loudly rather
+than silently passing when the tree cannot be walked, when an expected directory is missing, or when
+the file set comes back empty; the property additionally asserts at least 100 files were enumerated.
+The checker is proven able to *fail* by eight positive controls: a missing SPDX header, an SPDX
+header below the leading comment block, the wrong licence, an opaque credential assignment, the
+JSON and YAML spellings of one, an AWS access key id, a JWT and an opaque bearer header, and a PEM
+private key with a body (distinguished from a bare marker). **The credential scan was not made to
+pass by broad exclusions.** There is no file, directory or line exemption anywhere in it; every
+exclusion is scoped to the matched *value* inside `placeholderReason()`, each clause is individually
+pinned by `EveryPlaceholderClauseIsReachableAndNamed`, and a dedicated non-vacuity test asserts the
+rule actually fired on the real tree rather than staying silent: **39 credential shapes were found
+and every one was excused by a named value clause**, across three distinct clauses (26 shorter than
+16 characters, 9 self-describing, 4 a repeated pattern). Two honest limits on that: the
+self-describing word list contains `test`, `sample`, `stub` and `mock`, so a genuine secret that
+happened to contain one of those substrings would be excused — it is the loosest clause and it
+accounts for 9 of the 39 excusals — and the scan covers `src/`, `tests/` and `cmake/` only, so a
+credential committed under `.github/workflows/` or `packaging/` would not be caught. Requirement
+12.6 asks only for `src/` and `tests/`, so that is within scope, but it is a real blind spot.
+
+**No real credential was found anywhere in the repository.** The checker reports zero defects across
+the whole scanned tree, and an independent scan for AWS access key ids, JWT shapes, PEM private-key
+bodies and tracked `.env` / `.pem` / `.key` / `id_rsa` files found nothing either. The only
+AWS-shaped string in the tree is `AKIAIOSFODNN7EXAMPLE`, which is AWS's own published documentation
+example and appears inside a comment in the checker itself explaining the rule; every PEM hit is a
+bare `-----BEGIN PRIVATE KEY-----\n` marker with no key body, used as a TLS path fixture, which is
+exactly the case `DetectsAPemPrivateKeyWithBodyButNotABareMarker` pins as *not* a defect.
+
+> ### ⚠️ The task-9.9 checkpoint was ticked on a green suite, not on a Requirement 3.6 test
+>
+> 9.9's note reads "the headless sequence of Requirement 3.6 now completes end to end", but **no
+> test performs that sequence.** Requirement 3.6's six-call chain — `project.create`,
+> `timeline.add_track`, `media.import`, `timeline.add_clip`, `project.save`, `timeline.export`,
+> ending in "a file at the requested export path that the media engine can probe and decode" — is
+> not covered anywhere in `tests/`. The closest is 9.7's new
+> `ExportCoordinatorTest.ExportToolRunsThroughTheSharedToolRegistry`, which is a real advance: it
+> drives `timeline.export` through the shared `ToolRegistry` via the production
+> `makeExportToolHandler`, so the wiring the composition root performs is exercised. But it runs
+> against a scripted synthetic encode backend, so the file it asserts into existence is not a
+> decodable media file, and it exercises that one call rather than the chain. On this host the
+> decode half is impossible anyway — see the encoder blockquote below — so closing this properly
+> needs either an injected encode backend that emits a decodable container, or a host with a real
+> encoder stack.
 
 **Stage 10 in progress:** 10.1–10.4 are done. 10.1 added
 `src/services/OfflineIntentInterpreter.{hpp,cpp}` (the 12 documented phrase patterns, matched
@@ -1138,7 +1243,15 @@ compared through a canonicalizing fingerprint that hides freshly generated ident
 nothing else, with the sabotage modes asserted to fail and roll back on **both** paths. 10.4 added
 `tests/services/mention_resolver_property_test.cpp` (Property 63): a unique `@mention` is
 substituted and submitted, while an unmatched or ambiguous one is refused with no tool invoked and
-no project change. **10.5–10.9 remain**, so the stage-10 parent stays open.
+no project change. 10.8 added `tests/docs/repository_hygiene_property_test.cpp` (Property 68,
+Requirement 12.6) on the new `palmier_docs_tests` target: every source file under `src/`, `tests/`
+and `cmake/` is discovered from the filesystem and checked for the GPLv3 SPDX header in its leading
+comment block and for credential literals, with `PALMIER_SOURCE_DIR` and `PALMIER_DOCS_DIR` injected
+as compile definitions so the checker can find its input from the build tree. The target is
+deliberately set up to be **extended** by task 12.3 with `target_sources()` rather than
+re-declared — 12.3 must not add a second `add_executable()` with that name, and must not call
+`palmier_register_test()` on it again. So stage 10 now stands at **10.1–10.4 and 10.8 done, with
+10.5, 10.6, 10.7 and 10.9 remaining**, and the stage-10 parent stays open.
 Stages 11 and 12 are untouched.
 
 **One source fix came out of task 10.4: `MentionResolver`'s two refusal messages now state the
@@ -1167,13 +1280,18 @@ Rather than drop the mandated phrases, the missing tool surface was added:
 `edit.undo` and `edit.redo` expose the already-existing history stack through the tool surface and
 add no new edit semantics.
 
-**Test count (authoritative): 1049 registered tests, 100% passing in both trees.**
-`100% tests passed, 0 tests failed out of 1049` in `build-nogui` and the identical
-`100% tests passed, 0 tests failed out of 1049` in `build-ui` under `xvfb-run -a`, about 19 seconds
-of wall clock each. The +20 over the previous 1029 is tasks 9.5, 9.6, 10.3 and 10.4. Confirmed over
-**two** consecutive `build-nogui` runs with no flakes on the incremental trees; those trees had been
-**deleted and configured from scratch** earlier in the session, so no stale cache could misreport a
-dependency.
+**Test count (authoritative): 1070 registered tests, 100% passing in both trees.**
+`100% tests passed, 0 tests failed out of 1070` in `build-nogui` and the identical
+`100% tests passed, 0 tests failed out of 1070` in `build-ui` under `xvfb-run -a`, about 10 seconds
+of wall clock each. The +21 over the previous 1049 is tasks 9.7 and 10.8: **7 from 9.7**
+(`ExportToolSchema.MatchesTheCoordinatorRanges`, five `ExportCoordinatorTest` cases covering the
+tool's reported fields, its project-derived defaults, its agreement with the dialog for the same
+request, its forwarding of admission rejections without creating a file, and its route through the
+shared registry, plus
+`ToolRegistrySchema.ExportPublishesTheRequirement72ArgumentsAndTheirRanges`) and **14 from 10.8**
+(Property 68 itself plus its 13 `RepositoryHygieneChecker` controls). Both trees were **deleted and
+configured from scratch** for this run, after a full dependency restore, so no stale cache could
+misreport a dependency.
 
 The two trees report the **same** count because every test target is built in both — `build-ui`
 adds only the `palmier-pro` executable (`build-ui/bin/palmier-pro`), which registers no ctest test.
@@ -1187,7 +1305,7 @@ permission bits the case needs in order to make a parent unwritable. It is a pro
 sandbox user, not of the code, and the test was left untouched.
 
 Earlier runs in this session reported **975** and **1029** from two concurrent agents. Of those two,
-**1029 was the correct number** (it is now 1049 after 9.5, 9.6, 10.3 and 10.4); 975 was a tree in
+**1029 was the correct number** (it is now 1070, after 9.5, 9.6, 10.3, 10.4, 9.7 and 10.8); 975 was a tree in
 which the FFmpeg paths had compiled as stubs against a stale cache, as described in the warning
 above. The lesson stands: a count *below* the authoritative number is a stub build, not a
 regression, and calls for a from-scratch reconfigure rather than acceptance.
@@ -1252,10 +1370,29 @@ Vulkan (`/lib64/libvulkan.so`) and — for `build-ui` — Qt 6.8.3 at
 `/usr/local/lib/cmake/Qt6`. The three vendor hardware codec paths (VAAPI, NVENC, QSV) are
 `disabled (SDK not found)`; that is expected on this host and encoding falls back to software.
 
+**The stack was lost again before the 9.7/10.8 verification run, and this time `/usr/local` was
+completely empty** — no FFmpeg, no Qt, no shaderc. Both cheap gates failed up front
+(`pkg-config --exists libavcodec` reported missing, `qmake6` was not on `PATH`), which is the
+fastest way to detect it: check those two before trusting any build tree. The full restore below
+was performed and reproduced the documented configuration exactly, including libavcodec
+**60.31.102** — FFmpeg **6.1.2** configured
+`--enable-shared --disable-static --disable-doc --disable-programs --disable-debug`, i.e. with no
+`libx264`, `libx265`, `libvpx` or `libaom`, which is what keeps the encoder blockquote above true.
+`xz` and `nasm` had to be installed before FFmpeg would unpack and build; they are not in the base
+image. Both build trees were then deleted and configured from scratch.
+
 Restoring this host from scratch takes these steps, in order:
 
 ```
-# FFmpeg 6.1.x from source into /usr/local (discovered via pkg-config)
+# FFmpeg 6.1.x from source into /usr/local (discovered via pkg-config).
+# xz and nasm first — the base image has neither, and without xz the tarball
+# will not even unpack:
+dnf install -y xz nasm
+curl -sSLO https://ffmpeg.org/releases/ffmpeg-6.1.2.tar.xz && tar xf ffmpeg-6.1.2.tar.xz
+cd ffmpeg-6.1.2 && ./configure --prefix=/usr/local --enable-shared --disable-static \
+    --disable-doc --disable-programs --disable-debug && make -j"$(nproc)" && make install
+# shaderc / lcms2 / libsecret / Vulkan come from dnf and match the versions above:
+dnf install -y libshaderc-devel lcms2-devel libsecret-devel vulkan-loader-devel vulkan-headers
 # Qt 6.8.3:
 pip install aqtinstall
 aqt install-qt linux desktop 6.8.3 linux_gcc_64 -m qtshadertools -O /opt/Qt

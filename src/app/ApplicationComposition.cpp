@@ -21,12 +21,15 @@
 #include "app/ApplicationComposition.hpp"
 
 #include <cstdint>
+#include <filesystem>
+#include <initializer_list>
 #include <iostream>
 #include <map>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "core/Duration.hpp"
 #include "core/Error.hpp"
@@ -37,6 +40,7 @@
 #include "core/TimelineEngine.hpp"
 #include "core/Uuid.hpp"
 
+#include "gpu/CodecBridge.hpp"
 #include "gpu/Compositor.hpp"
 #include "gpu/GpuContext.hpp"
 
@@ -52,9 +56,11 @@
 #include "services/AuthenticationService.hpp"
 #include "services/ByokCredentialManager.hpp"
 #include "services/ByokCredentials.hpp"
+#include "services/ExportCoordinator.hpp"
 #include "services/GenerativeClient.hpp"
 #include "services/GenerativeMediaCoordinator.hpp"
 #include "services/Json.hpp"
+#include "services/MediaImportService.hpp"
 #include "services/LocalizationManager.hpp"
 #include "services/McpServer.hpp"
 #include "services/McpToolExecutor.hpp"
@@ -271,6 +277,43 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     // --- Project I/O -------------------------------------------------------
     saveService_ = std::make_unique<services::ProjectSaveService>();
 
+    // --- Export_Coordinator (task 9.7; Requirements 1.1, 7.1-7.11) ---------
+    //
+    // Exactly ONE coordinator, over the one session, the one live GpuContext and the
+    // one decoder teardown queue. Constructing it here rather than per export is
+    // what makes Requirement 7.10 — "an export is already in progress" — a fact
+    // about the application rather than about one caller: the GUI dialog and the
+    // `timeline.export` tool hold the same object and therefore the same single
+    // export slot.
+    //
+    // The coordinator still isolates each export exactly as before: the worker
+    // takes a VALUE-COPY project snapshot and builds its own GPU context,
+    // compositor, decoders and encoder, so nothing constructed above is shared with
+    // it and no export can perturb playback or the project (Requirement 7.2).
+    //
+    // The one collaborator worth binding here is the audio mix: absent an override,
+    // the export renders its audio through the composed AudioEngine's `renderRange`,
+    // so an export contains the same mix playback produces (Requirement 6.5). It is
+    // only a default — a caller that supplied its own renderer keeps it.
+    services::ExportCoordinatorOptions exportOptions = std::move(config.exportOptions);
+    if (!exportOptions.audioRenderer) {
+        exportOptions.audioRenderer = [engine = audioEngine_.get()](
+                                          const Project& project, Duration from, Duration to) {
+            return engine->renderRange(project, from, to);
+        };
+    }
+    exportCoordinator_ = std::make_unique<services::ExportCoordinator>(
+        *session_, *gpu_, *decoderTeardown_, std::move(exportOptions));
+
+    // --- Media_Import_Service (task 9.7; Requirements 1.1, 2.1-2.9) --------
+    //
+    // Exactly one service, importing into the one session's media library. The
+    // probe backend is injectable so `media.import` is exercisable with no media
+    // fixture; absent an injection it is the real FFmpeg prober.
+    mediaImportService_ = std::make_unique<services::MediaImportService>(
+        *session_,
+        config.mediaProbeBackend ? config.mediaProbeBackend : media::ffmpegProbeBackend());
+
     // --- Auth stack: secret store -> BYOK manager -> auth service ----------
     if (config.secretStore != nullptr) {
         secretStore_ = config.secretStore;
@@ -315,12 +358,24 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
         *genGate_, *genRunner_, session_->mediaLibrary(), *placer_);
 
     // --- Shared tool surface (UI == MCP == agent path; Property P4) --------
-    // The generate tool is wired to the composed coordinator; the export tool is
-    // left to the Export Engine (task 10.x) — absent that hook the tool is still
-    // advertised and reports Unsupported when invoked, keeping the tool surface
-    // identical across configurations.
+    // Three hooks, all bound to the single instances constructed above: the
+    // generative coordinator, the Export_Coordinator (task 9.7) and the
+    // Media_Import_Service. With these wired, the whole headless sequence of
+    // Requirement 3.6 — project.create, media.import, timeline.add_track,
+    // timeline.add_clip, project.save, project.open, timeline.export — runs through
+    // this one registry, which is the same registry the GUI and the MCP endpoint
+    // dispatch through (Requirements 3.1, 3.6, 7.2).
+    //
+    // The export hook is `services::makeExportToolHandler`, so the translation from
+    // tool arguments to an `ExportRequest2` and from an `ExportOutcome` to the tool
+    // result lives beside the coordinator and is the same for every caller.
     services::ToolRegistryHooks hooks;
     hooks.generate = makeGenerateHook(*genCoordinator_);
+    hooks.exportTimeline = services::makeExportToolHandler(*exportCoordinator_, *session_,
+                                                           config.exportToolOptions);
+    hooks.importMedia = [service = mediaImportService_.get()](const std::filesystem::path& path) {
+        return service->import(path);
+    };
     toolRegistry_ = std::make_unique<services::ToolRegistry>(
         services::buildDefaultToolRegistry(*session_, std::move(hooks)));
 
@@ -506,6 +561,93 @@ MediaManager& ApplicationComposition::mediaLibrary() noexcept {
 const std::string& ApplicationComposition::softwareCompositingNotice() const noexcept {
     static const std::string kEmpty;
     return playbackEngine_ ? playbackEngine_->softwareCompositingNotice() : kEmpty;
+}
+
+// ---------------------------------------------------------------------------
+// Codec backend report (task 9.7; Requirement 8.7)
+// ---------------------------------------------------------------------------
+//
+// Two booleans per backend, and nothing else happens. `compiledIn` is the
+// build-time `PALMIER_HAVE_*` state, read through
+// `gpu::BridgeAvailability::fromBuildConfig()`. `usableOnHost` is that AND the
+// capabilities the ONE GpuContext already probed at construction: the vendor it
+// selected and whether that device reports hardware encode. The FFmpeg software
+// backend is reported as both compiled in and usable unconditionally, because
+// software encoding is what every other path degrades to — a build in which it
+// were unavailable could not export at all.
+//
+// This deliberately runs NO probe of its own. `media::EncoderSelector` owns the
+// bounded capability probe, and starting a second one here would be both slower
+// than the requirement's 3000 ms ceiling deserves and a second definition of "is
+// this device usable". Reading already-probed capabilities is what makes the two
+// halves of Requirement 8.7 — inside 3000 ms, and changing no encoder selection or
+// export state — true by construction rather than by care: this function is const,
+// mentions neither the coordinator nor the selector, and allocates only its answer.
+
+std::vector<ApplicationComposition::CodecBackendStatus>
+ApplicationComposition::codecBackendReport() const {
+    const gpu::BridgeAvailability availability = gpu::BridgeAvailability::fromBuildConfig();
+    const gpu::GpuCaps            caps =
+        gpu_ ? gpu_->capabilities() : gpu::GpuCaps::software();
+
+    // One shared explanation, so all three vendor entries answer the same question
+    // the same way: compiled in? then is this device that vendor, and does it report
+    // hardware encode?
+    const auto vendorStatus = [&caps](std::string name, bool compiledIn,
+                                      const char* sdkName,
+                                      std::initializer_list<gpu::GpuVendor> vendors) {
+        CodecBackendStatus status;
+        status.name = std::move(name);
+        status.compiledIn = compiledIn;
+        if (!compiledIn) {
+            status.usableOnHost = false;
+            status.detail = std::string(sdkName) +
+                            " was not found at configure time, so this path is not compiled in";
+            return status;
+        }
+        bool vendorMatches = false;
+        for (const gpu::GpuVendor vendor : vendors) {
+            if (caps.vendorId == vendor) vendorMatches = true;
+        }
+        if (!vendorMatches) {
+            status.usableOnHost = false;
+            status.detail = "compiled in, but the selected device vendor is " + caps.vendor;
+            return status;
+        }
+        if (!caps.hwEncode) {
+            status.usableOnHost = false;
+            status.detail = "compiled in, but the selected " + caps.vendor +
+                            " device reports no hardware encode";
+            return status;
+        }
+        status.usableOnHost = true;
+        status.detail = "compiled in and usable on the selected " + caps.vendor + " device";
+        return status;
+    };
+
+    std::vector<CodecBackendStatus> report;
+    report.reserve(4);
+    report.push_back(vendorStatus("vaapi", availability.vaapi, "libva",
+                                  {gpu::GpuVendor::AMD, gpu::GpuVendor::Intel}));
+    report.push_back(vendorStatus("nvenc-nvdec", availability.nvenc && availability.nvdec,
+                                  "nv-codec-headers", {gpu::GpuVendor::NVIDIA}));
+    report.push_back(vendorStatus("qsv", availability.quickSync, "oneVPL/libmfx",
+                                  {gpu::GpuVendor::Intel}));
+
+    CodecBackendStatus software;
+    software.name = "ffmpeg-software";
+    // Requirement 8.7: always both. Asserted from the availability value as well,
+    // so a build that somehow reported otherwise would be visible rather than
+    // papered over by this hard-coded true.
+    software.compiledIn = true;
+    software.usableOnHost = true;
+    software.detail = availability.ffmpegSoftware
+                          ? "always compiled in and always usable: the CPU encode fallback"
+                          : "always compiled in and always usable: the CPU encode fallback "
+                            "(build reported the software bridge as absent, which cannot "
+                            "disable software encoding)";
+    report.push_back(std::move(software));
+    return report;
 }
 
 std::string ApplicationComposition::gpuUnavailableNotice() const {

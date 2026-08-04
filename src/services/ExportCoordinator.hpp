@@ -102,7 +102,9 @@
 #include "media/ExportEngine.hpp"
 #include "media/MediaDecoder.hpp"   // DecodeBackendFactory
 #include "media/MediaEncoder.hpp"
+#include "services/Json.hpp"          // the tool adapter's argument/result value
 #include "services/ProjectSession.hpp"
+#include "services/ToolRegistry.hpp"  // Tool::Handler — the `timeline.export` seam
 
 namespace palmier::services {
 
@@ -460,6 +462,72 @@ private:
 
     std::thread worker_{};
 };
+
+// ---------------------------------------------------------------------------
+// The `timeline.export` tool-surface adapter (task 9.7; Requirements 3.1, 7.2)
+// ---------------------------------------------------------------------------
+//
+// Requirement 7.2 asks for one thing: `timeline.export` must perform *the same*
+// export the dialog performs and report the output path, the encoded frame count,
+// the selected encoder name and whether hardware encode was used. "The same
+// export" is only structurally true if both callers enter through
+// `ExportCoordinator::begin()` — so the tool does not grow an export path of its
+// own. What it needs instead is a translation in each direction, and both are
+// declared here as FREE FUNCTIONS rather than buried in a lambda, so each is
+// separately callable from a test:
+//
+//   * `exportRequestFromToolArguments` — the published tool arguments to an
+//     `ExportRequest2`, filling every argument the caller omitted from the
+//     current project (canvas resolution, timeline frame rate) so the defaults
+//     are the project's own rather than an invented constant.
+//   * `exportOutcomeToJson` — the `ExportOutcome` to the tool's success payload.
+//     Every field Requirement 7.2 names comes from the outcome; nothing is
+//     recomputed here, so the tool cannot report something the export did not do.
+//
+// The handler is synchronous, because a tool call is: it begins the export and
+// then awaits its own completion under a BOUNDED budget (`ExportToolOptions`),
+// pumping the coordinator on the calling thread. A budget overrun cancels the
+// export — which removes the partial file through the coordinator's existing
+// scope guard — and reports `ErrorCode::Timeout`, so a wedged encoder makes a tool
+// call fail rather than hang. Progress reports are consumed by that same pump;
+// the GUI, which wants them on the main thread while its window keeps painting,
+// does not take this path (it drives `begin()` + `pump()` itself).
+
+/// How long the `timeline.export` handler waits for its own export.
+struct ExportToolOptions {
+    /// The bounded wait. The default sits INSIDE `McpToolExecutor`'s 60 s
+    /// per-invocation budget, so the tool reports its own timeout (naming the
+    /// budget and cleaning up the partial output) rather than being killed by the
+    /// executor's.
+    std::chrono::milliseconds budget{std::chrono::seconds{55}};
+};
+
+/// Translate published `timeline.export` arguments into an `ExportRequest2`,
+/// defaulting the omitted ones from `project`.
+///
+/// Rejects only what it cannot translate: a missing or non-string `outputPath` or
+/// `format`, and a `codec` outside the declared set. Every RANGE — path length,
+/// resolution, frame rate, bit rate, container, codec, an existing destination
+/// without acknowledgement — is left to `ExportCoordinator::validate()`, which is
+/// the one place those bounds are defined and the place Requirements 7.9 and 7.11
+/// require them to be checked before anything is created.
+///
+/// Defaults: `width`/`height` → the project canvas; `fps` → the project timeline
+/// frame rate; `codec` → VP9 for a `webm` container, H.264 otherwise;
+/// `bitrateKbps` → 8000; `includeAudio` and `preferHardware` → true;
+/// `overwrite` → false (Requirement 7.11's acknowledgement is never implied).
+[[nodiscard]] Result<ExportRequest2> exportRequestFromToolArguments(const Json& input,
+                                                                   const Project& project);
+
+/// Render `outcome` as the `timeline.export` success payload (Requirement 7.2).
+[[nodiscard]] Json exportOutcomeToJson(const ExportOutcome& outcome);
+
+/// The `timeline.export` handler over `coordinator`. `session` supplies the
+/// current project the omitted arguments are defaulted from; both must outlive the
+/// returned handler.
+[[nodiscard]] Tool::Handler makeExportToolHandler(ExportCoordinator& coordinator,
+                                                  ProjectSession&    session,
+                                                  ExportToolOptions  options = {});
 
 } // namespace palmier::services
 
