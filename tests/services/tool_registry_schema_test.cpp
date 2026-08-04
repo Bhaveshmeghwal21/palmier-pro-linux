@@ -155,6 +155,11 @@ std::vector<ToolExpectation> expectedSurface() {
         {"media.list", {}},
         {"timeline.add_track", {{"kind", "string", true}}},
         {"timeline.remove_track", {{"trackId", "string", true}}},
+        // Task 10.1 — the third track edit, added so the offline interpreter's
+        // documented "mute track N" / "unmute track N" phrases resolve to a tool
+        // that is really in the surface (Requirements 11.2, 11.3).
+        {"timeline.set_track_muted",
+         {{"trackId", "string", true}, {"muted", "boolean", true}}},
         {"timeline.add_clip",
          {{"trackId", "string", true},
           {"assetId", "string", true},
@@ -199,6 +204,11 @@ std::vector<ToolExpectation> expectedSurface() {
           {"format", "string", true},
           {"width", "integer", false},
           {"height", "integer", false}}},
+        // Task 10.1 — the tool-surface expression of the engine's undo/redo stack,
+        // which the offline interpreter's `undo` and `redo` phrases resolve to.
+        // Neither takes an argument.
+        {"edit.undo", {}},
+        {"edit.redo", {}},
     };
 }
 

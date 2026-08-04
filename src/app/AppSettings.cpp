@@ -246,6 +246,28 @@ constexpr KeySpec kKeys[] = {
          config.remote.idleTimeout = std::chrono::seconds{seconds};
          return true;
      }},
+    // Task 10.1 / Requirement 11.1: which Agent_Interpreter to install
+    // (`offline`, `hosted` or `byok`).
+    //
+    // Only emptiness is checked here. Deciding whether the id names a real
+    // interpreter is `services::AgentInterpreterRegistry`'s job — the same split
+    // `remote.bind_address` above uses, and for the same reason: the settings layer
+    // carries the operator's string, and the component that owns the value set
+    // validates it. That split is load-bearing here, because the registry's answer
+    // to an unrecognised id is not a rejection but a documented FALLBACK to
+    // `offline` plus a startup error naming the rejected id (Requirement 11.8);
+    // rejecting the value at this layer would silently substitute the default and
+    // lose that diagnostic.
+    {"agent.interpreter", "PALMIER_AGENT_INTERPRETER", "--agent-interpreter", false,
+     [](std::string_view value, AppConfig& config, std::string& error) {
+         const std::string_view id = trim(value);
+         if (id.empty()) {
+             error = "expected an agent interpreter id ('offline', 'hosted' or 'byok')";
+             return false;
+         }
+         config.agentInterpreterId = std::string(id);
+         return true;
+     }},
 };
 
 [[nodiscard]] const KeySpec* findKey(std::string_view key) {

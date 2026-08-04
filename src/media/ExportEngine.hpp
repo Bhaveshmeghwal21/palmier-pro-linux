@@ -56,6 +56,8 @@
 #include <functional>
 #include <string>
 
+#include <optional>
+
 #include "core/Duration.hpp"
 #include "core/FrameRate.hpp"
 #include "core/Project.hpp"
@@ -63,9 +65,53 @@
 #include "core/Result.hpp"
 #include "gpu/Compositor.hpp"
 #include "gpu/GpuTypes.hpp"
+#include "media/AudioGraph.hpp"
 #include "media/MediaEncoder.hpp"
 
 namespace palmier::media {
+
+// ---------------------------------------------------------------------------
+// AudioRangeRenderer — where the export audio mix comes from
+// ---------------------------------------------------------------------------
+
+/// Mixes `[from, to)` of the project's audio into ONE interleaved-float buffer at
+/// the Audio_Engine output format — the export audio seam (task 9.3;
+/// Requirements 6.5, 6.11).
+///
+/// In production this is bound to `media::AudioEngine::renderRange` (task 8.4),
+/// whose `mixWindow` builds an EXPORT-LOCAL `AudioGraph` per call and does all of
+/// the resampling, per-clip gain, summing and [-1, 1] clamping. Nothing in this
+/// file mixes audio itself: a second mixer would be a second definition of
+/// "correct audio", and the range renderer exists precisely so there is only one.
+///
+/// The renderer is a seam rather than an `AudioEngine&` because the engine needs
+/// a decoder factory, a sink and a teardown queue that an export driven by mock
+/// frames has no use for, and because Requirement 6.11's "no clip on an unmuted
+/// audio-bearing track" case must be reachable without any of them.
+using AudioRangeRenderer =
+    std::function<Result<AudioBuffer>(const Project&, Duration /*from*/, Duration /*to*/)>;
+
+/// The fallback renderer used when an export asks for audio and no renderer was
+/// injected: an export-local `AudioGraph` mixing ZERO sources into a full-length
+/// buffer, i.e. exact silence for the requested range. This is the same call
+/// `AudioEngine::mixWindow` makes for a range that no unmuted audio-bearing track
+/// covers, so an audio-less timeline still yields one silent stream spanning the
+/// whole duration (Requirement 6.11).
+[[nodiscard]] AudioRangeRenderer silentAudioRangeRenderer(AudioFormat format);
+
+// ---------------------------------------------------------------------------
+// ExportCancelPredicate — how a running export is stopped
+// ---------------------------------------------------------------------------
+
+/// Consulted at the top of every frame: true stops the export at that frame
+/// boundary with ErrorCode::Cancelled, after which the partial output file is
+/// removed exactly as for any other mid-export failure (Requirement 7.7).
+///
+/// A predicate rather than a signal or a deadline: the caller
+/// (`services::ExportCoordinator`) owns an atomic flag, so the frame at which an
+/// export stops is decided by a value the caller can set at a known moment
+/// instead of by how long anything took. May be empty (never cancelled).
+using ExportCancelPredicate = std::function<bool()>;
 
 // ---------------------------------------------------------------------------
 // ExportRequest — what to export and how
@@ -91,6 +137,10 @@ namespace palmier::media {
 ///   * progressInterval — the minimum cadence at which progress is emitted. The
 ///     default (1s) meets Requirement 11.2's "at least once per second"; tests
 ///     may pass a shorter interval (e.g. 0) to observe every frame.
+///   * includeAudio / audio — when `includeAudio` is set the output carries
+///     exactly one audio stream mixed from the same clip set, and `audio`
+///     describes it (default: the Audio_Engine output format, AAC). Defaults to
+///     false so an existing video-only caller is unaffected.
 struct ExportRequest {
     gpu::CodecId            codec{gpu::CodecId::H264};
     Resolution              resolution{};
@@ -103,6 +153,11 @@ struct ExportRequest {
     std::string             containerFormat{};
     gpu::RgbaColor          clearColor{gpu::RgbaColor::opaqueBlack()};
     std::chrono::milliseconds progressInterval{std::chrono::seconds{1}};
+    bool                    includeAudio{false};
+    AudioEncodeSpec         audio{};
+    /// Consulted before each frame is rendered; true stops the export at that
+    /// frame boundary and removes the partial output (Requirement 7.7).
+    ExportCancelPredicate   cancelled{};
 };
 
 // ---------------------------------------------------------------------------
@@ -134,6 +189,15 @@ struct ExportResult {
     std::filesystem::path outputPath{};      ///< where the output was written.
     bool                  usedHardwareEncode{false}; ///< hardware encoder was used.
     bool                  usedSoftwareFallback{false}; ///< HW init failed -> SW.
+    /// The output carries one audio stream (Requirement 6.5).
+    bool                  containsAudio{false};
+    /// Audio blocks submitted — one per rendered video frame interval.
+    std::size_t           audioBlocks{0};
+    /// Audio FRAMES (one sample per channel) submitted across the whole export.
+    /// At the audio stream's sample rate this is the mixed audio duration, which
+    /// spans the timeline duration and exceeds it by less than one video frame
+    /// interval (Requirements 6.8, 6.11, 7.4).
+    std::uint64_t         audioFrames{0};
 };
 
 // ---------------------------------------------------------------------------
@@ -151,7 +215,17 @@ public:
     /// ClipFrameProvider (the MediaDecoder in production) so it can fetch source
     /// pixels for visible clips; a timeline position with no visible clips is
     /// rendered as the cleared canvas and needs no provider.
+    ///
+    /// This overload has no audio source: an export that asks for audio through
+    /// it gets one silent stream spanning the timeline duration, which is exactly
+    /// Requirement 6.11's outcome.
     explicit ExportEngine(gpu::Compositor& compositor) noexcept;
+
+    /// As above, with the audio mix source injected. Production binds `audio` to
+    /// `media::AudioEngine::renderRange` so the export mix and the playback mix
+    /// come from the same `AudioGraph` code (task 9.3). An empty renderer behaves
+    /// exactly like the single-argument constructor.
+    ExportEngine(gpu::Compositor& compositor, AudioRangeRenderer audio);
 
     /// Render + encode the timeline using the default FFmpeg encode backend.
     ///   * `project` is only read — the source timeline is never modified.
@@ -187,6 +261,18 @@ public:
     [[nodiscard]] static std::size_t plannedFrameCount(const Project& project,
                                                        FrameRate frameRate) noexcept;
 
+    /// Replace the audio mix source. Exposed so a caller that builds the engine
+    /// before its audio engine exists (the composition root's construction order)
+    /// can still bind the production renderer.
+    void setAudioRangeRenderer(AudioRangeRenderer audio) { audio_ = std::move(audio); }
+
+    /// True when an audio mix source is bound. When false an audio export still
+    /// produces one silent stream (Requirement 6.11).
+    [[nodiscard]] bool hasAudioRangeRenderer() const noexcept
+    {
+        return static_cast<bool>(audio_);
+    }
+
 private:
     // Shared implementation of both run() overloads. `factory` selects the
     // encode backend (the default FFmpeg factory or an injected one).
@@ -195,7 +281,8 @@ private:
                                                const EncodeBackendFactory& factory,
                                                const ExportProgressCallback& progress);
 
-    gpu::Compositor& compositor_;
+    gpu::Compositor&   compositor_;
+    AudioRangeRenderer audio_{};
 };
 
 } // namespace palmier::media

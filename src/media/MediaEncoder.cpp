@@ -2,6 +2,15 @@
 //
 // media/MediaEncoder.cpp — MediaEncoder routing/fallback + FFmpeg encode backend.
 //
+// Task 9.3 adds the second (audio) stream (Requirement 6.5). The backend-agnostic
+// half — EncodeSpec::audio validation, submitAudio()'s format and ordering guards,
+// and the "flush both streams then write the trailer" contract of finish() — is
+// always compiled and fully exercised through the IEncodeBackend seam. The
+// concrete libav* audio work (one extra stream added to the muxer before the
+// header is written, an interleaved-float FIFO cut into the codec's fixed frame
+// size, libswresample bridging float -> the codec's sample format) lives beside
+// the video backend under PALMIER_HAVE_FFMPEG.
+//
 // The MediaEncoder logic (create/submit/finish, the HW-preferred-with-SW-
 // fallback-on-init routing through the GPU CodecBridge, and the resolution /
 // presentation-order guards) is backend-agnostic and always compiled: it drives
@@ -14,16 +23,22 @@
 
 #include "media/MediaEncoder.hpp"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
+#include <vector>
 
 #if defined(PALMIER_HAVE_FFMPEG)
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/channel_layout.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
+#include <libavutil/version.h>
+#include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
 #endif
@@ -68,10 +83,33 @@ namespace {
     }
 }
 
+/// The muxer-side state of the optional audio stream (Requirement 6.5). Built by
+/// openFfmpegEncoder BEFORE the container header is written — a stream cannot be
+/// added afterwards — and then owned by the backend.
+struct FfmpegAudioStream {
+    AVCodecContext* ctx{nullptr};
+    AVStream*       stream{nullptr};
+    SwrContext*     swr{nullptr};
+    AVFrame*        frame{nullptr};
+    /// Samples per encoded frame. Fixed-frame-size codecs (AAC: 1024) require
+    /// exactly this count for every frame but the last.
+    int             frameSize{0};
+    int             channels{0};
+    int             sampleRate{0};
+    /// Interleaved-float samples received but not yet encoded, so a caller may
+    /// submit blocks of any length while the encoder still sees whole frames.
+    std::vector<float> fifo{};
+    /// Next frame's pts in samples (the audio stream's time base is 1/rate).
+    std::int64_t    nextPts{0};
+
+    [[nodiscard]] bool isOpen() const noexcept { return ctx != nullptr; }
+};
+
 class FfmpegEncodeBackend final : public IEncodeBackend {
 public:
-    FfmpegEncodeBackend(AVFormatContext* fmt, AVCodecContext* codec, AVStream* stream)
-        : fmt_(fmt), codec_(codec), stream_(stream) {
+    FfmpegEncodeBackend(AVFormatContext* fmt, AVCodecContext* codec, AVStream* stream,
+                        FfmpegAudioStream audio = {})
+        : fmt_(fmt), codec_(codec), stream_(stream), audio_(std::move(audio)) {
         packet_ = av_packet_alloc();
         frame_ = av_frame_alloc();
         if (frame_ != nullptr) {
@@ -85,6 +123,9 @@ public:
     ~FfmpegEncodeBackend() override {
         if (sws_ != nullptr) sws_freeContext(sws_);
         if (frame_ != nullptr) av_frame_free(&frame_);
+        if (audio_.frame != nullptr) av_frame_free(&audio_.frame);
+        if (audio_.swr != nullptr) swr_free(&audio_.swr);
+        if (audio_.ctx != nullptr) avcodec_free_context(&audio_.ctx);
         if (packet_ != nullptr) av_packet_free(&packet_);
         if (codec_ != nullptr) avcodec_free_context(&codec_);
         if (fmt_ != nullptr) {
@@ -135,11 +176,32 @@ public:
         return sendFrame(frame_);
     }
 
+    [[nodiscard]] Result<void> encodeAudio(const EncoderInputAudio& audio) override {
+        if (!audio_.isOpen()) {
+            return failedPrecondition("this output has no audio stream");
+        }
+        if (audio.buffer == nullptr) {
+            return invalidArgument("submitted audio block has no buffer");
+        }
+        // Buffer the block's interleaved float samples and emit whole encoder
+        // frames; a fixed-frame-size codec (AAC) cannot be fed arbitrary lengths.
+        const std::vector<float>& samples = audio.buffer->samples();
+        audio_.fifo.insert(audio_.fifo.end(), samples.begin(), samples.end());
+        return drainAudio(/*flush=*/false);
+    }
+
     [[nodiscard]] Result<void> finish() override {
         if (codec_ == nullptr) {
             return failedPrecondition("encoder is not open");
         }
-        // Drain the encoder.
+        // Flush BOTH streams before the trailer (Requirement 6.5): the buffered
+        // audio tail, then each encoder's internal delay, then finalize the mux.
+        if (audio_.isOpen()) {
+            Result<void> tail = drainAudio(/*flush=*/true);
+            if (tail.isError()) return tail;
+            Result<void> audioFlushed = sendAudioFrame(nullptr);
+            if (audioFlushed.isError()) return audioFlushed;
+        }
         Result<void> flushed = sendFrame(nullptr);
         if (flushed.isError()) return flushed;
         if (av_write_trailer(fmt_) < 0) {
@@ -149,6 +211,66 @@ public:
     }
 
 private:
+    /// Encode whole frames out of the interleaved-float FIFO. With `flush` set the
+    /// trailing partial frame is encoded too — permitted for the LAST frame of a
+    /// fixed-frame-size codec, which is exactly what this is.
+    [[nodiscard]] Result<void> drainAudio(bool flush) {
+        const std::size_t channels = static_cast<std::size_t>(audio_.channels);
+        const std::size_t full = static_cast<std::size_t>(audio_.frameSize) * channels;
+        if (channels == 0 || full == 0) {
+            return makeError(ErrorCode::Internal, "the audio stream has no frame geometry");
+        }
+
+        while (audio_.fifo.size() >= full || (flush && !audio_.fifo.empty())) {
+            const std::size_t take = std::min(full, audio_.fifo.size());
+            const int frames = static_cast<int>(take / channels);
+            if (frames <= 0) break;
+
+            if (av_frame_make_writable(audio_.frame) < 0) {
+                return makeError(ErrorCode::Internal, "audio encoder frame is not writable");
+            }
+            const std::uint8_t* inData[1] = {
+                reinterpret_cast<const std::uint8_t*>(audio_.fifo.data())};
+            const int converted =
+                swr_convert(audio_.swr, audio_.frame->data, frames, inData, frames);
+            if (converted < 0) {
+                return makeError(ErrorCode::Internal, "converting audio samples failed");
+            }
+            audio_.frame->nb_samples = converted;
+            audio_.frame->pts = audio_.nextPts;
+            audio_.nextPts += converted;
+
+            Result<void> sent = sendAudioFrame(audio_.frame);
+            if (sent.isError()) return sent;
+
+            audio_.fifo.erase(audio_.fifo.begin(),
+                              audio_.fifo.begin() + static_cast<std::ptrdiff_t>(take));
+        }
+        return ok();
+    }
+
+    [[nodiscard]] Result<void> sendAudioFrame(AVFrame* f) {
+        const int sent = avcodec_send_frame(audio_.ctx, f);
+        if (sent < 0 && sent != AVERROR_EOF) {
+            return makeError(ErrorCode::Io, "submitting a block to the audio encoder failed");
+        }
+        for (;;) {
+            const int recv = avcodec_receive_packet(audio_.ctx, packet_);
+            if (recv == AVERROR(EAGAIN) || recv == AVERROR_EOF) break;
+            if (recv < 0) {
+                return makeError(ErrorCode::Io, "receiving an encoded audio packet failed");
+            }
+            av_packet_rescale_ts(packet_, audio_.ctx->time_base, audio_.stream->time_base);
+            packet_->stream_index = audio_.stream->index;
+            const int written = av_interleaved_write_frame(fmt_, packet_);
+            av_packet_unref(packet_);
+            if (written < 0) {
+                return makeError(ErrorCode::Io, "writing an encoded audio packet failed");
+            }
+        }
+        return ok();
+    }
+
     [[nodiscard]] Result<void> sendFrame(AVFrame* f) {
         const int sent = avcodec_send_frame(codec_, f);
         if (sent < 0 && sent != AVERROR_EOF) {
@@ -171,13 +293,139 @@ private:
         return ok();
     }
 
-    AVFormatContext* fmt_{nullptr};
-    AVCodecContext*  codec_{nullptr};
-    AVStream*        stream_{nullptr};
-    AVPacket*        packet_{nullptr};
-    AVFrame*         frame_{nullptr};
-    SwsContext*      sws_{nullptr};
+    AVFormatContext*  fmt_{nullptr};
+    AVCodecContext*   codec_{nullptr};
+    AVStream*         stream_{nullptr};
+    AVPacket*         packet_{nullptr};
+    AVFrame*          frame_{nullptr};
+    SwsContext*       sws_{nullptr};
+    FfmpegAudioStream audio_{};
 };
+
+/// Release an audio stream's encoder/resampler/frame. Used on the open paths that
+/// fail AFTER the audio stream was built (the backend's destructor owns it once
+/// construction succeeds).
+void freeFfmpegAudioStream(FfmpegAudioStream& audio) noexcept {
+    if (audio.frame != nullptr) av_frame_free(&audio.frame);
+    if (audio.swr != nullptr) swr_free(&audio.swr);
+    if (audio.ctx != nullptr) avcodec_free_context(&audio.ctx);
+}
+
+/// Add the audio stream to `fmt` and initialize its encoder and resampler. Called
+/// before the container header is written. On failure nothing is added and the
+/// error names the audio stage, so MediaEncoder reports audio encoding as the
+/// failing stage (Requirement 6.10).
+[[nodiscard]] Result<FfmpegAudioStream> openFfmpegAudioStream(AVFormatContext* fmt,
+                                                              const AudioEncodeSpec& spec) {
+    FfmpegAudioStream audio;
+    audio.channels = spec.channels;
+    audio.sampleRate = spec.sampleRate;
+
+    const AVCodec* encoder = avcodec_find_encoder_by_name(spec.codecName.c_str());
+    if (encoder == nullptr) {
+        return err<FfmpegAudioStream>(makeError(
+            ErrorCode::Unsupported, "audio encoder not found: " + spec.codecName));
+    }
+
+    AVStream* stream = avformat_new_stream(fmt, nullptr);
+    if (stream == nullptr) {
+        return err<FfmpegAudioStream>(
+            makeError(ErrorCode::Internal, "could not create the output audio stream"));
+    }
+    AVCodecContext* ctx = avcodec_alloc_context3(encoder);
+    if (ctx == nullptr) {
+        return err<FfmpegAudioStream>(
+            makeError(ErrorCode::Internal, "could not allocate an audio encoder context"));
+    }
+
+    // The encoder's sample format is whatever the codec prefers; the graph always
+    // hands us interleaved float, so libswresample bridges the two.
+    ctx->sample_fmt = encoder->sample_fmts != nullptr ? encoder->sample_fmts[0]
+                                                      : AV_SAMPLE_FMT_FLTP;
+    ctx->sample_rate = spec.sampleRate;
+    ctx->time_base = AVRational{1, spec.sampleRate};
+    if (spec.bitrateBitsPerSecond > 0) {
+        ctx->bit_rate = spec.bitrateBitsPerSecond;
+    }
+#if LIBAVUTIL_VERSION_MAJOR >= 57
+    av_channel_layout_default(&ctx->ch_layout, spec.channels);
+#else
+    ctx->channels = spec.channels;
+    ctx->channel_layout = static_cast<std::uint64_t>(
+        av_get_default_channel_layout(spec.channels));
+#endif
+    if ((fmt->oformat->flags & AVFMT_GLOBALHEADER) != 0) {
+        ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    }
+
+    if (avcodec_open2(ctx, encoder, nullptr) < 0) {
+        avcodec_free_context(&ctx);
+        return err<FfmpegAudioStream>(makeError(
+            ErrorCode::Internal, "could not initialize the " + spec.codecName + " audio encoder"));
+    }
+    if (avcodec_parameters_from_context(stream->codecpar, ctx) < 0) {
+        avcodec_free_context(&ctx);
+        return err<FfmpegAudioStream>(
+            makeError(ErrorCode::Internal, "could not copy audio encoder parameters"));
+    }
+    stream->time_base = ctx->time_base;
+
+    // A fixed-frame-size codec (AAC: 1024) dictates the encode chunk; a
+    // variable-frame-size codec (PCM) reports 0, for which any chunk is legal.
+    audio.frameSize = ctx->frame_size > 0 ? ctx->frame_size : 1024;
+
+    SwrContext* swr = nullptr;
+#if LIBAVUTIL_VERSION_MAJOR >= 57
+    AVChannelLayout inLayout;
+    av_channel_layout_default(&inLayout, spec.channels);
+    if (swr_alloc_set_opts2(&swr, &ctx->ch_layout, ctx->sample_fmt, ctx->sample_rate, &inLayout,
+                            AV_SAMPLE_FMT_FLT, spec.sampleRate, 0, nullptr) < 0) {
+        swr = nullptr;
+    }
+#else
+    swr = swr_alloc_set_opts(nullptr,
+                             static_cast<std::int64_t>(ctx->channel_layout), ctx->sample_fmt,
+                             ctx->sample_rate,
+                             av_get_default_channel_layout(spec.channels), AV_SAMPLE_FMT_FLT,
+                             spec.sampleRate, 0, nullptr);
+#endif
+    if (swr == nullptr || swr_init(swr) < 0) {
+        if (swr != nullptr) swr_free(&swr);
+        avcodec_free_context(&ctx);
+        return err<FfmpegAudioStream>(
+            makeError(ErrorCode::Internal, "could not initialize the audio resampler"));
+    }
+
+    AVFrame* frame = av_frame_alloc();
+    if (frame == nullptr) {
+        swr_free(&swr);
+        avcodec_free_context(&ctx);
+        return err<FfmpegAudioStream>(
+            makeError(ErrorCode::Internal, "could not allocate an audio encoder frame"));
+    }
+    frame->format = ctx->sample_fmt;
+    frame->sample_rate = ctx->sample_rate;
+    frame->nb_samples = audio.frameSize;
+#if LIBAVUTIL_VERSION_MAJOR >= 57
+    av_channel_layout_copy(&frame->ch_layout, &ctx->ch_layout);
+#else
+    frame->channels = ctx->channels;
+    frame->channel_layout = ctx->channel_layout;
+#endif
+    if (av_frame_get_buffer(frame, 0) < 0) {
+        av_frame_free(&frame);
+        swr_free(&swr);
+        avcodec_free_context(&ctx);
+        return err<FfmpegAudioStream>(
+            makeError(ErrorCode::Internal, "could not allocate the audio encoder frame buffer"));
+    }
+
+    audio.ctx = ctx;
+    audio.stream = stream;
+    audio.swr = swr;
+    audio.frame = frame;
+    return audio;
+}
 
 [[nodiscard]] Result<std::unique_ptr<IEncodeBackend>> openFfmpegEncoder(
     const EncodeSpec& spec, const gpu::CodecRoute& route) {
@@ -249,8 +497,22 @@ private:
             makeError(ErrorCode::Internal, "could not copy encoder parameters"));
     }
 
+    // The optional audio stream must join the container BEFORE the header is
+    // written — a muxer accepts no new stream afterwards (Requirement 6.5).
+    FfmpegAudioStream audio;
+    if (spec.audio.has_value()) {
+        Result<FfmpegAudioStream> opened = openFfmpegAudioStream(fmt, *spec.audio);
+        if (opened.isError()) {
+            avcodec_free_context(&codec);
+            avformat_free_context(fmt);
+            return err<std::unique_ptr<IEncodeBackend>>(std::move(opened).error());
+        }
+        audio = std::move(opened).value();
+    }
+
     if ((fmt->oformat->flags & AVFMT_NOFILE) == 0) {
         if (avio_open(&fmt->pb, spec.outputPath.c_str(), AVIO_FLAG_WRITE) < 0) {
+            freeFfmpegAudioStream(audio);
             avcodec_free_context(&codec);
             avformat_free_context(fmt);
             return err<std::unique_ptr<IEncodeBackend>>(makeError(
@@ -261,6 +523,7 @@ private:
         if ((fmt->oformat->flags & AVFMT_NOFILE) == 0 && fmt->pb != nullptr) {
             avio_closep(&fmt->pb);
         }
+        freeFfmpegAudioStream(audio);
         avcodec_free_context(&codec);
         avformat_free_context(fmt);
         return err<std::unique_ptr<IEncodeBackend>>(
@@ -268,7 +531,7 @@ private:
     }
 
     return std::unique_ptr<IEncodeBackend>(
-        std::make_unique<FfmpegEncodeBackend>(fmt, codec, stream));
+        std::make_unique<FfmpegEncodeBackend>(fmt, codec, stream, std::move(audio)));
 }
 
 } // namespace
@@ -322,6 +585,27 @@ Result<MediaEncoder> MediaEncoder::create(const EncodeSpec& spec,
     }
     if (spec.codec == gpu::CodecId::Unknown) {
         return err<MediaEncoder>(unsupported("no encoder exists for an unknown codec"));
+    }
+    // The optional audio stream is validated with the same "reject before the
+    // backend is built" discipline as the video parameters, so a malformed audio
+    // request never opens the output file (Requirement 6.5).
+    if (spec.audio.has_value()) {
+        const AudioEncodeSpec& audio = *spec.audio;
+        if (audio.sampleRate <= 0) {
+            return err<MediaEncoder>(
+                invalidArgument("audio encode sample rate must be positive"));
+        }
+        if (audio.channels <= 0) {
+            return err<MediaEncoder>(
+                invalidArgument("audio encode channel count must be positive"));
+        }
+        if (audio.bitrateBitsPerSecond < 0) {
+            return err<MediaEncoder>(
+                invalidArgument("audio encode bit rate must not be negative"));
+        }
+        if (audio.codecName.empty()) {
+            return err<MediaEncoder>(invalidArgument("audio encode requires a codec name"));
+        }
     }
     if (!factory) {
         return err<MediaEncoder>(makeError(ErrorCode::Internal, "no encode backend factory provided"));
@@ -407,6 +691,60 @@ Result<void> MediaEncoder::submit(const gpu::RenderedFrame& frame) {
     lastPresentation_ = pts;
     hasSubmitted_ = true;
     ++submittedFrames_;
+    return ok();
+}
+
+Result<void> MediaEncoder::submitAudio(const AudioBuffer& buffer, Duration presentation) {
+    if (finished_) {
+        return failedPrecondition("cannot submit to an encoder that was already finished");
+    }
+    if (!backend_) {
+        return failedPrecondition("encoder is not open");
+    }
+    // A video-only encoder rejects audio rather than dropping it silently: an
+    // export that believed it was writing audio must find out here, not by
+    // probing the finished file (Requirement 6.5).
+    if (!spec_.audio.has_value()) {
+        return failedPrecondition(
+            "this encoder has no audio stream: EncodeSpec::audio was not set");
+    }
+    const AudioEncodeSpec& audioSpec = *spec_.audio;
+
+    // The submitted format must be exactly the configured stream format. Silent
+    // resampling here would put a second, hidden mixer in the pipeline; the
+    // caller mixes through AudioGraph, which already produces this format.
+    if (buffer.sampleRate() != audioSpec.sampleRate) {
+        return invalidArgument(
+            "submitted audio sample rate does not match the encoder audio spec");
+    }
+    if (buffer.channels() != audioSpec.channels) {
+        return invalidArgument(
+            "submitted audio channel count does not match the encoder audio spec");
+    }
+
+    // Blocks must be queued in non-decreasing presentation order, the same rule
+    // the video stream follows. A regression is rejected without advancing state,
+    // leaving the stream uncorrupted.
+    if (hasSubmittedAudio_ && presentation < lastAudioPresentation_) {
+        return invalidArgument(
+            "submitted audio presentation time regresses below the previous block");
+    }
+
+    EncoderInputAudio input;
+    input.presentation = presentation;
+    input.buffer = &buffer;
+
+    Result<void> encoded = backend_->encodeAudio(input);
+    if (encoded.isError()) {
+        // Do not advance ordering/count state on failure, exactly as submit()
+        // does: the caller sees the error and the stream is left uncorrupted.
+        return encoded;
+    }
+
+    lastAudioPresentation_ = presentation;
+    hasSubmittedAudio_ = true;
+    ++submittedAudioBlocks_;
+    submittedAudioFrames_ += static_cast<std::uint64_t>(buffer.frameCount());
     return ok();
 }
 

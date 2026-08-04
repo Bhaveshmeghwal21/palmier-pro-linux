@@ -277,3 +277,62 @@ if(PALMIER_ENABLE_OPENSSL AND OPENSSL_FOUND)
     target_compile_definitions(palmier_services PRIVATE PALMIER_HAVE_OPENSSL=1)
     target_link_libraries(palmier_services PRIVATE PkgConfig::OPENSSL)
 endif()
+
+
+
+# --- Task 10.1: the offline interpreter + the interpreter registry -----------
+#
+# design.md D9 makes agent reasoning pluggable by configuration id, and makes the
+# DEFAULT a real implementation rather than an inert one:
+#
+#   * services::OfflineIntentInterpreter — the documented table of 12 phrase
+#     patterns matched case-insensitively on the whitespace-trimmed, interior-
+#     whitespace-collapsed utterance, resolving to tool invocations with captured
+#     arguments. It is pure translation over a string: no socket, no credential,
+#     no project access, so it issues no network request and answers well inside
+#     the 1 s bound (Requirement 11.3), and a rejected or unmappable utterance
+#     cannot have changed anything (Requirements 11.4, 11.9). The one route to the
+#     network any interpreter built on it would use is a declared, injectable seam,
+#     which is what lets the property test PROVE the no-network claim rather than
+#     assume it.
+#   * services::AgentInterpreterRegistry — ids `offline` (default), `hosted`,
+#     `byok`, replacing the composition root's `makeUnconfiguredInterpreter()`. An
+#     unknown id, or a credential-less `hosted`/`byok`, installs `offline` and
+#     records a startup error naming the rejected id and the unmet requirement, so
+#     a mistyped configuration string can never stop the editor from opening
+#     (Requirements 11.1, 11.8).
+#
+# Both depend only on Palmier::core plus the service-layer Json/AgentOrchestrator
+# surface and ProjectSession (for the session-backed editor-context provider); no
+# HTTP, no Qt and no new dependency enters here. Appended so the existing source
+# list above is preserved verbatim.
+target_sources(palmier_services PRIVATE
+    OfflineIntentInterpreter.cpp
+    AgentInterpreterRegistry.cpp)
+
+
+
+# --- Task 9.4: the Export_Coordinator ----------------------------------------
+#
+# services::ExportCoordinator owns admission, isolation, reporting and cleanup for
+# one export (Requirements 6.5, 6.10, 6.11, 7.1-7.7, 7.9, 7.10, 7.11, 8.11):
+#
+#   * a PURE STATIC validate() run before anything is created, which is what makes
+#     "create no file at the requested path" true for every rejection, and an
+#     overwrite check that leaves an existing destination byte-for-byte intact;
+#   * one std::thread per export over a VALUE-COPY Project snapshot with an
+#     export-local gpu::GpuContext, gpu::Compositor, DecoderClipFrameProvider,
+#     audio mix and media::MediaEncoder, and no reference to the ProjectSession at
+#     all — which is how "an export never touches the project" is structural
+#     rather than merely intended;
+#   * progress marshalled to the owning thread, monotonic and at intervals of at
+#     most one second measured on an INJECTED steady clock;
+#   * a scope guard that calls MediaEncoder::finish() best-effort and then removes
+#     the output path on any failure, cancellation or mid-export hardware failure.
+#
+# Encoder choice is delegated to media::EncoderSelector (task 9.1) rather than
+# reimplemented. Palmier::media (and through it Palmier::gpu and Palmier::core) is
+# already linked by this target, so no new dependency enters here. Appended so the
+# existing source list above is preserved verbatim.
+target_sources(palmier_services PRIVATE
+    ExportCoordinator.cpp)

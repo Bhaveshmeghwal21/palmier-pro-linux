@@ -69,6 +69,7 @@
 
 #include "core/Result.hpp"
 #include "gpu/GpuTypes.hpp"
+#include "services/AgentInterpreterRegistry.hpp"  // agent interpreter ids (task 10.1)
 #include "services/AgentOrchestrator.hpp"       // IntentInterpreter, IAgentAuthGate
 #include "services/AuthenticationService.hpp"    // AuthBackend
 #include "services/ByokCredentials.hpp"          // ByokProviderValidator
@@ -156,11 +157,21 @@ struct AppConfig {
     services::LanguagePreferenceStore*     languageStore = nullptr;
     services::SystemLanguageProvider       systemLanguage;
 
-    /// The in-app agent's natural-language -> tool-call interpreter. When empty a
-    /// default is installed that reports the interpreter is unconfigured (the
-    /// agent chat is inert until a model backend is wired) — the editor, MCP
-    /// server, and manual tool calls remain fully functional regardless.
+    /// The in-app agent's natural-language -> tool-call interpreter, injected
+    /// directly. When empty the interpreter named by `agentInterpreterId` is built
+    /// by `services::selectAgentInterpreter()` instead, which always yields a
+    /// working implementation — so the agent chat is never inert (task 10.1;
+    /// Requirement 11.1). Supplying one here overrides the registry, which is the
+    /// seam a test or a model-backed shell uses.
     services::IntentInterpreter agentInterpreter;
+
+    /// Which Agent_Interpreter to install: `offline` (the default), `hosted` or
+    /// `byok` (Requirement 11.1). An unrecognised id, or a `hosted`/`byok` whose
+    /// credentials are absent, installs `offline` and records a startup error in
+    /// `startupErrors()` naming the rejected id and the unmet requirement — it is
+    /// never fatal (Requirement 11.8). Empty means the default. Ignored when
+    /// `agentInterpreter` is supplied.
+    std::string agentInterpreterId = std::string(services::defaultAgentInterpreterId());
 
     /// BYOK provider ids that authorize the generative / agent features in
     /// addition to an active subscription (used by the auth gates).
@@ -369,6 +380,25 @@ public:
     /// here so the UI shell can show the non-blocking notification.
     [[nodiscard]] std::string gpuUnavailableNotice() const;
 
+    /// The Agent_Interpreter actually in force: `offline`, `hosted` or `byok`
+    /// (task 10.1; Requirement 11.1). This is the id that WON, which is not
+    /// necessarily the one that was configured: a rejected id falls back to
+    /// `offline` and the reason appears in `startupErrors()`.
+    [[nodiscard]] const std::string& agentInterpreterId() const noexcept {
+        return agentInterpreterId_;
+    }
+
+    /// Non-fatal startup diagnostics: every condition that changed how a component
+    /// was installed without preventing the application from coming up — currently
+    /// a rejected agent-interpreter id (Requirement 11.8). Empty for a fully
+    /// configured composition. Never contains a credential value.
+    ///
+    /// Distinct from the fatal path: a failure to construct a component named in
+    /// Requirement 1.1 is not reported here, it prevents construction.
+    [[nodiscard]] const std::vector<std::string>& startupErrors() const noexcept {
+        return startupErrors_;
+    }
+
 private:
     // Endpoint (captured from the config for start()).
     std::string   mcpHost_;
@@ -427,6 +457,8 @@ private:
     std::unique_ptr<services::McpServer>        mcpServer_;
     std::unique_ptr<services::IAgentAuthGate>   agentGate_;
     std::unique_ptr<services::AgentOrchestrator> agent_;
+    std::string                                 agentInterpreterId_;
+    std::vector<std::string>                    startupErrors_;
 
     // --- Localization ------------------------------------------------------
     std::unique_ptr<services::LocalizationManager> localization_;

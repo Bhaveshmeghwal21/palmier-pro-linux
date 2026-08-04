@@ -548,7 +548,7 @@ generated cases.
       the tests always run
     - _Requirements: 8.2, 8.3, 8.4, 8.8_
 
-  - [~] 9.3 Add the audio stream to the encoder and the export engine
+  - [x] 9.3 Add the audio stream to the encoder and the export engine
     - `src/media/MediaEncoder.{hpp,cpp}`: `AudioEncodeSpec`, `std::optional<AudioEncodeSpec> audio`
       on `EncodeSpec`, `submitAudio(const AudioBuffer&, Duration)`, and a `finish()` that flushes
       both streams and writes the trailer
@@ -557,7 +557,7 @@ generated cases.
       an unmuted audio-bearing track still gets one silent stream spanning the full duration
     - _Requirements: 6.5, 6.11_
 
-  - [~] 9.4 Implement `services::ExportCoordinator`
+  - [x] 9.4 Implement `services::ExportCoordinator`
     - `src/services/ExportCoordinator.{hpp,cpp}`: `ExportRequest2`, `ExportOutcome`,
       `ExportProgressReport`, `begin()`, `cancel()`, `running()`, and the pure static `validate()`
       called before any file is created
@@ -614,7 +614,7 @@ generated cases.
 ### Stage 10 — Pluggable backends (offline-first, no network dependency)
 
 - [ ] 10. Make agent reasoning and generation pluggable
-  - [~] 10.1 Implement the offline interpreter and the interpreter registry
+  - [x] 10.1 Implement the offline interpreter and the interpreter registry
     - `src/services/OfflineIntentInterpreter.{hpp,cpp}`: at least 12 documented phrase patterns
       (`split the clip at the playhead`, `mute track N`, `unmute track N`, `add a video track`,
       `add an audio track`, `delete the selected clip`, `import <path>`,
@@ -629,7 +629,7 @@ generated cases.
       or backend failures without touching the project
     - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.8, 11.9_
 
-  - [ ]* 10.2 Write the offline-interpreter property tests
+  - [x]* 10.2 Write the offline-interpreter property tests
     - **Property 59: The offline interpreter is case- and whitespace-insensitive** —
       **Validates: Requirements 11.3**
     - **Property 60: Interpreter output is always executable** — **Validates: Requirements 11.2**
@@ -1063,20 +1063,105 @@ more than one interval behind the audio position is dropped and one more than an
 waits. `.github/workflows/ci.yml` installs the two dev packages, and the configuration summary
 reports each sink.
 
-**Stage 9 in progress:** 9.1 and 9.2 are done — `media::EncoderSelector` with the
-`hardware(...)` / `software(codec, reason)` constructor pair (so no selection can report both
-hardware use and software fallback), the 3000 ms probe deadline, the single initialization retry
-before the documented software fallback, and `tests/support/HardwareSkip.hpp`
-(`PALMIER_SKIP_WITHOUT_HW`), covered by Properties 40, 41 and 42 on
-`palmier_media_encoder_selector_tests`. **9.3–9.9 remain**, so the stage-9 parent stays open.
-Stages 10–12 are untouched.
+> ### ⚠️ Read this before verifying: this sandbox loses its native dependency stack
+>
+> This sandbox has **repeatedly lost its native dependency stack mid-session** — FFmpeg, shaderc
+> and Qt 6 have each disappeared from `/usr/local` between agent runs. Symptoms and rules:
+>
+> - **A stale CMake cache will falsely report `PALMIER_HAVE_FFMPEG=1`** against headers that are no
+>   longer on disk. The tree then either fails to compile or silently compiles the FFmpeg paths as
+>   **stubs**, which *lowers the test count without failing anything*. A run that reports fewer
+>   tests than the count below is almost certainly a stub build, not a regression.
+> - **After any such loss, delete and reconfigure BOTH build trees from scratch.**
+>   `cmake --build` on an existing tree is not sufficient — only a fresh configure re-runs the
+>   `pkg-config` probes. Never trust an incremental build to tell you what is installed.
+> - **"Qt 6 not found" is usually not a missing Qt.** `find_package(Qt6 ... QUIET)` also fails when
+>   Qt6Gui's `WrapOpenGL` dependency is unmet, and `QUIET` hides the real reason. Verify with a
+>   throwaway non-`QUIET` `find_package` before concluding Qt is absent. The fix is the OpenGL/GLX
+>   development packages, not reinstalling Qt.
+> - Restoration is slow, and **each restore step must finish inside a single shell invocation** —
+>   background jobs and `/tmp` do not survive across calls in this sandbox.
+>
+> **The same instability also damaged the git object store.** A whole pack file was lost — the
+> `.idx` and `.rev` remained while the `.pack` itself was gone, leaving `git count-objects -v`
+> reporting `packs: 0` and 155 of the 419 objects reachable from `HEAD` missing. The working tree
+> was complete throughout (which is why the suite builds and passes), so most objects were
+> recoverable by re-hashing the working tree into the object store:
+>
+> ```
+> git ls-files -z | xargs -0 -n 50 git hash-object -w --   # additive, non-destructive
+> ```
+>
+> That brought the 155 missing objects down to 19. The commit recorded for tasks 9.3/9.4/10.1/10.2
+> was verified self-contained before being written (`git rev-list --objects --missing=print` on the
+> staged tree reported zero missing), so **the current `HEAD` tree is complete and checkout-able**.
+> What remains lost is history *behind* that commit: three subtrees and the previous `HEAD` blobs of
+> the four task-9.3 media files, plus the unrelated `feat/linux-port-gpu` ref. Practical
+> consequences: `git show --stat HEAD` and `git diff HEAD~1` fail because they must read the parent
+> tree, and **`git checkout`, `git reset --hard` and similar history-reading commands must be
+> avoided** — the working tree is the source of truth. A future push may need
+> `--no-thin`, or a fresh clone with this commit replayed on top.
 
-**Test count:** 952 registered tests, all passing in both trees
-(`100% tests passed, 0 tests failed out of 952`, about 10 seconds of wall clock) — 951 from
-tasks 8.6/8.7 (`palmier_media_audio_sink_tests`) and 9.1/9.2
-(`palmier_media_encoder_selector_tests`) plus the one unit test added with the Property 19 fix
-below. Confirmed over **five** consecutive `build-nogui` runs and once in `build-ui` under
-`xvfb-run -a`, with no flakes.
+**Stage 9 in progress:** 9.1–9.4 are done. 9.1 and 9.2 delivered
+`media::EncoderSelector` with the `hardware(...)` / `software(codec, reason)` constructor pair (so
+no selection can report both hardware use and software fallback), the 3000 ms probe deadline, the
+single initialization retry before the documented software fallback, and
+`tests/support/HardwareSkip.hpp` (`PALMIER_SKIP_WITHOUT_HW`), covered by Properties 40, 41 and 42
+on `palmier_media_encoder_selector_tests`. 9.3 added the audio stream: `MediaEncoder` gained
+`AudioEncodeSpec`, `EncodeSpec::audio`, `submitAudio()` and a two-stream `finish()` that flushes
+both streams and writes the trailer, and `ExportEngine` gained the `AudioRangeRenderer` seam and
+`ExportCancelPredicate`. 9.4 added `src/services/ExportCoordinator.{hpp,cpp}` — the pure static
+`validate()` that runs before any file is created, one worker thread per export over a
+**value-copy `Project` snapshot**, the `OutputGuard` scope guard that calls `finish()` best-effort
+then removes the output path on any failure or cancellation, and progress marshalled to the main
+thread. **9.5–9.9 remain**, so the stage-9 parent stays open.
+
+**Stage 10 in progress:** 10.1 and 10.2 are done. 10.1 added
+`src/services/OfflineIntentInterpreter.{hpp,cpp}` (the 12 documented phrase patterns, matched
+case-insensitively on the whitespace-trimmed utterance, no network request) and
+`src/services/AgentInterpreterRegistry.{hpp,cpp}` (ids `offline` default, `hosted`, `byok`);
+`makeUnconfiguredInterpreter()` was removed, and `AppConfig` / `AppSettings` /
+`ApplicationComposition` gained `agentInterpreterId` and `startupErrors()`. 10.2 added
+`tests/services/offline_interpreter_property_test.cpp` covering Properties 59, 60, 61 and 64 on
+`palmier_services_agent_offline_tests`. **10.3–10.9 remain**, so the stage-10 parent stays open.
+Stages 11 and 12 are untouched.
+
+**Three new tools were added by task 10.1, and why.** Four of the twelve phrases mandated by
+Requirement 11.1 had no tool to map to, and Property 60 requires every interpreter output to be
+executable — so an interpreter that emitted an unroutable invocation could not have been correct.
+Rather than drop the mandated phrases, the missing tool surface was added:
+
+| New tool | Backing command | Phrases it makes executable |
+| --- | --- | --- |
+| `timeline.set_track_muted` | new `core::SetTrackMutedCommand` | `mute track N`, `unmute track N` |
+| `edit.undo` | existing history stack | `undo` |
+| `edit.redo` | existing history stack | `redo` |
+
+`core::SetTrackMutedCommand` is a new undoable edit command in `src/core/EditCommands.{hpp,cpp}`;
+`edit.undo` and `edit.redo` expose the already-existing history stack through the tool surface and
+add no new edit semantics.
+
+**Test count (authoritative): 1029 registered tests, 100% passing in both trees.**
+`100% tests passed, 0 tests failed out of 1029` in `build-nogui` and the identical
+`100% tests passed, 0 tests failed out of 1029` in `build-ui` under `xvfb-run -a`, about 11 seconds
+of wall clock each. Confirmed over **three** consecutive `build-nogui` runs with no flakes, both
+trees having been **deleted and configured from scratch** first so that no stale cache could
+misreport a dependency.
+
+The two trees report the **same** count because every test target is built in both — `build-ui`
+adds only the `palmier-pro` executable (`build-ui/bin/palmier-pro`), which registers no ctest test.
+The difference is therefore zero, and any divergence between the trees should be read as a build
+configuration problem rather than a UI-only test.
+
+One test is reported as `Skipped` rather than run, in both trees:
+`ExportCoordinatorValidate.RejectsAnUnwritableParentDirectory`. This is the test's own pre-existing
+`GTEST_SKIP()`, taken because the suite runs as **root**, and root bypasses the directory
+permission bits the case needs in order to make a parent unwritable. It is a property of the
+sandbox user, not of the code, and the test was left untouched.
+
+Earlier runs in this session reported **975** and **1029** from two concurrent agents. **1029 is
+the correct number**; 975 was a tree in which the FFmpeg paths had compiled as stubs against a
+stale cache, as described in the warning above.
 
 **Property 19 flake fixed — root cause was the test's generator, not `ProjectSession`.**
 `ProjectSessionPersistenceProperties.UnmodifiedAfterSaveUntilTheNextToolAppliedEdit` (task 2.3)
@@ -1111,9 +1196,36 @@ is driven entirely by the injected `ManualClock`, so its outcome is a pure funct
 RapidCheck seed and the earlier failures were on pre-convergence revisions of the test. No bound
 was loosened.
 
-**Verification configuration:** Qt 6.8.3 is installed at `/usr/local` via `aqtinstall`, and
-**PipeWire and ALSA development packages (`pipewire-devel`, `alsa-lib-devel`) are now installed on
-this host**, so both audio sinks compile and are enabled in both trees.
+**Verification configuration.** Both trees configure with
+`Palmier Pro Linux: all required dependencies located` and the following found: FFmpeg
+(libavcodec 60.31.102, a from-source 6.1.x install under `/usr/local`), shaderc 2023.8.1,
+lcms2 2.19, libsecret-1 0.21.4, OpenSSL 3.5.5, libpipewire-0.3 1.2.7, ALSA 1.2.7.2,
+Vulkan (`/lib64/libvulkan.so`) and — for `build-ui` — Qt 6.8.3 at
+`/usr/local/lib/cmake/Qt6`. The three vendor hardware codec paths (VAAPI, NVENC, QSV) are
+`disabled (SDK not found)`; that is expected on this host and encoding falls back to software.
+
+Restoring this host from scratch takes these steps, in order:
+
+```
+# FFmpeg 6.1.x from source into /usr/local (discovered via pkg-config)
+# Qt 6.8.3:
+pip install aqtinstall
+aqt install-qt linux desktop 6.8.3 linux_gcc_64 -m qtshadertools -O /opt/Qt
+cp -a /opt/Qt/6.8.3/gcc_64/. /usr/local/
+echo /usr/local/lib > /etc/ld.so.conf.d/zz-usr-local.conf && ldconfig
+# dev packages:
+dnf install -y alsa-lib-devel pipewire-devel \
+    mesa-libGL-devel mesa-libEGL-devel libglvnd-devel \
+    libxkbcommon-devel libxkbcommon-x11-devel libX11-devel libxcb-devel \
+    xcb-util-devel xcb-util-image-devel xcb-util-keysyms-devel \
+    xcb-util-renderutil-devel xcb-util-wm-devel xcb-util-cursor-devel \
+    libXrender-devel libXi-devel mesa-dri-drivers xorg-x11-server-Xvfb
+```
+
+The `ldconfig` line is required, otherwise the Qt libraries under `/usr/local/lib` are installed but
+not loadable at runtime. The **OpenGL/GLX packages are required for `find_package(Qt6)` to succeed
+at all**, because Qt6Gui depends on `WrapOpenGL` — without them Qt reports as missing even when it
+is fully installed.
 
 - `build-nogui/` (`-DPALMIER_BUILD_UI=OFF`) remains the primary verification tree and covers the
   headless surface of core, gpu, media, services and app composition.
@@ -1124,10 +1236,11 @@ this host**, so both audio sinks compile and are enabled in both trees.
 FFmpeg is a from-source install under `/usr/local` and is discovered through `pkg-config`.
 
 ```
-cmake --build build-nogui -j$(nproc)
-ctest --test-dir build-nogui --output-on-failure
-PKG_CONFIG_PATH=/usr/local/lib/pkgconfig cmake --build build-ui -j$(nproc)
-xvfb-run -a ctest --test-dir build-ui --output-on-failure
+rm -rf build-nogui build-ui        # after any dependency loss, never reuse the cache
+PKG_CONFIG_PATH=/usr/local/lib/pkgconfig cmake -S . -B build-nogui -DPALMIER_BUILD_UI=OFF
+PKG_CONFIG_PATH=/usr/local/lib/pkgconfig cmake -S . -B build-ui   -DPALMIER_BUILD_UI=ON
+cmake --build build-nogui -j$(nproc) && ctest --test-dir build-nogui --output-on-failure
+cmake --build build-ui -j$(nproc) && xvfb-run -a ctest --test-dir build-ui --output-on-failure
 ```
 
 `build-nogui/`, `build-ui/`, `build/` and any other `build-*/` directory are local artifacts and

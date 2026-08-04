@@ -283,6 +283,81 @@ TEST(ApplicationComposition, OfflineAgentGateRejectsAndPreservesMessage) {
     EXPECT_EQ(composition.agent().pendingMessage(), "please add a clip");
 }
 
+// ---------------------------------------------------------------------------
+// Agent interpreter selection (task 10.1; Requirements 11.1, 11.8) — the
+// composition root accepts exactly one implementation through configuration and
+// exposes the ACTIVE one, which is not always the one that was asked for.
+// ---------------------------------------------------------------------------
+
+TEST(ApplicationComposition, DefaultsToTheOfflineInterpreterWithNoStartupError) {
+    ApplicationComposition composition{ephemeralConfig()};
+
+    // Requirement 11.1: the active implementation is reported through a public
+    // accessor. Replacing `makeUnconfiguredInterpreter()` means the default is a
+    // WORKING interpreter, so a documented phrase maps rather than reporting the
+    // interpreter as unconfigured.
+    EXPECT_EQ(composition.agentInterpreterId(), "offline");
+    EXPECT_TRUE(composition.startupErrors().empty());
+}
+
+TEST(ApplicationComposition, AnUnknownInterpreterIdFallsBackToOfflineAndStillComposes) {
+    AppConfig config = ephemeralConfig();
+    config.agentInterpreterId = "no-such-interpreter";
+
+    ApplicationComposition composition{config};
+
+    // Requirement 11.8: the rejected id is named, the offline interpreter is in
+    // force, and every other component is still constructed — a mistyped
+    // configuration string cannot stop the editor from coming up.
+    EXPECT_EQ(composition.agentInterpreterId(), "offline");
+    ASSERT_EQ(composition.startupErrors().size(), 1u);
+    EXPECT_NE(composition.startupErrors()[0].find("no-such-interpreter"), std::string::npos);
+    (void)composition.toolRegistry();
+    (void)composition.executor();
+    (void)composition.agent();
+    (void)composition.projectSession();
+    EXPECT_TRUE(composition.start().isOk());
+}
+
+TEST(ApplicationComposition, CredentiallessHostedInterpreterFallsBackToOffline) {
+    AppConfig config = ephemeralConfig();
+    config.agentInterpreterId = "hosted";
+
+    ApplicationComposition composition{config};
+
+    // The offline auth backend grants no subscription, so `hosted` is unauthorized
+    // and the fallback applies, naming the unmet requirement.
+    EXPECT_EQ(composition.agentInterpreterId(), "offline");
+    ASSERT_EQ(composition.startupErrors().size(), 1u);
+    EXPECT_NE(composition.startupErrors()[0].find("hosted"), std::string::npos);
+}
+
+TEST(ApplicationComposition, AnInjectedInterpreterOverridesTheRegistry) {
+    // Injecting an implementation directly is the seam a test or a model-backed
+    // shell uses. It bypasses the registry entirely, so the credential check that
+    // would otherwise demote `hosted` to `offline` does not run: the reported id is
+    // the configured one and no fallback diagnostic is recorded.
+    AppConfig config = ephemeralConfig();
+    config.agentInterpreterId = "hosted";
+    config.agentInterpreter =
+        [](std::string_view) -> palmier::Result<palmier::services::AgentIntent> {
+        return palmier::services::AgentIntent{"timeline.read",
+                                              palmier::services::Json::object()};
+    };
+
+    ApplicationComposition composition{config};
+    EXPECT_EQ(composition.agentInterpreterId(), "hosted");
+    EXPECT_TRUE(composition.startupErrors().empty());
+
+    // Sanity: the same configuration WITHOUT the injected implementation is demoted,
+    // which is what makes the override observable rather than incidental.
+    AppConfig withoutInjection = ephemeralConfig();
+    withoutInjection.agentInterpreterId = "hosted";
+    ApplicationComposition demoted{withoutInjection};
+    EXPECT_EQ(demoted.agentInterpreterId(), "offline");
+    EXPECT_FALSE(demoted.startupErrors().empty());
+}
+
 TEST(ApplicationComposition, LocalizationDefaultsToASupportedLanguage) {
     ApplicationComposition composition{ephemeralConfig()};
     // On first launch with no persisted selection the manager picks the system

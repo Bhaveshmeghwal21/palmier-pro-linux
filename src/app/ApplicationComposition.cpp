@@ -120,16 +120,12 @@ public:
     }
 };
 
-// The default agent interpreter: the natural-language -> tool mapping (an LLM in
-// production) is not wired in a bare composition, so report it as unconfigured.
-// The editor, MCP server, and manual/explicit tool calls remain fully functional.
-[[nodiscard]] services::IntentInterpreter makeUnconfiguredInterpreter() {
-    return [](std::string_view) -> Result<services::AgentIntent> {
-        return err<services::AgentIntent>(makeError(
-            ErrorCode::FailedPrecondition,
-            "the in-app agent's intent interpreter is not configured"));
-    };
-}
+// The agent interpreter is no longer defaulted to an inert
+// "not configured" stub. Task 10.1 replaced `makeUnconfiguredInterpreter()` with
+// `services::selectAgentInterpreter()`, which always installs a working
+// implementation: the configured id when it is selectable, and otherwise the
+// built-in `OfflineIntentInterpreter` plus a startup error naming the rejected id
+// (design.md D9; Requirements 11.1, 11.3, 11.8). See the construction site below.
 
 // ---------------------------------------------------------------------------
 // generation.generate tool hook
@@ -352,11 +348,60 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
         std::make_unique<services::RemoteAccessGate>(config.remote, *rejectionLog_);
     mcpServer_->setRemoteAccessGate(remoteAccessGate_.get());
 
+    // --- Agent interpreter selection (task 10.1; Requirements 11.1, 11.8) --
+    //
+    // Exactly one implementation, named by a configuration string, exposed through
+    // `agentInterpreterId()`. An explicitly injected `config.agentInterpreter`
+    // still wins — that is the seam tests and the GUI shell use to supply a
+    // scripted or model-backed interpreter directly — and in that case the reported
+    // id is the configured one, because the injected implementation is what the
+    // configuration asked for.
+    //
+    // Otherwise the registry decides. It never fails: an unknown id, or a
+    // `hosted`/`byok` whose credentials are absent, installs the offline
+    // interpreter and records the reason in `startupErrors()` while every other
+    // component is still constructed (the policy design.md D9 states, and the same
+    // one Requirement 12.8 states for the generative backend).
+    services::AgentInterpreterRequest interpreterRequest;
+    interpreterRequest.id = config.agentInterpreterId;
+    interpreterRequest.offlineOptions.context =
+        services::makeSessionEditorContextProvider(*session_);
+    // The credential probe reads the composed auth stack rather than the network:
+    // `hosted` needs an active subscription entitlement, `byok` an authorized
+    // provider credential among the configured ids. Neither call contacts anything.
+    interpreterRequest.credentials = [this, providers = config.byokProviders](
+                                         std::string_view id) -> bool {
+        if (id == services::kAgentInterpreterHosted) {
+            const std::optional<services::Session>& current = auth_->currentSession();
+            return current.has_value() &&
+                   current->entitlement == services::EntitlementStatus::Active;
+        }
+        if (id == services::kAgentInterpreterByok) {
+            for (const std::string& provider : providers) {
+                if (auth_->isByokAuthorized(provider)) return true;
+            }
+        }
+        return false;
+    };
+
+    services::AgentInterpreterSelection interpreter =
+        services::selectAgentInterpreter(interpreterRequest);
+    if (config.agentInterpreter) {
+        agentInterpreterId_ = config.agentInterpreterId.empty()
+                                  ? std::string(services::defaultAgentInterpreterId())
+                                  : config.agentInterpreterId;
+    } else {
+        agentInterpreterId_ = interpreter.id;
+        if (!interpreter.startupError.empty()) {
+            startupErrors_.push_back(interpreter.startupError);
+        }
+    }
+
     // --- In-app agent chat: reuse the SAME executor + registry -------------
     agentGate_ = std::make_unique<services::AuthServiceAgentGate>(*auth_, config.byokProviders);
     agent_ = std::make_unique<services::AgentOrchestrator>(
         *executor_, *agentGate_,
-        config.agentInterpreter ? config.agentInterpreter : makeUnconfiguredInterpreter(),
+        config.agentInterpreter ? config.agentInterpreter : std::move(interpreter.interpreter),
         services::makeMentionPreprocessor(session_->mediaLibrary()));
 
     // --- Localization ------------------------------------------------------

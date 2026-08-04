@@ -578,6 +578,42 @@ Result<void> RemoveTrackCommand::revert(Project& project) {
 }
 
 // ===========================================================================
+// SetTrackMutedCommand
+// ===========================================================================
+
+SetTrackMutedCommand::SetTrackMutedCommand(Uuid trackId, bool muted)
+    : trackId_(trackId), muted_(muted) {}
+
+Result<void> SetTrackMutedCommand::apply(Project& project) {
+    auto it = std::find_if(project.tracks.begin(), project.tracks.end(),
+                           [&](const Track& t) { return t.id == trackId_; });
+    if (it == project.tracks.end()) {
+        // Same rule as every other track-addressed edit (Requirement 3.8): an
+        // unknown identifier changes nothing.
+        return err(notFound("SetTrackMutedCommand: track " + idLabel(trackId_) +
+                            " not found in the current project"));
+    }
+    prior_ = it->muted;
+    it->muted = muted_;
+    return ok();
+}
+
+Result<void> SetTrackMutedCommand::revert(Project& project) {
+    if (!prior_) {
+        return err(failedPrecondition(
+            "SetTrackMutedCommand: revert before a successful apply"));
+    }
+    auto it = std::find_if(project.tracks.begin(), project.tracks.end(),
+                           [&](const Track& t) { return t.id == trackId_; });
+    if (it == project.tracks.end()) {
+        return err(notFound("SetTrackMutedCommand: track " + idLabel(trackId_) +
+                            " not found in the current project"));
+    }
+    it->muted = *prior_;
+    return ok();
+}
+
+// ===========================================================================
 // SetTransitionCommand
 // ===========================================================================
 

@@ -349,6 +349,49 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// SetTrackMutedCommand — set a track's muted flag.
+// ---------------------------------------------------------------------------
+//
+// Sets the muted flag of the track carrying `trackId` to `muted`, capturing the
+// prior value so revert() restores it exactly. Nothing else about the track — its
+// kind, its name, its clips or their order — is touched, so muting is a pure
+// per-track state change.
+//
+// This is the command behind the `timeline.set_track_muted` tool, which is what
+// the offline interpreter's "mute track N" / "unmute track N" phrases resolve to.
+// It lives in the core so that muting travels the same command path — atomic,
+// undoable, observable, invariant-checked — as every other edit, which is what
+// makes a mute reversible by one undo like any other edit.
+//
+// An unknown track identifier is rejected without mutating the project. Setting
+// the flag to the value it already holds is applied rather than refused: it is a
+// legal, idempotent edit whose revert is equally a no-op, and refusing it would
+// make the tool's success depend on state the caller cannot see.
+class SetTrackMutedCommand final : public EditCommand {
+public:
+    SetTrackMutedCommand(Uuid trackId, bool muted);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "SetTrackMuted"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+    /// The target track.
+    [[nodiscard]] Uuid trackId() const noexcept { return trackId_; }
+
+    /// The flag value this command installs.
+    [[nodiscard]] bool muted() const noexcept { return muted_; }
+
+    /// The flag value the track carried before apply(), or std::nullopt before the
+    /// first successful apply().
+    [[nodiscard]] std::optional<bool> priorMuted() const noexcept { return prior_; }
+
+private:
+    Uuid                trackId_;
+    bool                muted_;
+    std::optional<bool> prior_;  // captured on apply for an exact revert
+};
+
+// ---------------------------------------------------------------------------
 // SetTransitionCommand — set a clip's incoming transition.
 // ---------------------------------------------------------------------------
 //

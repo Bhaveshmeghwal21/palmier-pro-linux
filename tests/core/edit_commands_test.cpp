@@ -698,6 +698,80 @@ TEST(RemoveTrackCommand, IsUndoableThroughTheEngine) {
     EXPECT_FALSE(engine.clip(clipId).has_value());
 }
 
+// --- SetTrackMutedCommand (task 10.1) --------------------------------------
+//
+// The command behind `timeline.set_track_muted`, which the offline interpreter's
+// "mute track N" / "unmute track N" phrases resolve to.
+
+TEST(SetTrackMutedCommand, SetsTheFlagAndRevertRestoresThePriorValue) {
+    Project project = makeEmptyProject();
+    project.tracks = {makeTrack(TrackKind::Video), makeTrack(TrackKind::Audio)};
+    const Uuid target = project.tracks[1].id;
+    ASSERT_FALSE(project.tracks[1].muted);
+
+    SetTrackMutedCommand cmd(target, true);
+    ASSERT_TRUE(cmd.apply(project).isOk());
+    EXPECT_TRUE(project.tracks[1].muted);
+    EXPECT_FALSE(project.tracks[0].muted) << "no other track is touched";
+    ASSERT_TRUE(cmd.priorMuted().has_value());
+    EXPECT_FALSE(*cmd.priorMuted());
+
+    ASSERT_TRUE(cmd.revert(project).isOk());
+    EXPECT_FALSE(project.tracks[1].muted);
+}
+
+TEST(SetTrackMutedCommand, SettingTheValueItAlreadyHoldsIsAppliedAndRevertsToItself) {
+    Project project = makeEmptyProject();
+    project.tracks = {makeTrack(TrackKind::Audio)};
+    project.tracks[0].muted = true;
+    const Uuid target = project.tracks[0].id;
+
+    SetTrackMutedCommand cmd(target, true);
+    ASSERT_TRUE(cmd.apply(project).isOk());
+    EXPECT_TRUE(project.tracks[0].muted);
+    ASSERT_TRUE(cmd.revert(project).isOk());
+    EXPECT_TRUE(project.tracks[0].muted);
+}
+
+TEST(SetTrackMutedCommand, UnknownTrackIsRejectedAndChangesNothing) {
+    Project project = makeEmptyProject();
+    project.tracks = {makeTrack(TrackKind::Video)};
+
+    SetTrackMutedCommand cmd(Uuid::generateV4(), true);
+    const auto result = cmd.apply(project);
+    EXPECT_TRUE(result.isError());
+    EXPECT_EQ(result.error().code(), ErrorCode::NotFound);
+    EXPECT_FALSE(project.tracks[0].muted);
+    EXPECT_FALSE(cmd.priorMuted().has_value());
+}
+
+TEST(SetTrackMutedCommand, RevertBeforeApplyFails) {
+    Project project = makeEmptyProject();
+    project.tracks = {makeTrack(TrackKind::Video)};
+
+    SetTrackMutedCommand cmd(project.tracks[0].id, true);
+    const auto result = cmd.revert(project);
+    EXPECT_TRUE(result.isError());
+    EXPECT_EQ(result.error().code(), ErrorCode::FailedPrecondition);
+}
+
+TEST(SetTrackMutedCommand, IsUndoableThroughTheEngine) {
+    Project project = makeEmptyProject();
+    project.tracks = {makeTrack(TrackKind::Video), makeTrack(TrackKind::Audio)};
+    const Uuid target = project.tracks[1].id;
+    TimelineEngine engine(project);
+
+    ASSERT_TRUE(engine.apply(std::make_unique<SetTrackMutedCommand>(target, true)).changed());
+    EXPECT_TRUE(engine.snapshot().tracks[1].muted);
+    EXPECT_EQ(engine.undoDepth(), 1u);
+
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_FALSE(engine.snapshot().tracks[1].muted);
+
+    ASSERT_TRUE(engine.redo().changed());
+    EXPECT_TRUE(engine.snapshot().tracks[1].muted);
+}
+
 // --- SetTransitionCommand --------------------------------------------------
 
 TEST(SetTransitionCommand, SetsTheIncomingTransitionAndRevertRestoresAbsence) {

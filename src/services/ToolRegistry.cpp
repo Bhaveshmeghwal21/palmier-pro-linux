@@ -77,6 +77,9 @@ constexpr const char* kMediaImport    = "media.import";
 constexpr const char* kMediaList      = "media.list";
 constexpr const char* kAddTrack       = "timeline.add_track";
 constexpr const char* kRemoveTrack    = "timeline.remove_track";
+constexpr const char* kSetTrackMuted  = "timeline.set_track_muted";
+constexpr const char* kUndo           = "edit.undo";
+constexpr const char* kRedo           = "edit.redo";
 
 // The accepted length of a filesystem path argument (`project.open`,
 // `project.save`, `media.import`), matching the design's tool table.
@@ -1407,6 +1410,109 @@ Tool makeRemoveTrackTool(ProjectSession* session) {
     return t;
 }
 
+// ---------------------------------------------------------------------------
+// Track mute tool (task 10.1) — timeline.set_track_muted
+//
+// The third track edit, and like the other two an ordinary undoable edit: it is
+// applied as the core SetTrackMutedCommand through TimelineEngine::apply, so a
+// mute is reversed by exactly one undo like any other edit. It exists because the
+// offline interpreter's documented "mute track N" / "unmute track N" phrases must
+// resolve to a tool that is actually in the Tool_Surface (Requirements 11.2,
+// 11.3); the phrase's 1-based track ordinal is resolved to this identifier by the
+// interpreter, which is the only party that knows the current project's tracks.
+// ---------------------------------------------------------------------------
+
+Tool makeSetTrackMutedTool(ProjectSession* session) {
+    Tool t;
+    t.name = kSetTrackMuted;
+    t.description = "Mute or unmute a track, leaving its clips and every other track "
+                    "untouched.";
+    // NOT expressible: "the track is present in the current project" is a
+    // state-dependent rule, enforced by SetTrackMutedCommand.
+    t.schema.arg(uuidArg("trackId", true, "UUID of the track to mute or unmute."))
+        .arg(ArgSpec{.name = "muted",
+                     .kind = JsonKind::Bool,
+                     .required = true,
+                     .description = "True to mute the track, false to unmute it."});
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kSetTrackMuted));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> trackId = requireUuid(in, "trackId");
+        if (trackId.isError()) return err<Json>(std::move(trackId).error());
+        const Json* muted = in.find("muted");
+        if (muted == nullptr || !muted->isBool()) {
+            return err<Json>(invalidArgument("field 'muted' is required and must be a boolean"));
+        }
+
+        Json out = Json::object();
+        out.set("trackId", trackId.value().toString());
+        out.set("muted", muted->asBool());
+        return applyCommand(
+            engine, std::make_unique<SetTrackMutedCommand>(trackId.value(), muted->asBool()),
+            std::move(out));
+    };
+    return t;
+}
+
+// ---------------------------------------------------------------------------
+// History tools (task 10.1) — edit.undo / edit.redo
+//
+// These two are NOT EditCommands: they drive the engine's existing undo/redo
+// stack, which is what makes them the tool-surface expression of Requirement 2.9.
+// They exist for the same reason the mute tool does — the offline interpreter's
+// documented `undo` and `redo` phrases have to resolve to real tools.
+//
+// An empty history is the engine's documented no-op-with-an-indication
+// (Requirement 2.10), not a failure: the tool succeeds and reports `undone`/
+// `redone` false plus the engine's indication, so a caller can tell "there was
+// nothing to undo" from "the undo failed" without either being an error the
+// executor would roll back.
+// ---------------------------------------------------------------------------
+
+Tool makeUndoTool(ProjectSession* session) {
+    Tool t;
+    t.name = kUndo;
+    t.description = "Revert the most recently applied edit; reports a no-op when the undo "
+                    "history is empty.";
+    // No arguments.
+    t.handler = [session](const Json&) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kUndo));
+        TimelineEngine& engine = session->engine();
+        const CommandResult result = engine.undo();
+        if (result.isError()) return err<Json>(result.error());
+
+        Json out = Json::object();
+        out.set("undone", result.changed());
+        out.set("indication", result.message());
+        out.set("undoDepth", static_cast<std::int64_t>(engine.undoDepth()));
+        out.set("redoDepth", static_cast<std::int64_t>(engine.redoDepth()));
+        return out;
+    };
+    return t;
+}
+
+Tool makeRedoTool(ProjectSession* session) {
+    Tool t;
+    t.name = kRedo;
+    t.description = "Re-apply the most recently undone edit; reports a no-op when the redo "
+                    "history is empty.";
+    // No arguments.
+    t.handler = [session](const Json&) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kRedo));
+        TimelineEngine& engine = session->engine();
+        const CommandResult result = engine.redo();
+        if (result.isError()) return err<Json>(result.error());
+
+        Json out = Json::object();
+        out.set("redone", result.changed());
+        out.set("indication", result.message());
+        out.set("undoDepth", static_cast<std::int64_t>(engine.undoDepth()));
+        out.set("redoDepth", static_cast<std::int64_t>(engine.redoDepth()));
+        return out;
+    };
+    return t;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -1481,6 +1587,7 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(makeMediaListTool(session, std::move(hooks.listMedia)));
     registry.add(makeAddTrackTool(session));
     registry.add(makeRemoveTrackTool(session));
+    registry.add(makeSetTrackMutedTool(session));
     registry.add(makeAddClipTool(session));
     registry.add(makeDeleteClipTool(session));
     registry.add(makeMoveClipTool(session));
@@ -1489,6 +1596,8 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(makeReorderClipsTool(session));
     registry.add(makeAddEffectTool(session));
     registry.add(makeAddTransitionTool(session));
+    registry.add(makeUndoTool(session));
+    registry.add(makeRedoTool(session));
     registry.add(makeGenerateTool(session, std::move(hooks.generate)));
     registry.add(makeExportTool(session, std::move(hooks.exportTimeline)));
     return registry;

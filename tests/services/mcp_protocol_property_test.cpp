@@ -133,6 +133,9 @@ constexpr std::string_view kMediaImport   = "media.import";
 constexpr std::string_view kMediaList     = "media.list";
 constexpr std::string_view kAddTrack      = "timeline.add_track";
 constexpr std::string_view kRemoveTrack   = "timeline.remove_track";
+constexpr std::string_view kSetTrackMuted = "timeline.set_track_muted";
+constexpr std::string_view kUndo          = "edit.undo";
+constexpr std::string_view kRedo          = "edit.redo";
 constexpr std::string_view kAddClip       = "timeline.add_clip";
 constexpr std::string_view kDeleteClip    = "timeline.delete_clip";
 constexpr std::string_view kMoveClip      = "timeline.move_clip";
@@ -607,10 +610,12 @@ struct Invocation {
 
     Json args = Json::object();
 
-    // The three arg-less read tools, and the hook-backed trio, take their
-    // arguments straight from the schema.
+    // The arg-less tools, and the hook-backed trio, take their arguments straight
+    // from the schema. `edit.undo` / `edit.redo` (task 10.1) belong here: they take
+    // no arguments and an empty history is the engine's documented successful
+    // no-op, never an error, so they are applicable to every generated project.
     if (name == kReadTimeline || name == kProjectInfo || name == kMediaList ||
-        isHookBacked(name)) {
+        name == kUndo || name == kRedo || isHookBacked(name)) {
         return Invocation{name, schemaValidArgs(tool, scratch)};
     }
 
@@ -639,6 +644,14 @@ struct Invocation {
     if (name == kRemoveTrack) {
         const Track& track = project.tracks[drawIndex(project.tracks.size())];
         args.set("trackId", Json(track.id.toString()));
+        return Invocation{name, std::move(args)};
+    }
+    // Task 10.1: like every other track-addressed edit, applicable exactly when the
+    // identifier names a track of the current project. Either flag value applies.
+    if (name == kSetTrackMuted) {
+        const Track& track = project.tracks[drawIndex(project.tracks.size())];
+        args.set("trackId", Json(track.id.toString()));
+        args.set("muted", Json(*rc::gen::arbitrary<bool>()));
         return Invocation{name, std::move(args)};
     }
     if (name == kAddClip) {

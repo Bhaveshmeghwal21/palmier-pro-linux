@@ -31,6 +31,19 @@
 //     11.3).
 //   * Success notification: on success the ExportResult carries the output
 //     location and the final progress callback fires at 100% (Requirement 11.6).
+//
+// Task 9.3 adds the audio stream to the same loop (Requirements 6.5, 6.11): when
+// the request includes audio the encoder is built with an AudioEncodeSpec and each
+// iteration renders the frame, submits it, and THEN submits that frame interval's
+// audio — [frame i, frame i+1) — mixed by the export-local AudioGraph behind the
+// injected AudioRangeRenderer (media::AudioEngine::renderRange in production).
+// Because the per-frame intervals tile [0, plannedFrameCount * frameStep) with no
+// gap and no overlap, the audio stream spans the whole timeline duration and
+// exceeds it by less than one video frame interval. A timeline with no clip on an
+// unmuted audio-bearing track still gets that full-length stream: the renderer
+// returns silence for every interval, which is what both AudioEngine::mixWindow
+// and silentAudioRangeRenderer produce from an AudioGraph with zero sources
+// (Requirement 6.11).
 
 #include "media/ExportEngine.hpp"
 
@@ -44,6 +57,7 @@
 #include <utility>
 
 #include "core/TimelineEngine.hpp" // timelineDuration()
+#include "media/AudioSink.hpp"    // durationToFrames()
 
 namespace palmier::media {
 
@@ -154,7 +168,31 @@ void removeIncompleteOutput(const std::filesystem::path& outputPath) noexcept {
 
 } // namespace
 
+AudioRangeRenderer silentAudioRangeRenderer(AudioFormat format) {
+    return [format](const Project&, Duration from, Duration to) -> Result<AudioBuffer> {
+        if (to < from) {
+            return err<AudioBuffer>(
+                invalidArgument("the export audio range end must not precede its start"));
+        }
+        if (!format.isValid()) {
+            return err<AudioBuffer>(
+                invalidArgument("the export audio format must have a positive rate and channels"));
+        }
+        const std::size_t frames =
+            static_cast<std::size_t>(durationToFrames(to - from, format.sampleRate));
+        // An export-local graph mixing ZERO sources into `frames` frames: exactly
+        // the silence AudioGraph already produces for an empty source set, and
+        // exactly what AudioEngine::mixWindow returns for a range no unmuted
+        // audio-bearing track covers (Requirement 6.11).
+        AudioGraph graph{format};
+        return graph.render({}, frames);
+    };
+}
+
 ExportEngine::ExportEngine(gpu::Compositor& compositor) noexcept : compositor_(compositor) {}
+
+ExportEngine::ExportEngine(gpu::Compositor& compositor, AudioRangeRenderer audio)
+    : compositor_(compositor), audio_(std::move(audio)) {}
 
 std::size_t ExportEngine::plannedFrameCount(const Project& project, FrameRate frameRate) noexcept {
     if (!frameRate.isValid()) {
@@ -252,6 +290,21 @@ Result<ExportResult> ExportEngine::runImpl(const Project& project, const ExportR
     spec.availability = request.availability;
     spec.outputPath = request.outputPath;
     spec.containerFormat = request.containerFormat;
+    // One audio stream alongside the video stream when the request includes audio
+    // (Requirement 6.5). The encoder validates the audio parameters before the
+    // output file is opened, so a malformed audio request creates no file.
+    if (request.includeAudio) {
+        spec.audio = request.audio;
+    }
+
+    // The audio mix source: the injected renderer (AudioEngine::renderRange in
+    // production) or, when none was bound, exact silence for the requested range
+    // — which is the outcome Requirement 6.11 prescribes for a timeline with no
+    // clip on an unmuted audio-bearing track.
+    AudioRangeRenderer renderAudio;
+    if (request.includeAudio) {
+        renderAudio = audio_ ? audio_ : silentAudioRangeRenderer(request.audio.format());
+    }
 
     Result<MediaEncoder> encoderResult = MediaEncoder::create(spec, factory);
     if (encoderResult.isError()) {
@@ -288,6 +341,18 @@ Result<ExportResult> ExportEngine::runImpl(const Project& project, const ExportR
     std::size_t rendered = 0;
     Duration lastPosition = Duration::zero();
     for (std::size_t i = 0; i < totalFrames; ++i) {
+        // Cancellation is checked at the frame boundary, before any work for this
+        // frame: the export stops at a known frame rather than at whatever point a
+        // timer happened to fire, and the partial output is dropped exactly as for
+        // any other mid-export failure (Requirement 7.7).
+        if (request.cancelled && request.cancelled()) {
+            removeIncompleteOutput(request.outputPath);
+            return err<ExportResult>(makeError(
+                ErrorCode::Cancelled,
+                "the export was cancelled after " + std::to_string(rendered) + " of " +
+                    std::to_string(totalFrames) + " frames"));
+        }
+
         // Frame i's presentation time. durationForFrames(i) is exact and, since
         // frameStep > 0, strictly increasing in i — the P6 ordering property
         // (Requirement 10.3) the encoder also enforces on submit().
@@ -305,6 +370,28 @@ Result<ExportResult> ExportEngine::runImpl(const Project& project, const ExportR
         if (submitted.isError()) {
             removeIncompleteOutput(request.outputPath);
             return err<ExportResult>(std::move(submitted).error());
+        }
+
+        // Then this frame interval's audio, mixed by the export-local AudioGraph
+        // behind the range renderer (Requirement 6.5). Interleaving per frame
+        // rather than mixing the whole timeline up front keeps the export's peak
+        // memory independent of the timeline length, and keeps the two streams'
+        // presentation times marching together through the muxer.
+        if (renderAudio) {
+            const Duration intervalEnd =
+                frameRate.durationForFrames(static_cast<std::int64_t>(i) + 1);
+            Result<AudioBuffer> mixed = renderAudio(project, position, intervalEnd);
+            if (mixed.isError()) {
+                // A failure of the audio mix is a failure of the export: drop the
+                // partial output and report the audio stage (Requirement 6.10).
+                removeIncompleteOutput(request.outputPath);
+                return err<ExportResult>(std::move(mixed).error());
+            }
+            Result<void> submittedAudio = encoder.submitAudio(mixed.value(), position);
+            if (submittedAudio.isError()) {
+                removeIncompleteOutput(request.outputPath);
+                return err<ExportResult>(std::move(submittedAudio).error());
+            }
         }
 
         ++rendered;
@@ -339,6 +426,9 @@ Result<ExportResult> ExportEngine::runImpl(const Project& project, const ExportR
     result.outputPath = request.outputPath;
     result.usedHardwareEncode = encoder.isHardware();
     result.usedSoftwareFallback = encoder.usedSoftwareFallback();
+    result.containsAudio = encoder.hasAudioStream();
+    result.audioBlocks = encoder.submittedAudioBlockCount();
+    result.audioFrames = encoder.submittedAudioFrameCount();
     return result;
 }
 

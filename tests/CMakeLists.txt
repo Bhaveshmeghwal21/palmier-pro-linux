@@ -1388,6 +1388,10 @@ add_executable(palmier_app_composition_tests
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/MentionResolver.cpp"
+    # Task 10.1: the composition root now selects its Agent_Interpreter through the
+    # registry instead of defaulting to `makeUnconfiguredInterpreter()`.
+    "${PROJECT_SOURCE_DIR}/src/services/AgentInterpreterRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/OfflineIntentInterpreter.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/LocalizationManager.cpp")
 target_include_directories(palmier_app_composition_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -2241,3 +2245,161 @@ target_link_libraries(palmier_media_audio_sink_tests PRIVATE
     Palmier::test_support)
 
 palmier_register_test(palmier_media_audio_sink_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Offline interpreter tests (task 10.2; design.md Properties 59, 60, 61, 64;
+# Requirements 11.2, 11.3, 11.4, 11.9) — the built-in agent interpreter and the
+# interpreter registry that replaced `makeUnconfiguredInterpreter()`.
+#
+# The four properties:
+#
+#   * 59 — case- and whitespace-insensitivity, over the documented phrase table x
+#     case maps (lower, upper, alternating, per-character random) x leading,
+#     interior and trailing whitespace runs covering the whole whitespace set
+#     (spaces, tabs, newlines, carriage returns, vertical tabs, form feeds). Every
+#     perturbation must resolve to the SAME invocation as the canonical form.
+#   * 60 — "the interpreter's output is always executable", taken literally: each
+#     produced invocation is looked up in the REAL surface built by
+#     `buildDefaultToolRegistry`, validated against the tool's ADVERTISED
+#     `ToolSchema`, and then actually RUN through `McpToolExecutor` against a real
+#     `ProjectSession`. An invocation the schema would reject, or that the engine
+#     would refuse, is therefore a genuine counterexample rather than a formatting
+#     nit.
+#   * 61 — unmappable utterances (random strings plus deliberate near misses)
+#     quote the request and leave the project, both history depths and the media
+#     library byte-identical.
+#   * 64 — the 1-2000 character bounds, both arms, with the in-range lengths as the
+#     control so the boundary is pinned rather than just its far side.
+#
+# The no-network guarantee of Requirement 11.3 is PROVEN, not assumed, two ways:
+# the component's declared network seam is installed with a gate that fails the
+# test if called, and the C library's socket entry points (`socket`, `connect`,
+# `getaddrinfo`, `gethostbyname`, `sendto`) are interposed for the duration of
+# every interpretation and asserted never to be reached. The interposers forward to
+# the real symbols through dlsym(RTLD_NEXT), so nothing else in the process is
+# disturbed; the platform's dl library is linked for that reason.
+#
+# No sleeping, no injected clock, no FFmpeg, no GPU, no Qt and no sound device: the
+# 1-second bound is measured with a steady clock over the real call and asserted at
+# a small fraction of it. The two hook-backed tools the phrase table reaches
+# (`media.import`, `timeline.export`) are wired to minimal in-test hooks — the
+# import hook registers an asset in the session's real MediaManager, the export
+# hook writes the requested bytes — because the property is about the
+# INTERPRETER's output being acceptable to the tool surface, not about encoding.
+# Every write-performing tool is only ever handed an absolute path inside a
+# per-case scratch directory whose name carries the process id.
+#
+# Sources are listed explicitly (rather than linking Palmier::services) so this
+# binary needs neither libsecret, lcms2 nor Palmier::media, exactly as the other
+# service-layer test targets do.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_agent_offline_tests
+    services/offline_interpreter_property_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/OfflineIntentInterpreter.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AgentInterpreterRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_agent_offline_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_agent_offline_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+# dlsym(RTLD_NEXT, ...) for the socket interposers.
+if(CMAKE_DL_LIBS)
+    target_link_libraries(palmier_services_agent_offline_tests PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+palmier_register_test(palmier_services_agent_offline_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Export audio stream tests (task 9.3; Requirements 6.5, 6.11) — the encoder's
+# second stream and the export engine's per-frame audio interleave.
+#
+# Two surfaces, tested separately because they fail for different reasons:
+#
+#   * media::MediaEncoder — EncodeSpec::audio, submitAudio()'s format and ordering
+#     guards, the refusal to accept audio on a video-only encoder, the inherited
+#     IEncodeBackend::encodeAudio default that reports Unsupported rather than
+#     dropping audio, and finish() flushing BOTH streams before the trailer.
+#   * media::ExportEngine — one audio block per video frame interval, the two
+#     streams' presentation times marching together, and the per-frame intervals
+#     tiling the timeline with no gap and no overlap so the audio stream spans the
+#     whole duration within one frame interval.
+#
+# Requirement 6.11 ("no clip on an unmuted audio-bearing track still gets one
+# silent stream spanning the full timeline duration") is asserted twice: once
+# through the fallback silent renderer, and once through the PRODUCTION path,
+# media::AudioEngine::renderRange, mixing a project whose only audio track is
+# muted. That second case is the point of the seam — there is one export mixer, the
+# AudioGraph behind renderRange, not a second one written for export.
+#
+# Nothing here sleeps, opens a device or needs a media fixture: the encode backend
+# is a scriptable mock, the compositor runs the software reference on
+# gpu::GpuContext::softwareFallback(), and the audio engine mixes through the
+# always-available linear resampler with a NullAudioSink it never starts. Links
+# Palmier::media (which brings in Palmier::gpu and Palmier::core).
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_export_audio_tests
+    media/export_audio_stream_test.cpp)
+target_link_libraries(palmier_media_export_audio_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_export_audio_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Export coordinator tests (task 9.4; Requirements 6.5, 6.10, 6.11, 7.1-7.7,
+# 7.9, 7.10, 7.11, 8.11) — services::ExportCoordinator's admission, isolation,
+# reporting and cleanup.
+#
+# The coordinator's contract is mostly about what does NOT happen, so this target
+# is deliberately set up to make those absences checkable:
+#
+#   * The mock encode backend WRITES A REAL FILE the moment it is built, exactly as
+#     the FFmpeg backend does when it opens the muxer. That is what gives "no file
+#     remains after a failure or a cancellation" (Requirements 7.5, 7.7, 8.11)
+#     something real to assert, and it is why every write-performing case uses an
+#     ABSOLUTE path inside a per-process scratch directory whose name contains
+#     getpid(): gtest_discover_tests runs one process per case and ctest runs those
+#     in parallel.
+#   * The overwrite case compares the destination's BYTES before and after, which
+#     is the only way "preserved byte-for-byte" (Requirement 7.11) can be checked.
+#   * Cancellation and mid-export failure are DETERMINISTIC: the mock backend runs
+#     on the export worker, so calling cancel() from inside its Nth encode() sets
+#     the flag before the render loop's next frame-boundary check and the export
+#     always stops at that exact frame. Nothing sleeps and nothing polls.
+#   * The concurrent-request case parks the worker on a promise the TEST releases,
+#     so the two requests genuinely overlap rather than probably overlapping.
+#   * The <=1 s progress cadence is driven by an INJECTED clock the test advances by
+#     hand, and every wait is bounded (awaitCompletion with a budget) with its
+#     result asserted — so a coordinator that fails to finish makes these tests
+#     FAIL rather than hang.
+#
+# No GPU, no vendor SDK, no FFmpeg and no media fixture: the compositor runs the
+# software reference on gpu::GpuContext::softwareFallback(), clip pixels come from
+# an injected provider, and encoder choice runs through media::EncoderSelector with
+# an injected virtual-time probe awaiter. Links Palmier::services (which brings in
+# Palmier::media, Palmier::gpu and Palmier::core).
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_export_coordinator_tests
+    services/export_coordinator_test.cpp)
+target_link_libraries(palmier_services_export_coordinator_tests PRIVATE
+    Palmier::services
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_export_coordinator_tests)
