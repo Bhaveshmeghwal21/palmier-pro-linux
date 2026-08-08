@@ -13,12 +13,20 @@
 
 #include <gtest/gtest.h>
 
+#include <unistd.h>
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 
+#include "app/AppSettings.hpp"
 #include "app/ApplicationComposition.hpp"
 #include "core/MediaManager.hpp"
 #include "core/Project.hpp"
@@ -611,6 +619,155 @@ TEST(ApplicationComposition, LocalizationDefaultsToASupportedLanguage) {
     // language when supported, else English — always a supported language.
     EXPECT_TRUE(palmier::services::isSupportedLanguage(
         composition.localization().currentLanguage()));
+}
+
+// ---------------------------------------------------------------------------
+// Startup wiring: resolved settings actually reach the composed AppConfig.
+//
+// The composition root only ever sees an `AppConfig`, and `app::AppSettings` only
+// ever produces one — but nothing tied the two together, so the entry point could
+// (and did) construct the composition from a default-constructed config, leaving
+// every configurable option unreachable from the shipped binary. These tests pin
+// the sequence the entry point performs: resolve settings from the config file and
+// the command line, then construct the composition from `settings.config()`.
+//
+// Hermetic: the config file lives in a pid-qualified scratch directory (no real
+// user configuration is read), the environment is driven through the injected
+// lookup seam (the process environment is never consulted), and the MCP endpoint
+// binds an ephemeral LOOPBACK port — a remote configuration with unmet
+// prerequisites is deliberately used, which by design binds loopback.
+// ---------------------------------------------------------------------------
+
+using palmier::app::AppSettings;
+
+/// A scratch $XDG_CONFIG_HOME-style directory holding one config file.
+class ScratchConfig {
+public:
+    explicit ScratchConfig(std::string_view label, std::string_view contents) {
+        root_ = std::filesystem::temp_directory_path() /
+                ("palmier_startup_wiring_" + std::to_string(static_cast<long>(::getpid())) + "_" +
+                 std::string(label));
+        std::error_code ignored;
+        std::filesystem::remove_all(root_, ignored);
+        std::filesystem::create_directories(root_);
+        path_ = root_ / "config";
+        std::ofstream output(path_, std::ios::binary | std::ios::trunc);
+        output << contents;
+    }
+
+    ~ScratchConfig() {
+        std::error_code ignored;
+        std::filesystem::remove_all(root_, ignored);
+    }
+
+    ScratchConfig(const ScratchConfig&) = delete;
+    ScratchConfig& operator=(const ScratchConfig&) = delete;
+
+    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
+
+private:
+    std::filesystem::path root_;
+    std::filesystem::path path_;
+};
+
+/// Settings options that know nothing about the process environment, and read the
+/// given file as the config file.
+AppSettings::Options isolatedOptions(const ScratchConfig& config) {
+    AppSettings::Options options;
+    options.environment = [](std::string_view) { return std::optional<std::string>{}; };
+    options.configFile = config.path();
+    return options;
+}
+
+TEST(ApplicationStartupWiring, ConfigFileAndCommandLineOverridesReachTheComposedConfig) {
+    const ScratchConfig config("reaches",
+                               "mcp.host = 127.0.0.1\n"
+                               "mcp.port = 0\n"          // ephemeral: never contends for 19789
+                               "remote.max_sessions = 12\n"
+                               "agent.interpreter = hosted\n"
+                               "generative.backend = hosted\n");
+
+    // The command line the entry point would be given, program name included.
+    const std::string configFlag = "--config=" + config.path().string();
+    const char* argv[] = {"palmier-pro", configFlag.c_str(), "--remote-max-sessions=3",
+                          "--generative-backend=no-such-backend", "--turbo-mode"};
+    const AppSettings settings =
+        AppSettings::fromArgv(static_cast<int>(std::size(argv)), argv, isolatedOptions(config));
+
+    // Resolution: the file was read, the command line won where it spoke, and the
+    // unknown option was REPORTED rather than silently swallowed.
+    ASSERT_TRUE(settings.configFileRead());
+    EXPECT_FALSE(settings.helpRequested());
+    bool reportedUnknownOption = false;
+    for (const std::string& diagnostic : settings.diagnostics()) {
+        reportedUnknownOption =
+            reportedUnknownOption || diagnostic.find("--turbo-mode") != std::string::npos;
+    }
+    EXPECT_TRUE(reportedUnknownOption);
+
+    // The entry point's one job: construct the composition from what was resolved.
+    ApplicationComposition composition{settings.config()};
+
+    // Every one of these was unreachable while the entry point used a
+    // default-constructed AppConfig.
+    EXPECT_EQ(settings.config().mcpPort, 0);
+    EXPECT_EQ(settings.config().remote.maxSessions, 3);
+    EXPECT_EQ(settings.config().agentInterpreterId, "hosted");
+    EXPECT_EQ(settings.config().generativeBackendId, "no-such-backend");
+    EXPECT_EQ(composition.remoteAccessGate().config().maxSessions, 3);
+
+    // ...and the ids reached the registries, whose documented fallbacks then
+    // applied: credential-less `hosted` and an unrecognised backend id both install
+    // `offline` and say so in startupErrors() (Requirements 11.8, 12.8), which is
+    // exactly what the entry point now prints on stderr.
+    EXPECT_EQ(composition.agentInterpreterId(), "offline");
+    EXPECT_EQ(composition.generativeBackendId(), "offline");
+    ASSERT_EQ(composition.startupErrors().size(), 2u);
+    bool namedTheRejectedInterpreter = false;
+    bool namedTheRejectedBackend = false;
+    for (const std::string& error : composition.startupErrors()) {
+        namedTheRejectedInterpreter =
+            namedTheRejectedInterpreter || error.find("hosted") != std::string::npos;
+        namedTheRejectedBackend =
+            namedTheRejectedBackend || error.find("no-such-backend") != std::string::npos;
+    }
+    EXPECT_TRUE(namedTheRejectedInterpreter);
+    EXPECT_TRUE(namedTheRejectedBackend);
+
+    // The application still comes up in full: nothing here is fatal.
+    ASSERT_TRUE(composition.start());
+    EXPECT_TRUE(composition.running());
+    EXPECT_NE(composition.mcpBoundPort(), 0);
+    (void)composition.timeline();
+    composition.stop();
+}
+
+TEST(ApplicationStartupWiring, RemoteSettingsReachTheGateAndReportTheirUnmetPrerequisites) {
+    // Remote access could not be turned on from the binary at all before the entry
+    // point resolved settings. Enabled with the token and the acknowledgement
+    // missing, so the gate refuses the non-loopback bind, names what is missing and
+    // binds loopback instead (Requirements 10.3, 10.12) — no external address is
+    // ever bound by this test.
+    const ScratchConfig config("remote",
+                               "mcp.port = 0\n"
+                               "remote.enabled = true\n"
+                               "remote.bind_address = 203.0.113.7\n"
+                               "remote.idle_timeout_seconds = 45\n");
+
+    const AppSettings settings = AppSettings::load({}, isolatedOptions(config));
+    ASSERT_TRUE(settings.config().remote.enabled);
+    EXPECT_EQ(settings.config().remote.bindAddress, "203.0.113.7");
+    EXPECT_EQ(settings.config().remote.idleTimeout, std::chrono::seconds{45});
+
+    ApplicationComposition composition{settings.config()};
+    EXPECT_TRUE(composition.remoteAccessGate().config().enabled);
+    EXPECT_EQ(composition.remoteAccessGate().config().bindAddress, "203.0.113.7");
+    EXPECT_EQ(composition.remoteAccessGate().config().idleTimeout, std::chrono::seconds{45});
+
+    ASSERT_TRUE(composition.start());
+    EXPECT_TRUE(composition.running());
+    EXPECT_FALSE(composition.remoteAccessStartupError().empty());
+    composition.stop();
 }
 
 TEST(ApplicationComposition, GpuContextDegradesToSoftwareWhenNoGpu) {

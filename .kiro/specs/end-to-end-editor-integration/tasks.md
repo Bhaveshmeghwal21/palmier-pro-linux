@@ -1052,6 +1052,52 @@ Checkpoint tasks (4.8, 9.9, 11.12, 12.13) are intentionally excluded from the wa
 
 ## Progress
 
+### Defect fix — configuration never reached the binary (no task ticked)
+
+`src/app/main.cpp` constructed `ApplicationComposition` from a **default-constructed `AppConfig`** and
+never called `AppSettings::load()`/`fromArgv()`. `app::AppSettings` (task 6.1) resolved four layers
+into an `AppConfig` that nothing then used, so from the shipped binary the MCP endpoint could not be
+moved, remote access could not be turned on at all, and `agentInterpreterId` / `generativeBackendId`
+(tasks 10.1, 10.5) could not be selected — the hosted and BYOK interpreters and backends were
+reachable only from tests. Fixed by wiring the entry point to the settings API that already existed:
+resolve `fromArgv` (defaults < config file < `PALMIER_*` environment < command line), then construct
+the composition from `settings.config()`, on both the Qt and the no-Qt path.
+
+Three smaller changes came with it, each the minimum the fix needed:
+
+- **`generative.backend` / `PALMIER_GENERATIVE_BACKEND` / `--generative-backend`** joins the key
+  table. It was simply missing, so `generativeBackendId` had no configuration name; validation is
+  split exactly as `agent.interpreter`'s is, leaving the registry's Requirement 12.8 fallback and its
+  startup error intact instead of silently substituting the default here.
+- **`AppSettings::helpRequested()` + `AppSettings::usage()`.** `--help` / `-h` now prints the accepted
+  options — generated from the key table, so the text cannot drift — and exits before a QApplication,
+  a composition or a session is constructed. An unknown option is **not** fatal: per the existing
+  resolver contract it is reported on stderr together with the option list and ignored, leaving the
+  safe default in place, and the editor still starts.
+- **Startup diagnostics are surfaced.** `AppSettings::diagnostics()`, then
+  `ApplicationComposition::startupErrors()` and, after `start()`, `remoteAccessStartupError()` /
+  `remoteAccessWarning()` all go to stderr. Nothing silent, and no value (hence no token) is printed.
+
+**Tests: 1124 total, from 1119** — 3 in `tests/app/app_settings_test.cpp` (the two selection ids
+resolve from file/env/CLI with the documented precedence; `--help` sets the request without becoming a
+diagnostic or a positional; `usage()` names every recognized key, flag and variable) and 2 new
+`ApplicationStartupWiring` cases in `tests/app/application_composition_test.cpp`, where
+`AppSettings.cpp` now joins that target so the resolved config and the composition constructed from it
+can be asserted in one place. The wiring cases pin what was unreachable: a config file plus argv
+overrides reach `mcpPort`, `remote.maxSessions`, the gate's `RemoteAccessConfig` and both selection
+ids, an unknown option is reported rather than swallowed, and the rejected ids produce the documented
+fallback-plus-startup-error while the application still starts. Hermetic: a pid-qualified scratch
+config file, the injected environment seam, an ephemeral **loopback** port, and a remote configuration
+whose prerequisites are deliberately unmet so no external address is ever bound. Same 3 expected
+skips; no existing test changed.
+
+> **`main.cpp` is not compiled in `build-nogui`** — `src/app/CMakeLists.txt` guards the `palmier-pro`
+> target with `PALMIER_BUILD_UI AND TARGET Qt6::Widgets`, and Qt is absent. Its no-Qt path was
+> syntax-checked directly (`g++ -std=c++20 -fsyntax-only -Wall -Wextra -Isrc src/app/main.cpp`), which
+> covers the shared prologue (resolution, `--help`, both report helpers) and the console shell; the few
+> Qt-only lines remain unverified until a Qt build. Everything the entry point *does* — resolution and
+> composition-from-resolved-config — is covered by the runnable tests above.
+
 **Stage 10 is now closed, and 12.6 with it — the stage-10 parent is ticked for the first time.**
 
 **10.9 was the last open stage-10 sub-task.** It adds

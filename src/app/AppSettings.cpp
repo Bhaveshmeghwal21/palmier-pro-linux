@@ -268,6 +268,26 @@ constexpr KeySpec kKeys[] = {
          config.agentInterpreterId = std::string(id);
          return true;
      }},
+    // Task 10.5 / Requirement 12.2: which Generative_Backend to install
+    // (`offline`, `hosted` or `byok`). All three are compiled in, so this string is
+    // the only thing that selects between them — without it the hosted and BYOK
+    // clients are unreachable from a shipped binary.
+    //
+    // Validation is split exactly as it is for `agent.interpreter` above, and for
+    // the same reason: `services::GenerativeBackendRegistry` answers an
+    // unrecognised id with a documented fallback to `offline` plus a startup error
+    // naming the rejected id (Requirement 12.8), which rejecting the value here
+    // would silently throw away.
+    {"generative.backend", "PALMIER_GENERATIVE_BACKEND", "--generative-backend", false,
+     [](std::string_view value, AppConfig& config, std::string& error) {
+         const std::string_view id = trim(value);
+         if (id.empty()) {
+             error = "expected a generative backend id ('offline', 'hosted' or 'byok')";
+             return false;
+         }
+         config.generativeBackendId = std::string(id);
+         return true;
+     }},
 };
 
 [[nodiscard]] const KeySpec* findKey(std::string_view key) {
@@ -298,6 +318,11 @@ constexpr std::string_view kConfigFlag = "--config";
 constexpr std::string_view kConfigDirName = "palmier-pro";
 constexpr std::string_view kConfigFileName = "config";
 
+// Asking for the option list. Handled before layer 4 so it is neither an unknown
+// option nor a positional argument.
+constexpr std::string_view kHelpFlagLong = "--help";
+constexpr std::string_view kHelpFlagShort = "-h";
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -323,6 +348,26 @@ std::vector<std::string_view> AppSettings::recognizedKeys() {
         keys.push_back(spec.key);
     }
     return keys;
+}
+
+std::string AppSettings::usage() {
+    std::ostringstream text;
+    text << "Usage: palmier-pro [options] [project.palmier]\n"
+         << "\nOptions:\n"
+         << "  " << kHelpFlagLong << ", " << kHelpFlagShort
+         << "                 show this option list and exit\n"
+         << "  " << kConfigFlag << " <path>              read settings from <path> instead of\n"
+         << "                              $XDG_CONFIG_HOME/" << kConfigDirName << "/"
+         << kConfigFileName << "\n";
+    for (const KeySpec& spec : kKeys) {
+        text << "  " << spec.flag << (spec.valueOptional ? " [<value>]" : " <value>") << '\n'
+             << "                              config key " << spec.key << ", environment "
+             << spec.envVar << '\n';
+    }
+    text << "\nPrecedence, lowest first: built-in defaults, the config file, the\n"
+            "environment, the command line. An option that cannot be understood is\n"
+            "reported and ignored, leaving the safe default in place.\n";
+    return text.str();
 }
 
 std::string_view AppSettings::environmentVariableFor(std::string_view key) {
@@ -463,6 +508,12 @@ AppSettings AppSettings::load(const std::vector<std::string>& commandLine, Optio
     // --- Layer 4: command-line flags, the last word.
     for (std::size_t index = 0; index < commandLine.size(); ++index) {
         const std::string& argument = commandLine[index];
+        if (argument == kHelpFlagLong || argument == kHelpFlagShort) {
+            // Asking for the option list is a request, not a setting and not a
+            // mistake: it sets no key, records no diagnostic and is not positional.
+            settings.helpRequested_ = true;
+            continue;
+        }
         if (argument == kConfigFlag) {
             ++index;  // its value was consumed by the pre-scan above
             continue;

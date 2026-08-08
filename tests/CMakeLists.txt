@@ -1408,9 +1408,14 @@ palmier_register_test(palmier_ui_preview_controller_tests)
 # Palmier::gpu and Palmier::core) for the decode side. Still no Qt, FFmpeg, GPU or
 # vendor SDK: the decode backend factory degrades to its stub and the compositor
 # runs the vendor-neutral software reference.
+# AppSettings.cpp joins the same binary so the STARTUP WIRING can be tested where
+# it matters: that the AppConfig app::AppSettings resolves (config file + command
+# line) is the one the composition root is actually constructed from. Both sources
+# are Qt-free value/wiring code, so this adds no dependency to the target.
 add_executable(palmier_app_composition_tests
     app/application_composition_test.cpp
     "${PROJECT_SOURCE_DIR}/src/app/ApplicationComposition.cpp"
+    "${PROJECT_SOURCE_DIR}/src/app/AppSettings.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"

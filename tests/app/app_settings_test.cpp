@@ -437,6 +437,79 @@ TEST(AppSettings, BearerTokenIsCarriedVerbatimAndNeverAppearsInADiagnostic) {
 // The documented key table (Requirement 16.3).
 // ---------------------------------------------------------------------------
 
+TEST(AppSettings, BackendSelectionIdsAreResolvableFromEveryLayer) {
+    // The two ids that decide WHICH agent interpreter and WHICH generative backend
+    // are installed (tasks 10.1, 10.5; Requirements 11.1, 12.2). All the candidates
+    // are compiled in, so these strings are the only way an operator can select
+    // one — they have to be reachable from configuration.
+    const ScratchConfigHome scratch("backend_ids");
+    scratch.writeConfig(
+        "agent.interpreter = hosted\n"
+        "generative.backend = hosted\n");
+
+    const AppSettings fromFile = AppSettings::load({}, withScratch(scratch));
+    EXPECT_TRUE(fromFile.diagnostics().empty());
+    EXPECT_EQ(fromFile.config().agentInterpreterId, "hosted");
+    EXPECT_EQ(fromFile.config().generativeBackendId, "hosted");
+
+    const AppSettings overridden = AppSettings::load(
+        {"--generative-backend=byok"},
+        withScratch(scratch, {{"PALMIER_AGENT_INTERPRETER", "byok"}}));
+    EXPECT_TRUE(overridden.diagnostics().empty());
+    EXPECT_EQ(overridden.config().agentInterpreterId, "byok");   // env beat the file
+    EXPECT_EQ(overridden.config().generativeBackendId, "byok");  // cli beat the file
+    EXPECT_EQ(overridden.sourceOf("agent.interpreter"), Layer::Environment);
+    EXPECT_EQ(overridden.sourceOf("generative.backend"), Layer::CommandLine);
+
+    // Nothing configured leaves the offline defaults, and an empty value is
+    // reported rather than silently installing something nobody named.
+    const AppSettings defaults = AppSettings::load({}, emptyEnvironment());
+    EXPECT_EQ(defaults.config().agentInterpreterId, "offline");
+    EXPECT_EQ(defaults.config().generativeBackendId, "offline");
+
+    const AppSettings blank =
+        AppSettings::load({"--generative-backend="}, emptyEnvironment());
+    EXPECT_EQ(blank.config().generativeBackendId, "offline");
+    EXPECT_TRUE(anyDiagnosticContains(blank, "generative.backend: expected a generative backend id"));
+}
+
+// ---------------------------------------------------------------------------
+// Asking for the option list.
+// ---------------------------------------------------------------------------
+
+TEST(AppSettings, HelpIsRequestedWithoutBecomingADiagnosticOrAPositional) {
+    for (const std::string flag : {std::string("--help"), std::string("-h")}) {
+        const AppSettings settings =
+            AppSettings::load({flag, "--mcp-port=23456"}, emptyEnvironment());
+        EXPECT_TRUE(settings.helpRequested()) << flag;
+        EXPECT_TRUE(settings.diagnostics().empty()) << flag;
+        EXPECT_TRUE(settings.positionalArguments().empty()) << flag;
+        // The rest of the command line still resolved, so config() stays usable.
+        EXPECT_EQ(settings.config().mcpPort, 23456) << flag;
+    }
+
+    // Not asked for => not requested.
+    EXPECT_FALSE(AppSettings::load({"--mcp-port=23456"}, emptyEnvironment()).helpRequested());
+}
+
+TEST(AppSettings, UsageListsEveryAcceptedOptionAndNoValue) {
+    const std::string usage = AppSettings::usage();
+
+    EXPECT_NE(usage.find("--help"), std::string::npos);
+    EXPECT_NE(usage.find("--config"), std::string::npos);
+    for (const std::string_view key : AppSettings::recognizedKeys()) {
+        EXPECT_NE(usage.find(std::string(AppSettings::commandLineFlagFor(key))),
+                  std::string::npos)
+            << key;
+        EXPECT_NE(usage.find(std::string(AppSettings::environmentVariableFor(key))),
+                  std::string::npos)
+            << key;
+        EXPECT_NE(usage.find(std::string(key)), std::string::npos) << key;
+    }
+    ASSERT_FALSE(usage.empty());
+    EXPECT_EQ(usage.back(), '\n');
+}
+
 TEST(AppSettings, EveryRecognizedKeyHasAnEnvironmentVariableAndAFlag) {
     const std::vector<std::string_view> keys = AppSettings::recognizedKeys();
     EXPECT_FALSE(keys.empty());

@@ -93,6 +93,18 @@ public:
         return diagnostics_;
     }
 
+    /// True when the command line asked for the option list (`--help` or `-h`).
+    /// The entry point prints `usage()` and exits WITHOUT constructing a session;
+    /// asking for help is not a diagnostic, so it never appears in
+    /// `diagnostics()` and the resolved `config()` is still valid.
+    [[nodiscard]] bool helpRequested() const noexcept { return helpRequested_; }
+
+    /// The accepted options, one per line, generated from the same key table that
+    /// drives resolution — so the text can never drift from what is actually
+    /// understood (Requirement 16.3). Ends with a newline. Names no value, so it is
+    /// safe to print anywhere a diagnostic is safe to print.
+    [[nodiscard]] static std::string usage();
+
     /// The config file that was consulted, if any (before knowing whether it
     /// exists), and whether it was actually read.
     [[nodiscard]] const std::optional<std::filesystem::path>& configFilePath() const noexcept {
@@ -127,6 +139,7 @@ private:
     std::map<std::string, Layer>         sources_{};
     std::optional<std::filesystem::path> configFilePath_{};
     bool                                 configFileRead_ = false;
+    bool                                 helpRequested_ = false;
 };
 
 }  // namespace palmier::app
