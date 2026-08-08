@@ -2682,6 +2682,59 @@ target_compile_definitions(palmier_docs_tests PRIVATE
 target_link_libraries(palmier_docs_tests PRIVATE
     Palmier::test_support)
 
+# ---------------------------------------------------------------------------
+# Task 12.7 extends the same target with the documentation consistency checker
+# (Requirements 16.7, 16.8), following the instructions above: target_sources()
+# rather than a second add_executable(), and additive link libraries.
+#
+# The checker compares three checked-in documents against the RUNNING system, so
+# this target grows a live tool surface. The sources are listed explicitly rather
+# than linked as Palmier::services — exactly as the neighbouring tool-surface
+# suites do (`palmier_services_session_tools_tests`,
+# `palmier_services_tool_registry_schema_tests`) — so the binary still links no
+# libav*, no libsecret, no lcms2, no Vulkan and no Qt:
+#
+#   * ToolRegistry / ToolSchema  — `describe()` IS the `tools/list` payload the
+#     documented tool and argument names are compared against, and each tool's
+#     rendered schema supplies the JSON type and the required/optional marking.
+#   * ProjectSession / ProjectSaveService / ProjectStore / Json — the real session
+#     the checker drives so that each documented RESULT field is compared against a
+#     field a real handler actually returned. `media.import`'s probe operation is
+#     supplied as an in-test hook (no FFmpeg here), but the result SHAPE under test
+#     is the registry's own rendering of it.
+#   * AppSettings — `recognizedKeys()` plus the environment-variable and flag
+#     accessors read the one key table that defines the configuration surface
+#     docs/REMOTE_ACCESS.md documents. (`AppSettings::usage()` is generated from
+#     that table and so cannot drift from it; the document is what can.)
+#
+# The third path this target needs, alongside PALMIER_SOURCE_DIR and
+# PALMIER_DOCS_DIR above:
+#
+#   * PALMIER_OPTIONS_MANIFEST — the `palmier_options.txt` that
+#     cmake/PalmierOptionsManifest.cmake writes at configure time from this tree's
+#     `PALMIER_*` cache entries. A test binary cannot ask CMake anything at run
+#     time, so this file is how "the options defined by the build system"
+#     (Requirement 16.7) reaches the checker. It is written at the very end of the
+#     top-level CMakeLists.txt, after this directory has been added, because
+#     PALMIER_PBT_MIN_SUCCESS is created below.
+# ---------------------------------------------------------------------------
+target_sources(palmier_docs_tests PRIVATE
+    docs/documentation_consistency_test.cpp
+    support/DocumentationChecker.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
+    "${PROJECT_SOURCE_DIR}/src/app/AppSettings.cpp")
+target_include_directories(palmier_docs_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_compile_definitions(palmier_docs_tests PRIVATE
+    PALMIER_OPTIONS_MANIFEST="${PROJECT_BINARY_DIR}/palmier_options.txt")
+target_link_libraries(palmier_docs_tests PRIVATE
+    Palmier::core)
+
 palmier_register_test(palmier_docs_tests)
 
 

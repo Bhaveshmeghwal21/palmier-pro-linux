@@ -52,6 +52,35 @@ destination prompt) without changing their arguments or results.
 The order below is the order `tools/list` publishes, which is the registration order in
 `buildDefaultToolRegistry`.
 
+### Extraction contract for task 12.7
+
+The consistency checker reads this file mechanically, so the layout below is a contract, not a style
+preference. Changing it changes what the checker sees.
+
+- A **tool section** is an `## ` heading whose only content is the backticked tool name. The prose
+  sections (`Rules that hold for every tool`, `Next`) carry no backticked dotted name and are
+  therefore not tool sections.
+- **Arguments** come from the table whose first header cell is `Argument`: the backticked name in the
+  first cell, the JSON type in the `Type` cell, and `**yes**` / `no` in the `Required` cell. The
+  `*uuid*` marker in a `Type` cell means the published schema carries `"format": "uuid"`. A tool that
+  accepts no arguments must say `No arguments.` on a line of its own — silence would be
+  indistinguishable from an omission.
+- **Result fields** come from the table whose first header cell is `Field`, or from a paragraph that
+  begins with the word `Result`. Either way a field is written as a backticked name followed
+  immediately by its type in parentheses — `` `durationNs` (integer) `` — because that is the shape
+  the checker matches. Grouping several names under one parenthesised type hides all but the last
+  from the checker, so each field carries its own.
+- A field is **conditional** — exempt from "some invocation must return it" — when its note, its
+  `Notes` cell, or the sentence declaring it says when it is present (`present only`, `present when`,
+  `only when`, `absent`). A conditional field declared outside the `Result` paragraph, as
+  `media.import`'s resolution fields are, must sit in a sentence that states its condition; otherwise
+  the checker will not read it as a field at all.
+- `*(command result)*` stands for the `status` / `noOp` + `indication` trio described above. All
+  three count as documented and all three are conditional, since a single invocation shows only one
+  arm.
+- A name mentioned in ordinary prose is never read as a field or an argument, because it is not
+  followed by a parenthesised type. Prose is free.
+
 ## `timeline.read`
 
 Read the current project timeline (tracks, clips, effects, transitions).
@@ -142,8 +171,8 @@ depth.
 No arguments.
 
 Result: `projectId` (string), `name` (string), `fps` (object), `canvas` (object), `colorSpace`
-(string), `trackCount`, `clipCount`, `assetCount`, `durationNs` (integers), `modified` (bool),
-`documentPath` (string or `null`), `undoDepth` (integer).
+(string), `trackCount` (integer), `clipCount` (integer), `assetCount` (integer), `durationNs`
+(integer), `modified` (bool), `documentPath` (string or `null`), `undoDepth` (integer).
 
 `assetCount` is read from the media library, which is the same source `media.list` reads, so the two
 always agree.
@@ -160,9 +189,9 @@ Result: `assetId` (string), `sourcePath` (string), `containerFormat` (string), `
 (integer), `hasVideo` (bool), `hasAudio` (bool), `duplicate` (bool — the file was already
 registered).
 
-`width` and `height` (integers) are present only for an asset carrying a decodable video stream, and
-`fps` (number) only when a frame rate was determined. They are **absent**, not `null`, otherwise, so
-a caller can distinguish an audio-only asset from an unknown one.
+`width` (integer) and `height` (integer) are present only for an asset carrying a decodable video
+stream, and `fps` (number) only when a frame rate was determined. They are **absent**, not `null`,
+otherwise, so a caller can distinguish an audio-only asset from an unknown one.
 
 ## `media.list`
 

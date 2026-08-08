@@ -63,9 +63,10 @@ On an unsupported host — wrong architecture, glibc older than 2.31, or an unlo
 — the gate names **every** unmet item on stderr and in a dialog, and **no window opens**. That is the
 correct behaviour, not a crash.
 
-`palmier-pro` accepts no command-line arguments today: the settings resolver that understands
-`--mcp-port` and the `PALMIER_*` environment variables exists but is not consumed by the entry point,
-so the endpoint is always `127.0.0.1:19789`.
+`palmier-pro` resolves its configuration before it composes anything, so `--mcp-host`, `--mcp-port`,
+the `PALMIER_*` environment variables and the config file all take effect; `palmier-pro --help`
+prints the accepted options. Left unconfigured, the endpoint is `127.0.0.1:19789`. The full list is
+in [`REMOTE_ACCESS.md`](REMOTE_ACCESS.md).
 
 ## 2. Connect
 

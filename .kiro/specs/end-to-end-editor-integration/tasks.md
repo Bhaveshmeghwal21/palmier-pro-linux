@@ -881,7 +881,7 @@ generated cases.
       one file
     - _Requirements: 16.1, 16.2, 16.3, 16.4, 16.5, 16.6_
 
-  - [~] 12.7 Implement the documentation consistency checker
+  - [x] 12.7 Implement the documentation consistency checker
     - Emit `palmier_options.txt` at configure time from `get_cmake_property(... CACHE_VARIABLES)`
       filtered to `PALMIER_*`
     - Extract the documented option names from `docs/BUILD.md` and the documented tool, argument and
@@ -1158,7 +1158,54 @@ transport.
 
 **12.6 is now ticked.** Its remaining three documents — `docs/TOOLS.md`, `docs/HARDWARE_ENCODE.md`,
 `docs/QUICKSTART.md` — and the `README.md` trim are written and committed at `50bbd31`, so the whole
-of the checked name set now lives in exactly one file each. 12.7 remains `[~]`.
+of the checked name set now lives in exactly one file each.
+
+**12.7 is now ticked — 1150 tests, 3 expected skips (+26).** `cmake/PalmierOptionsManifest.cmake`
+emits `palmier_options.txt` from `get_cmake_property(... CACHE_VARIABLES)` filtered to `PALMIER_*`;
+it is called at the very END of the top-level `CMakeLists.txt`, because `tests/` creates
+`PALMIER_PBT_MIN_SUCCESS` and any earlier call would emit an incomplete set (16 entries).
+`tests/support/DocumentationChecker.{hpp,cpp}` extracts and compares, `tests/docs/`
+`documentation_consistency_test.cpp` runs it on `palmier_docs_tests` — the shared target, extended
+with `target_sources()` as its block instructs, with the tool surface / session / `AppSettings`
+sources listed explicitly so the binary still links no libav\*, libsecret, lcms2, Vulkan or Qt.
+
+**Nothing is restated in the test.** The option set comes from the manifest; the tool and argument
+names come from `ToolRegistry::describe()`, i.e. the `tools/list` payload itself; the result fields
+come from **invoking** the twenty registry-owned handlers over a real `ProjectSession`; the settings
+keys come from `AppSettings::recognizedKeys()` and its env/flag accessors. `timeline.export` and
+`generation.generate` render their payloads outside the registry (`exportOutcomeToJson`,
+`makeGenerateHook`), and linking either collaborator would drag FFmpeg/libsecret/lcms2 in, so those
+two are compared against the field names their real rendering function sets, read out of the source
+of record — with `FunctionFieldScan::found` failing loudly if either function is renamed, rather than
+checking nothing. Nineteen `DocumentationChecker*` cases inject each fault the checker must catch
+(missing marker, renamed option, wrong Type, flipped `**yes**`, changed JSON type, missing `*uuid*`,
+reordered tools, undocumented/never-returned result field, wrong env var), and drift was also
+confirmed end-to-end by temporarily mutating the real `docs/BUILD.md` and `docs/TOOLS.md`.
+
+**Five real doc/code inconsistencies were caught, and the DOC was fixed in each case** (the docs are
+the derived artefact; no behaviour was changed):
+
+1. `docs/REMOTE_ACCESS.md`'s table is headed "Every configuration input" but omitted
+   **`agent.interpreter`** and **`generative.backend`** — two of the fourteen keys in
+   `AppSettings.cpp`'s table. Both rows added, with a note that they are not remote-access inputs and
+   only live there because that is where the surface is tabulated.
+2. `docs/TOOLS.md` `project.info` grouped four fields under one type — "`trackCount`, `clipCount`,
+   `assetCount`, `durationNs` (integers)" — which hides the first three from any per-field reader.
+   Each now carries its own `(integer)`.
+3. Same shape in `media.import`: "`width` and `height` (integers)" hid `width`. Now
+   "`width` (integer) and `height` (integer)".
+4. `docs/REMOTE_ACCESS.md` carried a **stale status block** claiming `src/app/main.cpp` never calls
+   `AppSettings::load()`/`fromArgv()` and that the binary therefore ignores all configuration. `7b08fb3`
+   fixed exactly that; the block is now false and was replaced.
+5. `docs/QUICKSTART.md` likewise still said `palmier-pro` "accepts no command-line arguments today".
+   Also false since `7b08fb3`; rewritten, pointing at `REMOTE_ACCESS.md`.
+
+Items 2 and 3 are the interesting ones: prose that reads perfectly to a human silently drops names
+for a checker, so `docs/TOOLS.md` gained an **"Extraction contract for task 12.7"** section stating
+the grammar (tool heading, `Argument` table, `Field` table or `Result` paragraph, one parenthesised
+type per field, the conditional-presence phrases, `*(command result)*`), mirroring the contract
+`docs/BUILD.md` already declares for its option region. Items 4 and 5 are prose claims no name-level
+checker can see — worth recording as the known boundary of this check.
 
 > **On the 1119 count:** the +8 over 1110/1111 is entirely 10.9. Verified with **three consecutive
 > clean full runs** of `ctest --test-dir build-nogui -j$(nproc)`: 1119/1119, 3 skips

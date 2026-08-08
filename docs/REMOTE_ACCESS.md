@@ -10,14 +10,12 @@ and serves requests carrying neither `Authorization` nor `Origin` exactly as it 
 here happens as a side effect: remote access turns on only when configuration says `true` in so
 many words, and even then the gate still has to find all of its prerequisites.
 
-> **Status: the settings layer is not yet wired into the shipped binary.** Every key, variable and
-> flag below is implemented and enforced by `app::AppSettings` and `services::RemoteAccessGate`, and
-> `app::ApplicationComposition` acts on the resulting `AppConfig`. But `src/app/main.cpp` currently
-> constructs `ApplicationComposition` with a **default-constructed** `AppConfig` and never calls
-> `AppSettings::load()` or `AppSettings::fromArgv()`. Until that one call is added, `palmier-pro`
-> ignores the config file, the environment and the command line, and the endpoint always comes up on
-> loopback. Read this document as the configuration contract — accurate for embedders and for the
-> composition root — and not yet as something the shipped executable will honour.
+Every key, variable and flag below reaches the shipped binary: `src/app/main.cpp` resolves the
+configuration with `AppSettings::fromArgv(argc, argv)` before it composes anything, reports every
+input it could not make sense of, and hands the resulting `AppConfig` to
+`app::ApplicationComposition`, which acts on it. `--help` prints the accepted options — that list is
+generated from the same key table this document describes, so it cannot fall out of step with the
+binary.
 
 ## Where configuration comes from
 
@@ -55,10 +53,21 @@ positional path. Lists are comma-separated, trimmed, with blank entries dropped.
 | `remote.idle_timeout_seconds` | `PALMIER_REMOTE_IDLE_TIMEOUT_SECONDS` | `--remote-idle-timeout-seconds` | `300` | 30..3600 seconds |
 | `mcp.host` | `PALMIER_MCP_HOST` | `--mcp-host` | `127.0.0.1` | the host bound when the decision is loopback |
 | `mcp.port` | `PALMIER_MCP_PORT` | `--mcp-port` | `19789` | 0..65535; `0` binds an ephemeral port |
+| `agent.interpreter` | `PALMIER_AGENT_INTERPRETER` | `--agent-interpreter` | `offline` | `offline`, `hosted` or `byok`. An unrecognised id falls back to `offline` and reports a startup error naming what was rejected, rather than failing to start |
+| `generative.backend` | `PALMIER_GENERATIVE_BACKEND` | `--generative-backend` | `offline` | `offline`, `hosted` or `byok`, with the same unrecognised-id fallback |
+
+The table is the whole configuration surface, not just the remote-access part of it: it is the key
+table in `src/app/AppSettings.cpp`, one row per key, and the task 12.7 consistency checker compares
+it two-way against that table — every key, its environment variable and its command-line flag — so a
+key added to the code without a row here fails the Verification_Suite (Requirements 16.7, 16.8).
 
 `mcp.host` / `mcp.port` describe the ordinary (loopback) endpoint; `remote.bind_address` /
 `remote.port` describe the non-loopback one. They are separate keys on purpose: enabling remote
 access does not move the local endpoint, and a rejected remote configuration does not either.
+
+`agent.interpreter` and `generative.backend` are not remote-access inputs at all — they select which
+`Agent_Interpreter` and which `Generative_Backend` the composition root installs. They appear here
+because this is the one place the configuration surface is tabulated.
 
 ## The three prerequisites, and what happens when one is missing
 
