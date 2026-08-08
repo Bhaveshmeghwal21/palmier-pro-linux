@@ -613,7 +613,7 @@ generated cases.
 
 ### Stage 10 — Pluggable backends (offline-first, no network dependency)
 
-- [ ] 10. Make agent reasoning and generation pluggable
+- [x] 10. Make agent reasoning and generation pluggable
   - [x] 10.1 Implement the offline interpreter and the interpreter registry
     - `src/services/OfflineIntentInterpreter.{hpp,cpp}`: at least 12 documented phrase patterns
       (`split the clip at the playhead`, `mute track N`, `unmute track N`, `add a video track`,
@@ -688,7 +688,7 @@ generated cases.
     - File: `tests/docs/repository_hygiene_property_test.cpp`
     - _Requirements: 12.6_
 
-  - [ ]* 10.9 Write the offline-mode availability sweep test
+  - [x]* 10.9 Write the offline-mode availability sweep test
     - One representative operation from each of edit, playback, save, open, export and `tools/call`
       succeeds while Offline_Mode applies, and the generation-unavailable indication requires no
       dismissal and blocks no other command
@@ -860,7 +860,7 @@ generated cases.
     - File: `tests/docs/port_backlog_property_test.cpp`
     - _Requirements: 14.1, 14.3, 14.9, 14.10, 14.11_
 
-  - [~] 12.6 Author the operator and agent-user documentation set
+  - [x] 12.6 Author the operator and agent-user documentation set
     - `docs/BUILD.md`: the complete configure/build/test/launch sequence from a clean checkout, the
       native package names per supported distribution family, every `PALMIER_*` option with its
       default and effect, and the minimum host specification
@@ -1051,6 +1051,81 @@ Checkpoint tasks (4.8, 9.9, 11.12, 12.13) are intentionally excluded from the wa
 
 
 ## Progress
+
+**Stage 10 is now closed, and 12.6 with it — the stage-10 parent is ticked for the first time.**
+
+**10.9 was the last open stage-10 sub-task.** It adds
+`tests/services/offline_mode_availability_test.cpp` on the new
+`palmier_services_offline_mode_tests` target: **8 cases, 1119 tests total** (from 1111), with 3
+skips rather than 2. It is example-based on purpose — design.md lists the offline-mode sweep among
+the surfaces deliberately NOT property-tested, because each of the six operations already has its
+own property suite and what was unproven was their *availability*, not their behaviour.
+
+The six representative operations, all over ONE `ProjectSession` and all through product code:
+**edit** = `timeline.add_clip` via `McpToolExecutor`; **playback** = `ui::PreviewController`
+play+pump over an injected `PlaybackClock`, compositing through `gpu::Compositor` on the software
+fallback; **save** = `project.save`; **open** = `project.open` on the document the save leg just
+wrote (so the open leg is non-vacuous without a checked-in fixture); **export** = `timeline.export`
+through the real `makeExportToolHandler` over a real `ExportCoordinator`; **`tools/call`** =
+`McpProtocolHandler` running the real `initialize` → `notifications/initialized` → `tools/call`
+sequence, with a *mutating* call so "the endpoint is available" means an edit landed.
+
+**Three things about 10.9 a reader should not have to infer.**
+
+1. **Offline_Mode is swept in BOTH of the shapes task 10.5's registry can produce**, because they
+   surface different indications: nothing configured (`offline` installed as the default, no startup
+   error, the generic precondition) and `hosted` configured with no account (fallback to `offline`
+   plus the Requirement 12.8 startup error). Assuming they behave alike would have been an
+   assumption, so both run the full sweep.
+2. **"Requires no dismissal and blocks no other command" is asserted as three checkable facts**, not
+   as an intention: the indication is a *value* read on demand (`unmetPrecondition()` /
+   `startupError`) that is byte-identical across repeated reads and still readable after the sweep,
+   the tool surface advertises no dismiss/acknowledge/clear operation, and the full six-operation
+   sweep is re-run **after** one refusal and again after five consecutive refusals with **nothing
+   done in between** — no acknowledgement, no reset. A refusal is also shown to leave the session
+   revision, undo depth, clip count and media-library size untouched, which is what makes "the next
+   command is unaffected" true of the project rather than only of the return value.
+3. **The no-network claim is guarded against vacuity twice.** A `ForbiddenTransport` (`ADD_FAILURE()`
+   when asked to send) stays installed for the whole life of the rig, and the `dlsym(RTLD_NEXT, ...)`
+   socket interposers of tasks 10.5/10.6 are armed around the refusal itself.
+   `TheInterposersObserveARealSocketCall` opens a real socket so an unlinked interposer fails there,
+   and `TheTransportSeamIsLive` builds the **same** rig with the credentials present and shows the
+   transport is then provably reached — so the offline zero is a refusal, not a hole in the wiring.
+   The rig also stores a BYOK credential for the model every request names, so the entitlement gate
+   *downstream* of the hook would have passed: the refusal is attributable to the selected backend's
+   unmet precondition and to nothing else.
+
+**The export leg is the one host-dependent part, and it is split rather than weakened.** The sweep
+supplies the encode backend through `ExportCoordinator`'s own `encodeFactory` seam — the same
+arrangement `export_coordinator_test.cpp` uses, writing a real file — so offline export is asserted
+on every host. A seventh case, `ExportWithTheHostEncoder`, removes that seam and runs the identical
+`timeline.export` call through the **production FFmpeg backend**; it probes availability through
+`media::MediaEncoder::create` and **SKIPS with a recorded reason** when the host has none. It skips
+on this sandbox: `Unsupported: encoder not found: libx264`. That is the third skip, and it is the
+same idiom task 9.8 uses.
+
+**No product defect was found.** Every one of the six operations succeeds offline, unchanged. The
+two failures seen while writing the test were both in the test: a frame-sink count that attributed
+the frames a `seek()` presents on its own account to the pump loop, and a rig that omitted the BYOK
+credential the entitlement gate needs, which made the liveness case refuse before reaching the
+transport.
+
+**12.6 is now ticked.** Its remaining three documents — `docs/TOOLS.md`, `docs/HARDWARE_ENCODE.md`,
+`docs/QUICKSTART.md` — and the `README.md` trim are written and committed at `50bbd31`, so the whole
+of the checked name set now lives in exactly one file each. 12.7 remains `[~]`.
+
+> **On the 1119 count:** the +8 over 1110/1111 is entirely 10.9. Verified with **three consecutive
+> clean full runs** of `ctest --test-dir build-nogui -j$(nproc)`: 1119/1119, 3 skips
+> (`ExportCoordinatorValidate.RejectsAnUnwritableParentDirectory`,
+> `ExportHardwareSoftwareComparisonTest.HardwareAndSoftwareExports...`,
+> `OfflineModeAvailability.ExportWithTheHostEncoder`). One earlier run showed
+> `ProjectSessionSave.DeliversCompletionsOnlyWhenPumped` failing under the load of a full rebuild;
+> it is a **pre-existing flake** in that threaded save-completion timing test, unrelated to this
+> target (it passed in the pre-change baseline run, passes on every rerun, and passed in all three
+> clean runs). **The native stack was lost again before this run** — FFmpeg, the Vulkan headers,
+> shaderc, ALSA/PipeWire, libsecret and lcms2 were all missing. FFmpeg was recovered by re-running
+> `make install` in the already-built `/projects/sandbox/.ffmpeg-src/ffmpeg-6.1.2` tree (no
+> recompile); the rest came from `dnf`. Qt is still absent, so `build-ui` was not touched.
 
 **Complete:** stages 0–8 in full. Stage 8 closed with 8.6 and 8.7: `PipeWireAudioSink` and
 `AlsaAudioSink` land behind `PALMIER_ENABLE_PIPEWIRE` / `PALMIER_HAVE_PIPEWIRE` and

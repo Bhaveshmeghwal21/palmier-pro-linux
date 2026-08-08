@@ -2711,3 +2711,87 @@ target_link_libraries(palmier_services_export_hw_sw_comparison_tests PRIVATE
     Palmier::test_support)
 
 palmier_register_test(palmier_services_export_hw_sw_comparison_tests)
+
+
+
+# ---------------------------------------------------------------------------
+# Offline-mode availability sweep (task 10.9; Requirement 12.5).
+#
+# design.md lists this surface among the ones deliberately NOT property-tested
+# ("one representative operation from each of edit, playback, save, open, export
+# and `tools/call`"), so the binary holds example-based GoogleTest cases rather
+# than RapidCheck properties. What is unproven without it is not the behaviour of
+# those six operations — each already has its own suite — but their AVAILABILITY
+# while the installed generative backend is task 10.5's offline stub.
+#
+# That makes this the widest service-layer test target in the tree, because the
+# sweep has to reach all six surfaces over ONE ProjectSession:
+#
+#   * edit / save / open / `tools/call` — the shared ToolRegistry, McpToolExecutor
+#     and McpProtocolHandler (with McpSessionRegistry, so the endpoint leg runs the
+#     real initialize -> notifications/initialized -> tools/call sequence).
+#   * export — services::ExportCoordinator through the real
+#     `makeExportToolHandler` adapter. The sweep supplies the encode backend
+#     through the coordinator's own `encodeFactory` seam so it runs on a host with
+#     no encoder, and one further case removes that seam and runs the same export
+#     through the PRODUCTION FFmpeg backend, skipping with a recorded reason when
+#     the host has no software H.264 encoder (Requirement 15.5's idiom).
+#   * playback — the Qt-free ui::PreviewController source compiled directly in,
+#     exactly as palmier_ui_preview_playback_tests does, compositing through
+#     gpu::Compositor on gpu::GpuContext::softwareFallback().
+#   * the refusal itself — task 10.5's GenerativeBackendRegistry and its two HTTPS
+#     clients, plus the GenerativeMediaCoordinator/gate/runner chain the
+#     composition root's generate hook is mirrored against, so the refusal comes
+#     from the SELECTED backend's `unmetPrecondition()` rather than from an absent
+#     collaborator.
+#
+# The injected GenerativeHttpTransport is the only route from any of that to a
+# socket, which is what makes "Offline_Mode issued no network request" checkable:
+# a ForbiddenTransport fails the test when asked to send, and ${CMAKE_DL_LIBS} is
+# linked so the same dlsym(RTLD_NEXT, ...) socket interposers tasks 10.5 and 10.6
+# use can count socket/connect/getaddrinfo for the process. Two non-vacuity cases
+# guard those zeros: one arms the counters and opens a real socket, and one builds
+# the same rig WITH credentials and shows the transport is then provably reached.
+#
+# Nothing here sleeps: playback is paced by an injected ui::PlaybackClock and the
+# export progress cadence by an injected media::SteadyClock. Every file written is
+# an absolute path inside a per-process temp directory.
+#
+# Sources are listed explicitly (rather than linking Palmier::services) so this
+# binary needs neither libsecret nor lcms2, exactly as the other service-layer
+# test targets do; Palmier::media is linked because export and playback genuinely
+# need it, and it brings in Palmier::gpu and Palmier::core.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_offline_mode_tests
+    services/offline_mode_availability_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/ExportCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeBackendRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeHttpTransport.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp")
+target_include_directories(palmier_services_offline_mode_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_offline_mode_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+# dlsym(RTLD_NEXT, ...) for the socket interposers.
+if(CMAKE_DL_LIBS)
+    target_link_libraries(palmier_services_offline_mode_tests PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+palmier_register_test(palmier_services_offline_mode_tests)
