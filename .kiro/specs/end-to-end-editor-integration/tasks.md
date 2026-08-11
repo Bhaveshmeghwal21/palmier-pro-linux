@@ -889,7 +889,7 @@ generated cases.
       live `ToolRegistry::describe()` plus each `ToolSchema`; never write to the documentation
     - _Requirements: 16.7, 16.8_
 
-  - [ ]* 12.8 Write the documentation consistency property tests
+  - [x]* 12.8 Write the documentation consistency property tests
     - **Property 76: Documentation and the running system agree on every name** —
       **Validates: Requirements 16.4, 16.7**
     - **Property 77: The documentation check reports every mismatch and modifies nothing** —
@@ -2283,3 +2283,80 @@ single 100-case run. This applies to any categorical `inRange` draw elsewhere in
 `docs/PORT_BACKLOG.md`, so neither document needed an edit, and no property was weakened to reach
 green. No existing test or source was modified; the only edit outside the two new files is the
 `target_sources()` block in `tests/CMakeLists.txt`.
+
+
+### ✅ Task 12.8 — the quantified half of the documentation consistency check (Properties 76, 77)
+
+**12.8 is now ticked — 1217 tests, 4 expected skips (+3).**
+`tests/docs/documentation_consistency_property_test.cpp` is appended to the existing
+`palmier_docs_tests` target with `target_sources()` — no second `add_executable()`, no second
+`palmier_register_test()` and no new compile definition, since `PALMIER_DOCS_DIR` and
+`PALMIER_OPTIONS_MANIFEST` were already attached by the 12.7 block, along with the live tool surface
+(`ToolRegistry`, `ToolSchema`, `ProjectSession`, `Json`, `AppSettings`) it needs.
+
+**It extends 12.7 rather than restating it.** 12.7's half checks the three checked-in documents and
+produces each defect kind from a hand-written synthetic document. This half **generates whole
+documentation sets** — a `docs/BUILD.md`, a `docs/TOOLS.md` and a `docs/REMOTE_ACCESS.md` — whose
+option, tool, argument and settings **names are the running system's** (`palmier_options.txt`, the
+`ToolRegistry::describe()` payload, `AppSettings::recognizedKeys()`) and whose **presentation is
+drawn**: the number and titles of the `###` option groups and whether the first is titled at all,
+which of three option-table / three argument-table / two settings-table column orders is used,
+whether option types are backticked, and per tool the bold `Required` marker, the side the `*uuid*`
+marker sits on, the argument order inside the table, the `| Field |`-table versus `Result:`-paragraph
+result shape, the *(command result)* marker, and how many result fields are unconditional,
+conditional and observed. Property 76 asserts every one of those documents is accepted; Property 77
+mutates the **model** and re-renders, so `mutate(set, kind, choice)` is pure and the property
+quantifies over (generated set) × (29 mutation kinds) × (target and variant).
+
+**All six document-fault kinds are covered, and coverage does not depend on sampling.** The 29
+mutations span the five name classes (option, tool, argument, result field, settings key) and the
+rename / delete / add / retype / restructure fault classes, and produce `UndocumentedName`,
+`UnknownDocumentedName`, `TypeMismatch`, `RequiredMismatch`, `OrderMismatch` and `SectionMissing` —
+the whole vocabulary except `InputUnreadable`, which is a missing-input kind that 12.7 already owns.
+Every mutation is asserted **by the offending name together with its document and its section**,
+which is exactly what Requirement 16.8 obliges. A non-property test drives all 29 kinds × five
+choices on a fixed set each run and asserts the produced kind set is still exactly that six, so a
+kind cannot silently stop being exercised. All 29 appeared in a single 100-case run.
+
+**Five guards against a vacuous pass**, asserted on every generated case: (1) the checked-in set is a
+case of every run — both properties assert all three documents and the manifest were found (non-zero
+bytes), that what was extracted has the real counts (as many options as the manifest lists, as many
+tools as `tools/list` publishes, as many rows as the key table recognises, all non-zero), and only
+then that it has no defects; (2) every generated document is read back **field for field** against its
+model — every option's name, type and `###` section, every tool's name, published position,
+no-arguments claim, argument names, types, uuid markers and required markings, every result field and
+its conditionality, and every settings row's key, environment variable, flag and `##` section; (3) the
+generator's own guarantees are asserted, not assumed (an argument-bearing tool and an argument-free
+one, a uuid and a plain argument, a required and an optional one, a conditional field no payload
+carried, both result shapes and a *(command result)* tool); (4) every mutant is asserted to still be a
+fully readable set, so the reported defect is attributable to the injected fault — the four
+**structural** faults (markers removed, region emptied, tool headings demoted, settings header
+renamed) declare themselves and are instead asserted to produce exactly the `SectionMissing` the
+extraction contract promises, rather than an empty and vacuously-consistent name set; (5) the
+unmutated rendering of the same case is asserted clean. Two decoys ride along in every generated
+`docs/BUILD.md` — a non-`PALMIER_` row inside the marked region and a whole option table outside it —
+and are asserted **not** to have been extracted, so region scoping is quantified too. The guards were
+verified to bite: perturbing the generated argument table's header cell fails Property 76 on the
+readback (`0 == 5` arguments) rather than passing quietly.
+
+**Requirement 16.8's third clause is asserted, not assumed.** Property 77 fingerprints (byte count
+plus an FNV-1a hash) **every `.md` file under `docs/`** — enumerated from the directory, not listed —
+before and after a full check run over the checked-in documents, on every one of the 100 cases. That
+is deliberately wider than the three documents the checker reads: the obligation is that the check
+leaves the documentation alone, and a document added later is covered with no edit here.
+
+**Result fields, scope stated rather than hidden.** 12.7's twenty-tool scenario, and its assertion
+that every registry-rendered payload is observed at least once, stay there and are not restated. This
+file drives a compact **real** observation on every run — `project.create`, `project.info`,
+`media.list`, `timeline.read` through the real registry over a real `ProjectSession` — which anchors
+the checked-in `docs/TOOLS.md` result-field claims to real payloads here too, while the generated
+cases quantify over result-field shapes with generated observations.
+
+**Every categorical draw goes through `rc::gen::resize(rc::kNominalSize, rc::gen::inRange(...))`**,
+for the reason measured in 12.4: a bare `inRange` scales with RapidCheck's `size` and silently fails
+to draw whole categories.
+
+**All three checked-in documents pass unchanged** — no inconsistency was found in `docs/BUILD.md`,
+`docs/TOOLS.md` or `docs/REMOTE_ACCESS.md`, so no document needed an edit and no property was
+weakened to reach green. No existing test or source was modified; the only edit outside the new file
+is the `target_sources()` block in `tests/CMakeLists.txt`.

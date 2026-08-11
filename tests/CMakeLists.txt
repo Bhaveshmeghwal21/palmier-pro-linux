@@ -2807,6 +2807,29 @@ target_sources(palmier_docs_tests PRIVATE
     docs/parity_report_property_test.cpp
     docs/port_backlog_property_test.cpp)
 
+# ---------------------------------------------------------------------------
+# Task 12.8 extends the same target with the QUANTIFIED half of the documentation
+# consistency check — Properties 76 and 77 (Requirements 16.4, 16.7, 16.8).
+#
+# One file, and again no new source, library or compile definition: it generates
+# whole `docs/BUILD.md` / `docs/TOOLS.md` / `docs/REMOTE_ACCESS.md` sets whose
+# option, tool, argument and settings NAMES are read out of the running system, and
+# drives the very same pure extractors and checks of `support/DocumentationChecker.hpp`
+# that `docs/documentation_consistency_test.cpp` drives — which is the point, because
+# a document set that passed the example-based check and failed the quantified one
+# (or the reverse) would mean two checkers.
+#
+# The live surface it needs is already linked into this target by the task 12.7
+# block above (ToolRegistry / ToolSchema / ProjectSession / Json / AppSettings), and
+# all three paths it reads — PALMIER_DOCS_DIR for the checked-in documents,
+# PALMIER_OPTIONS_MANIFEST for the configure-time `PALMIER_*` list — are already
+# attached. Property 77 additionally fingerprints every `.md` file under
+# PALMIER_DOCS_DIR before and after a check run, which is Requirement 16.8's "SHALL
+# leave the documentation unmodified" asserted rather than assumed.
+# ---------------------------------------------------------------------------
+target_sources(palmier_docs_tests PRIVATE
+    docs/documentation_consistency_property_test.cpp)
+
 palmier_register_test(palmier_docs_tests)
 
 
