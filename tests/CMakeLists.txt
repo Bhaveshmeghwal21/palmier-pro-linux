@@ -28,9 +28,15 @@
 #         Feature: palmier-pro-linux, Property {n}: {text}
 #     and references the requirement clause(s) it validates.
 #
-# The placeholder property test (palmier_placeholder_property_test.cpp) exists
-# only to demonstrate this wiring, the tag format, and the 100-iteration floor;
-# real property tests for P1-P12 are added by later tasks and replace it.
+#   * No placeholder test. The wiring-demonstration test that once stood here
+#     (`palmier_placeholder_property_test.cpp` and its `palmier_placeholder_tests`
+#     target) was deleted by task 12.9 in the same commit that added Property 80
+#     (`tests/docs/suite_hygiene_property_test.cpp`), so Requirement 15.6 is never
+#     transiently violated. Property 80 now enforces the rule for every test
+#     source and every registered target: a registered target must compile code of
+#     this product — a `Palmier::` library other than the `Palmier::test_support`
+#     scaffolding, or a source under `src/` — and reference at least one component
+#     named in this repository's documents.
 
 include(FetchContent)
 
@@ -142,17 +148,6 @@ function(palmier_test_enable_openssl target)
         target_link_libraries(${target} PRIVATE PkgConfig::OPENSSL)
     endif()
 endfunction()
-
-# ---------------------------------------------------------------------------
-# Placeholder test binary — proves the GoogleTest + RapidCheck wiring, the
-# required property tag format, and the 100-iteration floor. Replaced by the
-# real P1-P12 property tests in later tasks.
-# ---------------------------------------------------------------------------
-add_executable(palmier_placeholder_tests
-    palmier_placeholder_property_test.cpp)
-target_link_libraries(palmier_placeholder_tests PRIVATE Palmier::test_support)
-
-palmier_register_test(palmier_placeholder_tests)
 
 # ---------------------------------------------------------------------------
 # GPU abstraction layer — unit tests for device selection, capability probing,
@@ -2720,6 +2715,7 @@ target_link_libraries(palmier_docs_tests PRIVATE
 # ---------------------------------------------------------------------------
 target_sources(palmier_docs_tests PRIVATE
     docs/documentation_consistency_test.cpp
+    docs/suite_hygiene_property_test.cpp
     support/DocumentationChecker.cpp
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
@@ -2732,6 +2728,29 @@ target_include_directories(palmier_docs_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_compile_definitions(palmier_docs_tests PRIVATE
     PALMIER_OPTIONS_MANIFEST="${PROJECT_BINARY_DIR}/palmier_options.txt")
+
+# ---------------------------------------------------------------------------
+# Task 12.9 extends the same target with the suite hygiene property (Property 80,
+# Requirement 15.6), in the same commit that deletes the placeholder test and its
+# `palmier_placeholder_tests` target — so the rule forbidding a placeholder arrives
+# with the removal rather than after it.
+#
+# The checker parses THIS file, walks `tests/` and `src/`, and reads the checked-in
+# documents, so it needs one path beyond PALMIER_SOURCE_DIR and PALMIER_DOCS_DIR
+# above:
+#
+#   * PALMIER_SPEC_DIR — `.kiro/specs`, whose `requirements.md` / `design.md` name
+#     the components Requirement 15.6 speaks of. The whole specs directory rather
+#     than one spec, so a later feature's documents widen the documented-component
+#     set with no edit here.
+#
+# No further sources or libraries: the checker is standard-library only (it reads
+# text and never links what it reasons about), and it is compiled into this target
+# precisely because that target already compiles product code — which is what puts
+# it outside the placeholder pattern it enforces.
+# ---------------------------------------------------------------------------
+target_compile_definitions(palmier_docs_tests PRIVATE
+    PALMIER_SPEC_DIR="${PROJECT_SOURCE_DIR}/.kiro/specs")
 target_link_libraries(palmier_docs_tests PRIVATE
     Palmier::core)
 

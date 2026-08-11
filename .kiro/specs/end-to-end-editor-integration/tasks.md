@@ -897,7 +897,7 @@ generated cases.
     - File: `tests/docs/documentation_consistency_property_test.cpp`
     - _Requirements: 16.4, 16.7, 16.8_
 
-  - [~] 12.9 Delete the placeholder test and add the suite-hygiene property in the same task
+  - [x] 12.9 Delete the placeholder test and add the suite-hygiene property in the same task
     - Delete `tests/palmier_placeholder_property_test.cpp` and its `palmier_placeholder_tests`
       target, and in the **same commit** add:
     - **Property 80: Every registered test asserts a named component and none is a placeholder** —
@@ -2079,3 +2079,83 @@ The 6 new cases were each confirmed to FAIL on the unfixed tree with exactly the
   `project.open` round-trips, the document on disk loads and `validateProject` accepts it, and the
   reopened session's media library carries the asset with its resolved source path; and two clips
   over one imported asset register it exactly once and still re-open.
+
+
+
+### ✅ Task 12.9 — the placeholder test deleted and Property 80 added in the same change
+
+`tests/palmier_placeholder_property_test.cpp` and its `palmier_placeholder_tests` target are gone,
+and `tests/docs/suite_hygiene_property_test.cpp` (Property 80, Requirement 15.6) arrives with them,
+so the rule that forbids a placeholder lands with the removal rather than after it. The new source is
+appended to the existing `palmier_docs_tests` target with `target_sources()`, as that block's own
+instructions require; the only new build input is `PALMIER_SPEC_DIR="${PROJECT_SOURCE_DIR}/.kiro/specs"`
+(the whole specs directory, not one spec, so a later feature's documents widen the component set with
+no edit to the test).
+
+**What the property asserts.** Six defects, each a pure function of the parsed `tests/CMakeLists.txt`,
+the walked `tests/` tree and a discovered component set — no list of targets, sources or names is
+written in the test, so a target or source added tomorrow is checked tomorrow:
+
+1. a target registered with CTest that no `add_executable()` defines;
+2. a registered target that compiles **no code of this product** — no `Palmier::` library other than
+   the `Palmier::test_support` GoogleTest/RapidCheck bundle, and no source under `src/`. Excluding
+   `test_support` is load-bearing: the deleted target linked exactly that and nothing else, so the
+   clause read literally could not reject the one target it exists to reject. Compiling a `src/`
+   source counts equally, because that is how most `palmier_services_*` targets are built;
+3. a registered target none of whose own test sources references a documented component;
+4. **the placeholder pattern**, both of design.md's conjuncts: a source that declares test cases,
+   references no component of this product in code, and whose every owning target compiles no
+   product code;
+5. a test source no target compiles;
+6. a source that declares test cases but is compiled only into targets CTest never registers — cases
+   that never run assert nothing, the same defect in different clothes.
+
+"A component named in this document" is read as the **intersection** of what a header under `src/`
+declares (comment-stripped, so prose does not declare anything) and what the checked-in documents
+name (`docs/*.md` plus every `requirements.md` / `design.md` under `.kiro/specs/`), filtered to names
+of ≥4 characters carrying an interior case change — 225 names on this tree, from 96 headers and 12
+documents. Two readings are documented in the file rather than assumed: the document set includes
+`docs/` (otherwise `tests/app/platform_compatibility_test.cpp` — a real test of a real component
+whose feature specification predates this one and is not checked in — would be condemned, though
+`docs/BUILD.md` names `app::checkPlatformCompatibility` in the minimum-host table Requirement 16.1
+mandates); and a reference must appear in **code**, not in a comment, which is what stops a future
+placeholder from satisfying the clause by naming `TimelineEngine` in its header block.
+
+**Tests: 1174 total, from 1160** — 3 removed with the placeholder, 17 added (Property 80 plus 16
+`SuiteHygieneChecker` cases). Same 4 expected skips; no other test weakened, skipped or deleted. The
+non-vacuity cases drive the same pure functions the scan uses: the deleted file's own shape,
+reconstructed inline, must be flagged as a placeholder **and** as a target with no product code and
+no named component; the same tautology source dropped into a target that links `Palmier::core` is
+correctly *not* a placeholder but still fails the named-component clause, so the two clauses together
+leave no way in; a registration of a non-existent target, an orphan source and an unregistered source
+are each detected; and the CMake parser, the test-macro scanner and the component extractor have
+their own cases, because a parser that silently found nothing would report a spotless suite. One case
+asserts the checker is subject to its own rule — this file appears in the enumerated domain and is
+outside the placeholder pattern only because `palmier_docs_tests` compiles product code, not because
+anything is exempt.
+
+### ⚠️ Suite hygiene — the reported `PreviewPlaybackProperties` flake was not reproducible and needs no fix
+
+`PreviewPlaybackProperties.PresentationRateWithinBoundsAndDropsUnderFivePercent` was reported as
+failing under `ctest -j$(nproc)` because it measures presentation rate against the real wall clock.
+**It does not measure wall time at all**, and the reported failure did not reproduce:
+
+- `tests/ui/preview_playback_property_test.cpp` contains no `<chrono>` include, no `steady_clock`,
+  no `sleep` and no other real-time source. Its only clock is `ManualClock : public PlaybackClock`,
+  injected into `PreviewController` at construction, advanced explicitly by the harness (one idle
+  quantum per pump that found nothing due) and from inside the render seam (which is how composite
+  latency is modelled). The presentation-rate windows are counted over *that* clock's stamps, so the
+  measurement is a pure function of the generated inputs. This is the same seam
+  `tests/e2e/editor_end_to_end_test.cpp` and `tests/services/offline_mode_availability_test.cpp`
+  use, so there is no second injection to make.
+- Empirically: 40 isolated runs of the property, 80 concurrent runs of the whole
+  `palmier_ui_preview_playback_tests` binary at 2× core oversubscription, 11 full-suite runs at
+  `-j$(nproc)` and 10 at `-j32` — zero failures of this test in any of them.
+
+Because the property is already stated against injected time, there was nothing to convert, and the
+bounds were left exactly as they are. **A different, genuinely load-sensitive test was found while
+looking**: `ExportCoordinatorTest.ADestroyedCoordinatorCancelsAndLeavesNoPartialFile` failed 2 of 10
+full-suite runs at `-j32` (4× oversubscription) and never at `-j$(nproc)`. It waits on a real worker
+thread to reach its first frame within a wall-clock `kWaitBudget`, which is what a heavily
+oversubscribed host misses. It is left untouched here — it is outside task 12.9 and outside the
+reported defect — and is recorded so the next reader does not have to rediscover it.
