@@ -843,7 +843,7 @@ generated cases.
       `palmier_docs_tests`
     - _Requirements: 13.8, 14.11_
 
-  - [ ]* 12.4 Write the parity-report property tests
+  - [x]* 12.4 Write the parity-report property tests
     - **Property 69: Parity_Report well-formedness** —
       **Validates: Requirements 13.1, 13.2, 13.3, 13.5, 13.6, 13.9**
     - **Property 70: The parity check detects every malformation** —
@@ -852,7 +852,7 @@ generated cases.
       defects and holding over generated well-formed documents and mutations
     - _Requirements: 13.1, 13.2, 13.3, 13.5, 13.6, 13.8, 13.9_
 
-  - [ ]* 12.5 Write the port-backlog property tests
+  - [x]* 12.5 Write the port-backlog property tests
     - **Property 71: Port_Backlog well-formedness** —
       **Validates: Requirements 14.1, 14.3, 14.9, 14.10**
     - **Property 72: The backlog check detects every malformation** —
@@ -2226,3 +2226,60 @@ malformed document an *alternative* to a parsed one, when what both requirements
 parse **plus** the list of what is wrong with it — a document missing one rationale must still yield
 its other 33 entries so every remaining defect is reported in one run (Requirement 13.8's "report
 each offending entry"). It also keeps the file free of `Palmier::core`.
+
+
+
+### ✅ Tasks 12.4 and 12.5 — the quantified halves of the two report checks (Properties 69–72)
+
+**12.4 and 12.5 are now ticked — 1214 tests, 4 expected skips (+6).**
+`tests/docs/parity_report_property_test.cpp` (Properties 69, 70) and
+`tests/docs/port_backlog_property_test.cpp` (Properties 71, 72) are appended to the existing
+`palmier_docs_tests` target with `target_sources()` — no second `add_executable()`, no second
+`palmier_register_test()`, and no new compile definition: `PALMIER_DOCS_DIR` and `PALMIER_SPEC_DIR`
+were already attached there. Both files consume 12.3's pure functions unchanged, so a document cannot
+pass the example-based checks and fail the quantified ones.
+
+**They extend `report_parser_test.cpp` rather than restate it.** 12.3's half produces each defect by a
+single **text edit** of a real document. These two **generate whole documents** to the grammar
+`ReportParser.hpp` states and then mutate the **model** and re-render, so a mutation is a value
+— `mutate(document, kind, choice)` is pure — and the property quantifies over (generated document) ×
+(mutation kind) × (target entry and variant). Parity: 34 rows in a generated per-table order, drawn
+statuses, components, priorities, rationale lengths across both ends of the 1–200 bound, all three
+macOS-framework shapes, and a build-order projection derived from the rows. Backlog: the ten
+Requirement 14.2 identifiers plus 0–30 further entries in a generated order, drawn summaries,
+dispositions, statuses, components, notes and checks. Ten is the floor, not one: the check reports
+each absent required identifier, and the empty-document case is 12.3's.
+
+**All nine defect kinds are covered across the two files, and coverage does not depend on sampling.**
+The Parity_Report grammar can express seven (`MissingEntry`, `DuplicateEntry`, `InvalidStatus`,
+`InvalidPriority`, `MissingRationale`, `MissingField`, `OutOfOrder`) over 20 mutation kinds; the
+Port_Backlog expresses the remaining two plus four shared ones (`MissingCheck`,
+`DuplicateIdentifier`, `MissingEntry`, `MissingField`, `MissingRationale`, `InvalidStatus`) over 19.
+Each file also carries one non-property test that drives **every** mutation kind × five choices on a
+fixed document each run and asserts both that each is reported and that the kind set is still exactly
+this grammar's — so a kind cannot silently stop being exercised, and the union is asserted to be all
+nine.
+
+**Four guards against a vacuous pass**, asserted on every generated case: (1) the checked-in document
+is a case of every run — both properties assert it was found (non-zero bytes), that its tables /
+entries / build-order projection / acceptance checks parsed to the counts the requirements fix, and
+only then that it has no defects; (2) every generated document is compared **field for field** with
+its model, not merely declared defect-free; (3) every mutant is asserted to still be a fully readable
+document (entry and item counts equal the mutated model's, every name and heading read back, both
+tables recognised, and the parser's "holds no entries at all" defect absent), so the asserted defect
+is attributable to the injected fault; (4) the unmutated rendering of the same case is asserted clean.
+Each mutation is asserted **by the offending entry's name**, which is what Requirements 13.8 and
+14.11 actually oblige.
+
+**One RapidCheck finding worth recording.** `rc::gen::inRange` scales its range with the `size`
+parameter, which rises across a run, so a bare `inRange` draws only low indices in the early cases:
+measured over a 100-case run, **five of the twenty parity mutation kinds were never drawn at all**.
+Every categorical draw in both files therefore goes through
+`rc::gen::resize(rc::kNominalSize, rc::gen::inRange(...))`, which is uniform over the whole range and
+keeps `inRange`'s shrinking. After the change all 20 parity kinds and all 19 backlog kinds appear in a
+single 100-case run. This applies to any categorical `inRange` draw elsewhere in the suite.
+
+**Both checked-in documents pass unchanged** — no defect was found in `docs/UPSTREAM_PARITY.md` or
+`docs/PORT_BACKLOG.md`, so neither document needed an edit, and no property was weakened to reach
+green. No existing test or source was modified; the only edit outside the two new files is the
+`target_sources()` block in `tests/CMakeLists.txt`.

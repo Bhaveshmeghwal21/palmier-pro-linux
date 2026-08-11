@@ -2783,6 +2783,30 @@ target_sources(palmier_docs_tests PRIVATE
     docs/report_parser_test.cpp
     support/ReportParser.cpp)
 
+# ---------------------------------------------------------------------------
+# Tasks 12.4 and 12.5 extend the same target with the QUANTIFIED halves of the two
+# report checks — Properties 69 and 70 over the Parity_Report (Requirements 13.1,
+# 13.2, 13.3, 13.5, 13.6, 13.8, 13.9) and Properties 71 and 72 over the Port_Backlog
+# (Requirements 14.1, 14.3, 14.9, 14.10, 14.11).
+#
+# Two files, one per document, as the tasks specify. They add no source, no library
+# and no compile definition of their own: each generates whole documents to the
+# grammar `support/ReportParser.hpp` states, renders them to Markdown and drives the
+# very same pure `parse*`/`check*` functions `docs/report_parser_test.cpp` drives —
+# which is the point, because a document that passed the example-based checks and
+# failed the quantified ones (or the reverse) would mean two checkers. Both read the
+# checked-in documents through PALMIER_DOCS_DIR, already attached above, and assert
+# they were found (non-zero bytes) before asserting anything about them, so a
+# mis-wired definition fails loudly rather than vacuously.
+#
+# `palmier_register_test()` below applies RC_PARAMS=max_success=${PALMIER_PBT_MIN_SUCCESS}
+# to this target, so all four properties run at least 100 generated cases per run
+# (Requirement 15.2) with no per-file setting.
+# ---------------------------------------------------------------------------
+target_sources(palmier_docs_tests PRIVATE
+    docs/parity_report_property_test.cpp
+    docs/port_backlog_property_test.cpp)
+
 palmier_register_test(palmier_docs_tests)
 
 
