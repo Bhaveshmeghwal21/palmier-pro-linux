@@ -111,7 +111,7 @@ check:
   when:  the documented configure command is run and then the build and test commands
   then:  configuration succeeds and its summary reports every required dependency as found, the build completes, and the test suite runs with no dependency-related failure
 status: in-progress
-note: Honest status. The FetchContent pins exist and are exact, and the configuration summary already reports each dependency, but docs/BUILD.md does not exist yet — task 12.6 is unbuilt — so the "packages that docs/BUILD.md lists" half of the check cannot be run at all, and the check as a whole has not passed. This entry moves to `complete` when task 12.6 lands the documented package set and the check is run against it.
+note: Honest status. The FetchContent pins exist and are exact, and the configuration summary already reports each dependency. `docs/BUILD.md` now exists — task 12.6 landed it, with the per-distribution native package table Requirement 16.1 asks for — so the "packages that docs/BUILD.md lists" half of the check is now runnable, but it has not been run: nothing has configured, built and tested a CLEAN checkout on a supported distribution with only that package set installed, which is the check's `given`. This entry moves to `complete` when that run happens and passes, which is the CI work of tasks 12.11 and 12.12.
 
 ---
 
@@ -201,7 +201,8 @@ note: `not-started` here is a formality of the closed status value set, not a cl
 - **Three entries carry a status weaker than "the code exists".** PR 403 is `complete` for the
    off-thread save and the preservation rule, while Requirement 14.6's event-latency half awaits
    task 11.11. PR 404 is `not-started` because `ui::MainWindow` is still a placeholder. PR 399 is
-   `in-progress` because `docs/BUILD.md` does not exist yet. Those three notes are the honest
+   `in-progress` because its check has never been run on a clean checkout, even though
+   `docs/BUILD.md` and its package table now exist. Those three notes are the honest
    reading of Requirement 14.12: a check that has not been run and passed does not make an entry
    complete, however much code is in place.
 - **PR 408's two halves have different fates.** The effect is `complete`; the panel-hierarchy

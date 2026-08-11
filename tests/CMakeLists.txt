@@ -2754,6 +2754,35 @@ target_compile_definitions(palmier_docs_tests PRIVATE
 target_link_libraries(palmier_docs_tests PRIVATE
     Palmier::core)
 
+# ---------------------------------------------------------------------------
+# Task 12.3 extends the same target with the Parity_Report / Port_Backlog parser
+# and its two checkers (Requirements 13.8, 14.11) — again with target_sources()
+# rather than a second add_executable(), as the block at the top of this section
+# instructs.
+#
+# `support/ReportParser.cpp` is dependency-free by design: standard library only,
+# no YAML or JSON library, nothing from `Palmier::`. It therefore adds no link
+# dependency to this target, and `docs/report_parser_test.cpp` needs no path
+# beyond the three definitions already attached above:
+#
+#   * PALMIER_DOCS_DIR — `docs/UPSTREAM_PARITY.md` and `docs/PORT_BACKLOG.md`, the
+#     two checked-in documents the checkers must find. Reading them from the SOURCE
+#     tree is what makes the check real; ctest's working directory is the build
+#     tree, where neither document exists.
+#   * PALMIER_SPEC_DIR — `requirements.md`, whose Requirement 13.1, 13.2 and 14.2
+#     parenthesised lists are the source of record for the 22 tool categories, the
+#     12 capability areas and the ten upstream identifiers. The test cross-checks
+#     the parser's transcription of all three against it, so a slip in the
+#     transcription fails rather than silently narrowing the check.
+#
+# Tasks 12.4 and 12.5 add `docs/parity_report_property_test.cpp` and
+# `docs/port_backlog_property_test.cpp` to this same list; they consume the very
+# same pure functions, so a document cannot pass here and fail there.
+# ---------------------------------------------------------------------------
+target_sources(palmier_docs_tests PRIVATE
+    docs/report_parser_test.cpp
+    support/ReportParser.cpp)
+
 palmier_register_test(palmier_docs_tests)
 
 

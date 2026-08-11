@@ -832,7 +832,7 @@ generated cases.
       no acceptance check
     - _Requirements: 14.1, 14.2, 14.3, 14.9, 14.12_
 
-  - [~] 12.3 Implement `tests/support/ReportParser` and the two report checkers
+  - [x] 12.3 Implement `tests/support/ReportParser` and the two report checkers
     - `tests/support/ReportParser.{hpp,cpp}`: `parseParityReport`, `parsePortBacklog`,
       `checkParityReport`, `checkPortBacklog`, producing `ParityEntry` / `BacklogEntry` values and a
       `std::vector<Defect>` over the defect kinds `MissingEntry`, `DuplicateEntry`, `InvalidStatus`,
@@ -2159,3 +2159,70 @@ full-suite runs at `-j32` (4× oversubscription) and never at `-j$(nproc)`. It w
 thread to reach its first frame within a wall-clock `kWaitBudget`, which is what a heavily
 oversubscribed host misses. It is left untouched here — it is outside task 12.9 and outside the
 reported defect — and is recorded so the next reader does not have to rediscover it.
+
+
+
+### ✅ Task 12.3 — `tests/support/ReportParser` and the two report checkers
+
+**12.3 is now ticked — 1208 tests, 4 expected skips (+34).** `tests/support/ReportParser.{hpp,cpp}`
+parses both checked-in reports and checks them; `tests/docs/report_parser_test.cpp` runs it. All three
+files are appended to the existing `palmier_docs_tests` target with `target_sources()`, as that block
+instructs — no second `add_executable()`, no second `palmier_register_test()`, and no new compile
+definition: `PALMIER_DOCS_DIR` was already defined there for this task, and `PALMIER_SPEC_DIR` (added
+by 12.9) supplies `requirements.md`.
+
+**The four functions the task names**, plus the value types: `parseParityReport` /
+`parsePortBacklog` produce `ParityReport` (`ParityProvenance`, 34 `ParityEntry`, 31 `BuildOrderItem`)
+and `PortBacklog` (`BacklogProvenance`, ten `BacklogEntry` each with an `AcceptanceCheck`);
+`checkParityReport` / `checkPortBacklog` are pure functions from those values to
+`std::vector<Defect>`. Dependency-free: standard library only — no YAML, no JSON, no regex engine and
+nothing from `Palmier::`, so the target gained no link dependency.
+
+**Totality is asserted, not claimed.** Every parse failure is a `Defect`, never an exception and never
+a silent empty result: the empty document, unrelated prose, three truncations of each real document
+and a table with the wrong column count all yield defects, and both parsers append a defect when they
+find no entry table / no `### ` entry at all. That matters because `checkX(parse(doc)).empty()` is the
+assertion 12.4 and 12.5 will make — a parser that threw would abort the suite and one that returned
+nothing would make it pass vacuously. The clean-document cases therefore assert **what was parsed**
+first (22 + 12 entries, 31 build-order items, ten backlog entries, nine complete acceptance checks,
+each provenance field) and only then that the defect list is empty.
+
+**All nine defect kinds are reachable and each is proven by a single edit to a real document**:
+`MissingEntry` (a blanked row name; an `absent` entry dropped from the build-order list; a required
+`PR` identifier absent), `DuplicateEntry` (a row written twice), `InvalidStatus` (`mostly` for a
+status, `skip` for a disposition, `nearly` for a `status:` field), `InvalidPriority` (`urgent`; a
+priority on a `present` row; a build-order item disagreeing with its table), `MissingRationale` (a
+`-` rationale where 13.3 requires one; a 201-character one; a backlog entry with none),
+`MissingCheck` (a `port` entry with no `check:`; a check missing its `then:`; a check on the
+`not-applicable` entry, which 14.3 gives none), `MissingField` (a missing or non-`YYYY-MM-DD`
+`comparison-date`; a missing or malformed `window`; a 201-character summary; a `macos-framework` with
+no `linux-replacement`; a wrong column count), `DuplicateIdentifier` (two entries under one `PR`),
+`OutOfOrder` (a `should` item ahead of a `must` one). The opposite direction is covered too: a
+synthetic well-formed document of each kind yields **zero** defects, which is what rules out a
+checker that always fails.
+
+**The 22 tool categories, 12 capability areas and ten `PR` identifiers are not trusted to a
+transcription.** They must be written down — the checker cannot derive them from the document it is
+checking without checking nothing — so `requiredToolCategories()`, `requiredCapabilityAreas()` and
+`requiredBacklogIdentifiers()` hold them, and three cases read the parenthesised lists straight out of
+Requirements 13.1, 13.2 and 14.2 in `requirements.md` and compare. A slip in the transcription fails
+the suite instead of quietly narrowing the check.
+
+**Both checked-in documents pass with no structural defect**, so nothing in the grammar had to be
+fixed. One **factual** staleness was found, which no structural check can see: `docs/PORT_BACKLOG.md`
+said PR 399 was `in-progress` "because `docs/BUILD.md` does not exist yet — task 12.6 is unbuilt",
+which task 12.6 has since made false. Both places that said it (the entry's `note` and the "Known
+limits" list) now record that the document and its package table exist while the check itself has
+still never been run on a clean checkout, which is the CI work of 12.11/12.12. `status: in-progress`
+is unchanged and correct: Requirement 14.12 turns on whether the check has *passed*, not on whether
+the code and documents exist. PR 404's note was re-verified and is still accurate —
+`src/ui/MainWindow.cpp` has no `setMinimumSize` and no `QDockWidget`.
+
+**One deliberate deviation from design.md's sketch.** The design writes
+`Result<ParityReport> parseParityReport(...)`; the implementation instead follows
+`tests/support/DocumentationChecker.hpp` (task 12.7), which design.md names as the same parser style,
+and returns the report by value while appending to a `std::vector<Defect>&`. A `Result` would make a
+malformed document an *alternative* to a parsed one, when what both requirements ask for is a partial
+parse **plus** the list of what is wrong with it — a document missing one rationale must still yield
+its other 33 entries so every remaining defect is reported in one run (Requirement 13.8's "report
+each offending entry"). It also keeps the file free of `Palmier::core`.
