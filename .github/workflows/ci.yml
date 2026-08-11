@@ -32,6 +32,15 @@
 # >=100 max_success floor via gtest_discover_tests ENVIRONMENT, so no extra
 # RC_PARAMS is needed. CTest is wrapped in `xvfb-run -a` to give any Qt widget
 # test a virtual display.
+#
+# Every run — passing or failing — publishes a `ctest-results` artifact holding the
+# complete test log and a generated summary that lists every test's outcome with
+# the reason each skipped test recorded (Requirements 15.2, 15.5, 15.7).
+#
+# The third job, `l4-validation`, is the Requirement 8.5 hardware-encode lane. It
+# needs an NVIDIA L4, which no hosted runner has, so it runs only on a manual
+# dispatch that ticks its input AND on a self-hosted runner labelled `nvidia-l4`.
+# Ordinary pushes and pull requests never reach it.
 # -----------------------------------------------------------------------------
 
 name: CI
@@ -43,10 +52,24 @@ on:
   pull_request:
     branches:
       - main
+  # Manual dispatch exists for the `l4-validation` job at the bottom of this file,
+  # which needs an NVIDIA L4 no hosted runner has. Dispatching without ticking the
+  # box just re-runs the ordinary jobs.
+  workflow_dispatch:
+    inputs:
+      run_l4_validation:
+        description: >-
+          Run the NVIDIA L4 hardware-encode validation job. Requires a self-hosted
+          runner labelled `nvidia-l4` with the NVIDIA driver and the ffnvcodec
+          headers installed; leave unticked on every other dispatch.
+        type: boolean
+        default: false
 
-# Cancel superseded runs on the same ref to save CI minutes.
+# Cancel superseded runs on the same ref to save CI minutes. The event name is part
+# of the group so a long manual `l4-validation` dispatch is not cancelled by an
+# ordinary push to the same ref.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -109,6 +132,17 @@ jobs:
           cmake --version
           ninja --version
           pkg-config --modversion libavcodec || true
+
+      # Both report generators this workflow uses are scripts with their own
+      # tests, and they run here rather than in CTest because they are CI tooling,
+      # not part of the product's verification suite. The l4 one also checks that
+      # the measurement keys it parses are the keys
+      # export_hardware_software_comparison_test.cpp actually prints — the only
+      # guard against those two drifting apart on a lane that cannot run here.
+      - name: Self-test the CI report generators
+        run: |
+          python3 scripts/test_ctest_summary.py
+          python3 scripts/test_l4_validation_report.py
 
       - name: Cache ccache
         uses: actions/cache@v4
@@ -188,16 +222,62 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      # Requirements 15.2, 15.5 and 15.7. One run of the whole suite that produces
+      # three things: the complete console log, CTest's own logs under
+      # build/Testing, and the JUnit XML the summary below is generated from.
+      #
+      # `set -o pipefail` is load-bearing: without it `tee` returns 0 and a failing
+      # suite would pass the job. Requirement 15.7 wants BOTH halves — the run
+      # reported as failed *and* the log plus summary published — so the failure
+      # stays here and the two publishing steps run with `if: always()`.
+      #
+      # A RELATIVE --output-junit path is resolved against the directory named by
+      # --test-dir rather than the working directory (checked against ctest 3.22),
+      # so the results land at build/ctest-results.xml.
       - name: Test (CTest, headless via xvfb)
-        run: xvfb-run -a ctest --test-dir build --output-on-failure
+        run: |
+          set -o pipefail
+          xvfb-run -a ctest --test-dir build \
+            --output-on-failure \
+            --output-junit ctest-results.xml 2>&1 | tee build/ctest.log
 
-      - name: Upload test logs on failure
-        if: failure()
+      # Requirement 15.7's summary half: every test's name and its outcome of
+      # passed, failed or skipped together with its RECORDED skip reason.
+      #
+      # The reason has to be dug out of the JUnit `<system-out>`: CTest fills
+      # `<skipped message="...">` with the constant `SKIP_REGULAR_EXPRESSION_MATCHED`
+      # for every skipped test, while the text a test recorded with `GTEST_SKIP() <<
+      # reason` — which is what Requirement 15.5 is about — is in its captured
+      # output. scripts/ctest_summary.py does that parsing and is self-tested by
+      # scripts/test_ctest_summary.py.
+      #
+      # `if: always()` here and on the upload is task 12.11's "unconditionally":
+      # the artifact is published for green runs too, because Requirement 15.5's
+      # evidence — which hardware tests skipped, and the reason each recorded — is
+      # only observable on runs that passed.
+      - name: Summarise the test results
+        if: always()
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          python3 scripts/ctest_summary.py build/ctest-results.xml \
+            --allow-missing \
+            --title "CTest summary for ${COMMIT_SHA}" \
+            --output build/ctest-summary.md
+          # Also render it on the run's own page, not only inside the artifact.
+          cat build/ctest-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the complete test log and the summary
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ctest-logs
-          path: build/Testing/**
-          if-no-files-found: ignore
+          name: ctest-results
+          path: |
+            build/ctest.log
+            build/ctest-results.xml
+            build/ctest-summary.md
+            build/Testing/**
+          if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
   # Requirement 8.9: a vendor path may be enabled at configure time while its
@@ -325,3 +405,173 @@ jobs:
             grep -E "Audio sink" configure-no-sdk.log || true
             exit 1
           fi
+
+
+  # ---------------------------------------------------------------------------
+  # Requirements 8.5, 8.10 and 16.5 — the NVIDIA L4 hardware-encode validation.
+  #
+  #   8.5:  "THE L4_Validation_Job SHALL export the fixture timeline of at least
+  #          300 frames at 1920x1080 and 30 frames per second on an NVIDIA L4
+  #          device using `h264_nvenc` and SHALL record, as job output, the
+  #          selected encoder name, the elapsed wall-clock time in milliseconds
+  #          and the output file size in bytes."
+  #   8.10: "IF the L4_Validation_Job records a selected encoder other than
+  #          `h264_nvenc`, a software-fallback flag of true, or an output file size
+  #          of 0 bytes, THEN THE L4_Validation_Job SHALL exit with a failure
+  #          status and SHALL retain the recorded measurements as job output."
+  #
+  # HOW IT IS GATED, and why it has to be. GitHub's hosted runners have no GPU, so
+  # on a hosted runner this job could only ever record a skip. Three independent
+  # gates keep it out of ordinary CI:
+  #
+  #   1. `if:` — the run must be a `workflow_dispatch` whose `run_l4_validation`
+  #      input is ticked. A push or a pull request never satisfies this, and
+  #      neither does a plain dispatch.
+  #   2. `runs-on:` — a self-hosted runner carrying the `nvidia-l4` label. Without
+  #      such a runner the job simply never picks up; it cannot land on a hosted
+  #      one and burn minutes.
+  #   3. No `needs:` — it is an independent lane, so nothing in the normal graph
+  #      waits on it and its absence cannot hold up a merge.
+  #
+  # The runner is expected to be PREPARED, not provisioned from here: the NVIDIA
+  # driver, the `ffnvcodec` headers and an FFmpeg carrying `h264_nvenc` and
+  # `libx264` are host state (see docs/HARDWARE_ENCODE.md). This job therefore
+  # installs nothing — running `apt-get install` against somebody's self-hosted
+  # machine is not this workflow's business — and instead checks the prerequisites
+  # up front and stops with a message naming the missing one.
+  #
+  # The export itself is `palmier_services_export_hw_sw_comparison_tests`: it
+  # already exports exactly Requirement 8.5's fixture (300 frames, 1920x1080,
+  # 30 fps, H.264) through the production encode path, and its hardware run prints
+  # the three measured values in a machine-readable block that
+  # scripts/l4_validation_report.py turns into the job outputs below. A SKIP on
+  # this host is a failed validation, not a pass — the script exits non-zero when
+  # no measurements were recorded at all.
+  # ---------------------------------------------------------------------------
+  l4-validation:
+    name: NVIDIA L4 hardware-encode validation (Requirement 8.5)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_l4_validation
+    runs-on: [self-hosted, linux, x64, nvidia-l4]
+
+    # Requirement 8.5's three recorded values, plus the flags Requirement 8.10
+    # judges them by. Published for failing runs as well as passing ones.
+    outputs:
+      encoder-name: ${{ steps.validate.outputs.encoder-name }}
+      elapsed-ms: ${{ steps.validate.outputs.elapsed-ms }}
+      output-bytes: ${{ steps.validate.outputs.output-bytes }}
+      used-hardware-encode: ${{ steps.validate.outputs.used-hardware-encode }}
+      software-fallback: ${{ steps.validate.outputs.software-fallback }}
+      fallback-reason: ${{ steps.validate.outputs.fallback-reason }}
+      frames-encoded: ${{ steps.validate.outputs.frames-encoded }}
+      validation-status: ${{ steps.validate.outputs.validation-status }}
+      validation-detail: ${{ steps.validate.outputs.validation-detail }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Fail here, with the cause named, rather than three steps later inside a
+      # skip reason. Only the specific tools are queried; nothing dumps the
+      # environment.
+      - name: Verify the L4 prerequisites are present on this runner
+        run: |
+          status=0
+          if command -v nvidia-smi >/dev/null 2>&1; then
+            nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+          else
+            echo "::error::nvidia-smi is not on PATH; this runner has no usable NVIDIA driver"
+            status=1
+          fi
+          if pkg-config --exists ffnvcodec; then
+            echo "ffnvcodec $(pkg-config --modversion ffnvcodec) is visible to pkg-config"
+          else
+            echo "::error::the ffnvcodec headers (nv-codec-headers) are not visible to pkg-config, so PALMIER_HAVE_NVENC cannot be defined"
+            status=1
+          fi
+          # Both halves of the comparison are needed: the hardware encoder under
+          # test and a software H.264 encoder to compare it against.
+          if command -v ffmpeg >/dev/null 2>&1; then
+            ffmpeg -hide_banner -encoders | grep -E 'h264_nvenc|libx264' || true
+          fi
+          exit "$status"
+
+      - name: Configure (NVENC on, UI off)
+        run: |
+          set -o pipefail
+          cmake -S . -B build-l4 -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DPALMIER_BUILD_TESTS=ON \
+            -DPALMIER_BUILD_UI=OFF \
+            -DPALMIER_ENABLE_NVENC=ON \
+            2>&1 | tee configure-l4.log
+
+      # PALMIER_HAVE_NVENC undefined here means the export could only ever fall
+      # back to software, so stop before measuring nothing.
+      - name: Assert the NVENC path is compiled in
+        run: |
+          if grep -Eq "NVENC[^:]*:[[:space:]]*enabled \(SDK found\)" configure-l4.log; then
+            echo "OK: NVENC reported as 'enabled (SDK found)'"
+          else
+            echo "::error::the NVENC path is not compiled in, so h264_nvenc cannot be selected"
+            grep -E "NVENC" configure-l4.log || true
+            exit 1
+          fi
+
+      - name: Build
+        run: cmake --build build-l4
+
+      # The export under measurement. `-V` so the measurement block reaches the
+      # log; the exit status is recorded rather than acted on, because the verdict
+      # belongs to the next step, which must run even when this one fails.
+      - name: Export the 300-frame 1920x1080/30 fps fixture with h264_nvenc
+        id: export
+        run: |
+          set -o pipefail
+          status=0
+          ctest --test-dir build-l4 -R palmier_services_export_hw_sw_comparison_tests -V \
+            2>&1 | tee ctest-l4.log || status=$?
+          echo "ctest-status=${status}" >> "$GITHUB_OUTPUT"
+          echo "ctest exited with status ${status}"
+
+      # Requirement 8.5 records the three values; Requirement 8.10 then judges
+      # them. The script writes the job outputs BEFORE applying the verdict, so a
+      # failing validation still retains its measurements — and the summary is
+      # rendered before the non-zero exit is re-raised, for the same reason.
+      - name: Publish the recorded measurements, then apply the verdict
+        id: validate
+        if: always()
+        run: |
+          status=0
+          python3 scripts/l4_validation_report.py ctest-l4.log \
+            --summary l4-summary.md || status=$?
+          cat l4-summary.md >> "$GITHUB_STEP_SUMMARY"
+          exit "${status}"
+
+      # A test failure that is not one of Requirement 8.10's three conditions —
+      # say the frame counts or durations disagreeing — must still fail the job.
+      - name: Fail if the comparison test itself failed
+        if: always()
+        env:
+          CTEST_STATUS: ${{ steps.export.outputs.ctest-status }}
+        run: |
+          if [ -z "${CTEST_STATUS}" ]; then
+            echo "::error::the export step never ran, so nothing was measured; see the steps above"
+            exit 1
+          fi
+          if [ "${CTEST_STATUS}" != "0" ]; then
+            echo "::error::the hardware/software comparison test exited with status ${CTEST_STATUS}; see the uploaded ctest-l4.log"
+            exit 1
+          fi
+          echo "the comparison test itself passed"
+
+      - name: Upload the L4 log, configure log and measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: l4-validation
+          path: |
+            ctest-l4.log
+            configure-l4.log
+            l4-summary.md
+            build-l4/Testing/**
+          if-no-files-found: warn

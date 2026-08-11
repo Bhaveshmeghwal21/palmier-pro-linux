@@ -920,13 +920,13 @@ generated cases.
     - New target `palmier_e2e_tests`
     - _Requirements: 3.6, 15.1, 15.9_
 
-  - [~] 12.11 Publish the CI test log, summary and skip reasons
+  - [x] 12.11 Publish the CI test log, summary and skip reasons
     - Run `ctest --output-on-failure --output-junit ctest-results.xml` under `xvfb-run -a`, and
       upload **unconditionally** the full test log plus a generated summary listing every test's
       name and its outcome of passed, failed or skipped with its recorded skip reason
     - _Requirements: 15.2, 15.5, 15.7_
 
-  - [~] 12.12 Add the separate `l4-validation` CI job
+  - [x] 12.12 Add the separate `l4-validation` CI job
     - A manually-triggered / self-hosted job that exports the ≥300-frame 1920×1080/30 fps fixture
       with `h264_nvenc`, records the selected encoder name, the elapsed wall-clock milliseconds and
       the output size in bytes as job output, and exits non-zero if the encoder is not
@@ -2360,3 +2360,95 @@ to draw whole categories.
 `docs/TOOLS.md` or `docs/REMOTE_ACCESS.md`, so no document needed an edit and no property was
 weakened to reach green. No existing test or source was modified; the only edit outside the new file
 is the `target_sources()` block in `tests/CMakeLists.txt`.
+
+
+### ✅ Tasks 12.11 and 12.12 — the CI test-result artifact and the gated `l4-validation` lane
+
+**12.11 and 12.12 are now ticked — still 1217 tests, 4 expected skips.** They landed together because
+both edit `.github/workflows/ci.yml`. No test was added, removed or weakened; the only C++ change is a
+measurement *print* in the existing hardware/software comparison test.
+
+**12.11.** The test step became `xvfb-run -a ctest --test-dir build --output-on-failure --output-junit
+ctest-results.xml 2>&1 | tee build/ctest.log` under `set -o pipefail` — load-bearing, because without
+it `tee` returns 0 and a failing suite would pass the job. Two new steps run with `if: always()` (task
+12.11's "unconditionally"): one generates the summary and appends it to `$GITHUB_STEP_SUMMARY`, one
+uploads `ctest.log`, `ctest-results.xml`, `ctest-summary.md` and `build/Testing/**` as the
+`ctest-results` artifact. Publishing on green runs is not decoration: Requirement 15.5's evidence —
+which hardware tests skipped and the reason each recorded — is only observable on runs that passed.
+
+> **The skip reason is NOT in the JUnit `<skipped>` element, and that is the whole difficulty of
+> 12.11.** CTest classifies these tests as skipped through `SKIP_REGULAR_EXPRESSION`, so it writes
+> `<skipped message="SKIP_REGULAR_EXPRESSION_MATCHED"/>` — the same constant for every skipped test,
+> naming no cause. The text a test recorded with `GTEST_SKIP() << reason` is inside `<system-out>`, as
+> `<file>:<line>: Skipped` followed by the reason, which may run over several lines. A generator that
+> read the attribute would produce a summary in which all four expected skips read
+> `SKIP_REGULAR_EXPRESSION_MATCHED`: the letter of "reports skipped", and none of Requirement 15.5.
+> `scripts/ctest_summary.py` parses `<system-out>`, keeps the `file:line`, and preserves multi-line
+> reasons verbatim — the comparison test's reason is a bulleted list naming both missing halves.
+
+**Verified against real output, not by inspection.** A full `--output-junit` run of this tree
+(1.1 MB of XML) through the generator yields `Passed 1213 | Failed 0 | Skipped 4 | Total 1217`, one
+table row per test for all 1217, and the four actual recorded reasons: the unwritable-parent-directory
+test's *"this user can write to a read-only directory…"*, the comparison test's two-bullet *"no
+hardware encoder: … PALMIER_HAVE_NVENC, PALMIER_HAVE_VAAPI and PALMIER_HAVE_QSV are all undefined"* /
+*"no software encoder to compare against: … no software H.264 encoder (\"libx264\")"*, and the
+`OfflineModeAvailability` and `EditorEndToEndTest` host-encoder reasons. The rendered summary is 108 KB,
+comfortably inside the 1 MiB step-summary limit. **A ctest quirk worth knowing**: with `--test-dir`, a
+relative `--output-junit` path resolves against the *build* directory, not the working directory.
+
+**12.12.** `l4-validation` is a third job, gated three ways because no hosted runner has the device:
+`if: github.event_name == 'workflow_dispatch' && inputs.run_l4_validation` (a new `workflow_dispatch`
+input defaulting to false, so neither a push, a pull request, nor a plain dispatch reaches it),
+`runs-on: [self-hosted, linux, x64, nvidia-l4]`, and no `needs:` from anything. It installs nothing —
+the driver, `ffnvcodec` and an FFmpeg with `h264_nvenc`/`libx264` are host state — but checks those
+prerequisites up front with `nvidia-smi` and `pkg-config --exists ffnvcodec`, and asserts the
+configuration summary reports NVENC *enabled (SDK found)* before measuring anything. The concurrency
+group gained `${{ github.event_name }}` so a push cannot cancel a long L4 dispatch on the same ref.
+
+**Where the three recorded values come from.** `export_hardware_software_comparison_test.cpp` already
+exports Requirement 8.5's exact fixture (300 frames, 1920×1080, 30 fps, H.264) through the production
+encode path and gates itself on real hardware, so rather than duplicate it, its hardware run now
+prints `PALMIER_L4_ENCODER_NAME`, `PALMIER_L4_ELAPSED_MS` (a `steady_clock` bracket around `begin()` →
+`awaitCompletion()`), `PALMIER_L4_OUTPUT_BYTES`, plus the fallback flag, reason and frame count,
+between two sentinel lines. `scripts/l4_validation_report.py` lifts that block out of the `ctest -V`
+log, writes the values to `$GITHUB_OUTPUT`, and only then applies Requirement 8.10's verdict.
+
+**Requirement 8.10's ordering is enforced on both sides**: the test prints the block *before* it
+asserts anything about the values, and the script writes the job outputs *before* it decides, so a run
+that fails for a wrong encoder, a true software-fallback flag or a 0-byte output still retains its
+measurements as job output. Three further details a reader should not have to infer:
+
+1. **`ctest` exits 0 for a skip**, so it cannot be the verdict. A log with no measurement block exits
+   the script 2 with a summary saying nothing was validated — a skip on the L4 host is a failed
+   validation, not a pass. This path is verified against a *real* skip log from this host.
+2. **A comparison failure that is not one of Requirement 8.10's three conditions** — frame counts or
+   durations disagreeing — would leave the measurements passing, so a separate `if: always()` step
+   fails the job on the recorded `ctest` exit status.
+3. **Job outputs are written with `$GITHUB_OUTPUT`'s heredoc form**, not `key=value`, so a value that
+   ever grows a newline cannot forge another output.
+
+**What could not be run here, stated plainly.** This host has no GPU, no `ffnvcodec`, no `nvidia-smi`,
+no software H.264 encoder and no `xvfb-run`, so: the measurement block has never been *emitted* by a
+real hardware export (the test still skips, and its new code compiles but does not execute); the
+`l4-validation` job itself is unexecuted; and the `xvfb-run` wrapping of the GUI half of the suite
+remains unexercised. The parsing side is covered instead — `scripts/test_l4_validation_report.py`
+(17 cases) drives the pass, wrong-encoder, software-fallback, 0-byte, no-block and unreadable-log
+paths, and one of its cases reads
+`tests/services/export_hardware_software_comparison_test.cpp` and asserts the sentinels and every key
+the script parses are the ones that file actually prints. That check plus
+`scripts/test_ctest_summary.py` (15 cases) run as a CI step, since they are the only guard against a
+lane that cannot run here drifting out of sync. Neither script is registered with CTest: they are CI
+tooling, not part of the Verification_Suite, and Requirement 15.6 governs what is registered.
+
+**`docs/HARDWARE_ENCODE.md` disagreed with the implementation and the document was fixed** — it was
+the document that was out of date, not the code. It ended with *"Not yet implemented: the automated
+`l4-validation` CI job of task 12.12 … the three values are read from the test output rather than
+emitted as job outputs"*, which is now false. Its L4 section states the CI lane and its three gates,
+the emitted key for each recorded value and the job output it becomes, the `ctest`-exits-0-on-skip
+trap, and the artifact contents; its operator command gained `-DPALMIER_BUILD_TESTS=ON`, the `tee` and
+the report-script invocation, so the documented procedure is exactly the job's. Nothing else in the
+document needed changing: the fixture (300 frames, 1920×1080, 30 fps), the codec (`h264_nvenc`), the
+three recorded values and the three failure conditions already matched. No documentation checker reads
+this file — 12.7 and 12.8 cover `BUILD.md`, `TOOLS.md` and `REMOTE_ACCESS.md` only — so the agreement
+was established by reading, and is now pinned in the one place a machine can check it: the
+key-consistency case above.

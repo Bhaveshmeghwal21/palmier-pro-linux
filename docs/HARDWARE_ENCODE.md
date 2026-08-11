@@ -173,31 +173,62 @@ then run the same test that gates itself on hardware:
 ```sh
 PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
   cmake -S . -B build-l4 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-        -DPALMIER_BUILD_UI=OFF -DPALMIER_ENABLE_NVENC=ON
+        -DPALMIER_BUILD_TESTS=ON -DPALMIER_BUILD_UI=OFF -DPALMIER_ENABLE_NVENC=ON
 cmake --build build-l4 -j"$(nproc)"
-ctest --test-dir build-l4 -R palmier_services_export_hw_sw_comparison_tests -V
+ctest --test-dir build-l4 -R palmier_services_export_hw_sw_comparison_tests -V \
+  2>&1 | tee ctest-l4.log
+python3 scripts/l4_validation_report.py ctest-l4.log --summary l4-summary.md
 ```
 
 A **skip** on that host is a failed validation, not a pass: it means the NVENC path was not compiled
 in, the device was not selected, or there is no software H.264 encoder to compare against. Read the
-recorded reason, fix the named cause, and re-run.
+recorded reason, fix the named cause, and re-run. Note that `ctest` exits **0** for a skip, which is
+why the verdict is the report script's and not `ctest`'s: with no measurements recorded the script
+exits 2.
 
-**Values recorded.** Requirement 8.5 requires three values as job output:
+**The CI lane.** The `l4-validation` job in [`../.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+runs exactly the sequence above. It is gated three ways, because no hosted runner has the device:
 
-| Value | Where it comes from |
-|---|---|
-| the selected encoder name | the `encoderName` field of the export result — must be `h264_nvenc` |
-| elapsed wall-clock time in milliseconds | measured around the export run |
-| output file size in bytes | the size of the written file — must be greater than 0 |
+- it runs only on a `workflow_dispatch` whose `run_l4_validation` input is ticked, so no push and no
+  pull request reaches it;
+- it requires a self-hosted runner labelled `nvidia-l4` (`runs-on: [self-hosted, linux, x64,
+  nvidia-l4]`), so it cannot land on a hosted runner even by accident;
+- nothing `needs:` it, so its absence never holds up the normal graph.
+
+The job installs nothing: the driver, the `ffnvcodec` headers and an FFmpeg carrying `h264_nvenc`
+and `libx264` are host state, checked at the start of the job with `nvidia-smi` and
+`pkg-config --exists ffnvcodec` so a missing prerequisite is named up front instead of appearing
+later as a skip reason. It then asserts the configuration summary reports NVENC as *enabled (SDK
+found)* before it measures anything.
+
+**Values recorded.** Requirement 8.5 requires three values as job output. The hardware run of
+`export_hardware_software_comparison_test.cpp` prints them, one key per line, between
+`--- BEGIN PALMIER L4 MEASUREMENTS ---` and `--- END PALMIER L4 MEASUREMENTS ---`;
+`scripts/l4_validation_report.py` lifts that block out of the `ctest -V` log and writes the values to
+`$GITHUB_OUTPUT`:
+
+| Value | Emitted as | Job output | Where it comes from |
+|---|---|---|---|
+| the selected encoder name | `PALMIER_L4_ENCODER_NAME` | `encoder-name` | the `encoderName` field of the export result — must be `h264_nvenc` |
+| elapsed wall-clock time in milliseconds | `PALMIER_L4_ELAPSED_MS` | `elapsed-ms` | a `steady_clock` bracket around the hardware export, `begin()` through `awaitCompletion()` |
+| output file size in bytes | `PALMIER_L4_OUTPUT_BYTES` | `output-bytes` | `file_size()` of the written file — must be greater than 0 |
+
+Three more are recorded because Requirement 8.10 judges by them: `PALMIER_L4_USED_HARDWARE_ENCODE`
+(`used-hardware-encode`), `PALMIER_L4_SOFTWARE_FALLBACK` (`software-fallback`) and
+`PALMIER_L4_FALLBACK_REASON` (`fallback-reason`), plus `PALMIER_L4_FRAMES_ENCODED`
+(`frames-encoded`) so the 300-frame fixture count is on the record. The job also publishes
+`validation-status` (`passed`/`failed`) and `validation-detail`.
 
 The validation **fails** if the selected encoder is anything other than `h264_nvenc`, if the
 software-fallback flag is true, or if the output is 0 bytes — and it retains the measurements as job
-output in every case, including the failing ones.
+output in every case, including the failing ones. That ordering is deliberate on both sides: the test
+prints the block *before* it asserts anything about the values, and the script writes the job outputs
+*before* it applies the verdict, so a failing run cannot lose its measurements. A run that recorded
+nothing at all — the test skipped, was filtered out, or the build never got that far — fails too,
+with a summary saying nothing was validated.
 
-**Not yet implemented:** the automated `l4-validation` CI job of task 12.12. `.github/workflows/`
-currently contains only `ci.yml`, which has no L4 lane, so the procedure above is an operator
-procedure today and the three values are read from the test output rather than emitted as job
-outputs.
+The uploaded `l4-validation` artifact carries `ctest-l4.log`, `configure-l4.log`, the generated
+`l4-summary.md` and `build-l4/Testing/**`; the same summary is rendered on the run's own page.
 
 ## Next
 

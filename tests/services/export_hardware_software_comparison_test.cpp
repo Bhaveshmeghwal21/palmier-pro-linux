@@ -3,6 +3,14 @@
 // tests/services/export_hardware_software_comparison_test.cpp — task 9.8 of the
 // end-to-end-editor-integration spec; Requirements 8.6 and 15.5.
 //
+// Task 12.12 later made this file the measuring instrument of the `l4-validation`
+// CI job as well: its hardware run prints the three values Requirement 8.5 asks
+// the L4 lane to record (selected encoder name, elapsed wall-clock milliseconds,
+// output size in bytes) in the machine-readable block described at
+// `emitL4Measurements` below. That added no assertion and changed none: the
+// export it measures is the hardware half of the comparison this file already
+// performed.
+//
 // Requirement 8.6 is a comparison, and it is the only export requirement that
 // cannot be satisfied by reasoning about the encoder *selection*: it demands two
 // real coded outputs.
@@ -75,6 +83,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -244,6 +253,70 @@ constexpr std::chrono::milliseconds kExportBudget{600'000};
     why << "\nThe comparison needs BOTH, so it is reported as skipped rather than failed "
            "(Requirement 15.5).";
     return why.str();
+}
+
+// ---------------------------------------------------------------------------
+// The Requirement 8.5 measurements, in a machine-readable block
+// ---------------------------------------------------------------------------
+//
+// Requirement 8.5 wants three values recorded as job output by the L4 validation
+// lane: the selected encoder name, the elapsed wall-clock time in milliseconds
+// and the output file size in bytes. Requirement 8.10 wants them retained even
+// when the validation fails.
+//
+// This test IS that lane's export — the same 300-frame 1920x1080/30 fps fixture
+// through the same production encode path — so rather than duplicating it in a
+// second binary, the hardware run prints its measurements in a form
+// `scripts/l4_validation_report.py` can lift out of `ctest -V` output and turn
+// into GitHub Actions job outputs. On every host that cannot do hardware encode
+// the test skips before reaching this, so no block is printed and the L4 job
+// fails for want of measurements — a skip on the L4 host is a failed validation,
+// not a pass.
+//
+// The keys are prefixed and one per line so the parse is exact, and the
+// fallback flag and reason are included because they are two of the three
+// conditions Requirement 8.10 fails on.
+
+/// The sentinel lines delimiting the measurement block. Any change here must be
+/// matched in scripts/l4_validation_report.py.
+constexpr const char* kL4BlockBegin = "--- BEGIN PALMIER L4 MEASUREMENTS ---";
+constexpr const char* kL4BlockEnd   = "--- END PALMIER L4 MEASUREMENTS ---";
+
+/// Print the hardware run's measurements. Asserts nothing: it is a recorder, and
+/// the assertions on these values are in the test body where they belong.
+void emitL4Measurements(const ExportOutcome& outcome, const std::filesystem::path& output,
+                        std::chrono::milliseconds elapsed) {
+    std::error_code     ec;
+    const std::uintmax_t bytes = std::filesystem::exists(output, ec)
+                                     ? std::filesystem::file_size(output, ec)
+                                     : 0u;
+
+    std::ostringstream block;
+    block << kL4BlockBegin << '\n'
+          << "PALMIER_L4_ENCODER_NAME=" << outcome.encoderName << '\n'
+          << "PALMIER_L4_ELAPSED_MS=" << elapsed.count() << '\n'
+          << "PALMIER_L4_OUTPUT_BYTES=" << (ec ? 0u : bytes) << '\n'
+          << "PALMIER_L4_USED_HARDWARE_ENCODE=" << (outcome.usedHardwareEncode ? "true" : "false")
+          << '\n'
+          << "PALMIER_L4_SOFTWARE_FALLBACK=" << (outcome.usedSoftwareFallback ? "true" : "false")
+          << '\n'
+          // Newlines would break the one-key-per-line contract; a reason is a
+          // single sentence today, and this keeps it one whatever it becomes.
+          << "PALMIER_L4_FALLBACK_REASON="
+          << [&] {
+                 std::string reason = outcome.fallbackReason;
+                 for (char& c : reason) {
+                     if (c == '\n' || c == '\r') {
+                         c = ' ';
+                     }
+                 }
+                 return reason;
+             }()
+          << '\n'
+          << "PALMIER_L4_FRAMES_ENCODED=" << outcome.framesEncoded << '\n'
+          << "PALMIER_L4_OUTPUT_PATH=" << output.string() << '\n'
+          << kL4BlockEnd << std::endl;
+    std::cout << block.str();
 }
 
 // ---------------------------------------------------------------------------
@@ -441,8 +514,23 @@ TEST_F(ExportHardwareSoftwareComparisonTest,
     const std::filesystem::path hardwareOut = scratchPath("hardware");
     const std::filesystem::path softwareOut = scratchPath("software");
 
+    // The hardware run is the run Requirement 8.5's L4 validation measures, so it
+    // is timed. The clock brackets exactly the export — begin() through
+    // awaitCompletion() — and nothing else.
+    const auto hardwareStart = std::chrono::steady_clock::now();
     const std::optional<ExportOutcome> hardware = runExport(hardwareOut, /*preferHardware=*/true);
+    const auto hardwareElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - hardwareStart);
     ASSERT_TRUE(hardware.has_value()) << "the hardware export produced no outcome";
+
+    // Requirements 8.5 and 8.10: emit the three recorded values BEFORE any
+    // assertion about them, so the L4 job publishes the measurements even on the
+    // runs it then fails (wrong encoder, software fallback, or a 0-byte output).
+    // `scripts/l4_validation_report.py` parses this block out of `ctest -V`
+    // output; on a host that skips, no block is emitted and the job fails for
+    // want of measurements rather than passing vacuously.
+    emitL4Measurements(*hardware, hardwareOut, hardwareElapsed);
+
     EXPECT_FALSE(hardware->cancelled);
     EXPECT_TRUE(hardware->usedHardwareEncode)
         << "this host reports a usable hardware encoder, but the export fell back to software: "
