@@ -799,7 +799,7 @@ generated cases.
 
 ### Stage 12 — Documents, suite hygiene, CI
 
-- [ ] 12. Author the checked-in document set and close out verification
+- [x] 12. Author the checked-in document set and close out verification
   - [x] 12.1 Author `docs/UPSTREAM_PARITY.md`
     - Provenance block: `upstream-repository: https://github.com/palmier-io/palmier-pro`,
       `upstream-ref`, `linux-ref`, `comparison-date: YYYY-MM-DD`, plus the three status definitions
@@ -934,7 +934,7 @@ generated cases.
       the measurements
     - _Requirements: 8.5, 8.10, 16.5_
 
-  - [~] 12.13 Final checkpoint
+  - [x] 12.13 Final checkpoint
     - Ensure all tests pass, ask the user if questions arise.
 
 ---
@@ -2452,3 +2452,74 @@ three recorded values and the three failure conditions already matched. No docum
 this file — 12.7 and 12.8 cover `BUILD.md`, `TOOLS.md` and `REMOTE_ACCESS.md` only — so the agreement
 was established by reading, and is now pinned in the one place a machine can check it: the
 key-consistency case above.
+
+
+---
+
+**The owed parity re-score is done, and the honest answer is not the one the owed-work note above
+predicted: both generation rows stay `absent`.** `docs/UPSTREAM_PARITY.md` now records
+`linux-ref: 3516ba02574782c348294897bdeab93ff8185b3f` and `comparison-date: 2026-08-11`, and the
+`linux-components` and `rationale` cells of `generate` (tool category) and `generation and
+upscaling` (capability area) were rewritten — but the **statuses did not move**, so the build-order
+projection is untouched and the status counts stay **3 `present` / 11 `partial` / 20 `absent`**, not
+the 3 / 13 / 18 the note above anticipated. Every count was re-derived mechanically from the tables
+rather than trusted: 34 rows (table 1 = 3 `present` / 7 `partial` / 12 `absent`; table 2 =
+0 / 4 / 8), a 31-item projection holding exactly the `absent` and `partial` rows with 2 `must`,
+19 `should` and 10 `later`, correctly sorted and consecutively numbered, `generate` still at
+position 12 and `generation and upscaling` still at 20, and every priority-bearing rationale inside
+1–200 characters.
+
+**Why the prediction failed — a false premise, not a definitional disagreement.** The note above,
+and the report's own "Known limits" bullet, both said the rows should become `partial` because "the
+offline default still completes no generation" — which implies that a *non-default* configuration
+does. It does not. Task 10.5's work is real and reachable (`GenerativeBackendRegistry` compiles all
+three backends in, `ApplicationComposition` calls `selectGenerativeBackend()`, `main.cpp` now wires
+`AppSettings` so `--generative-backend hosted|byok` is honoured by the shipped binary, and the
+`generation.generate` hook asks the selected backend for `unmetPrecondition()` first), but
+**this tree implements no HTTPS transport**: `services::GenerativeHttpTransport` is a declared seam
+whose only product implementation is `makeUnavailableGenerativeHttpTransport()`, and no CMake option
+or `#ifdef` supplies another (`grep` for `: public GenerativeHttpTransport` finds one product class
+and six test doubles). `transportFor()` therefore installs the unavailable transport in every
+non-injected composition, so `hosted` and `byok` fail at `submit` with `Unsupported` having sent no
+bytes. **No configuration of this tree completes a generation** — prompt-to-video, prompt-to-image,
+catalog-driven model choice (PR 406), upscale (PR 396) and audio generation (PR 395) are all
+unperformable — and the report's `partial` requires **at least one reachable operation**, where
+every row it scores `partial` cites a user operation that *completes* (`media`: import and list;
+`project settings`: settable at create, readable by `project.info`; `MCP and agent chat`:
+`initialize`, `tools/list`, `tools/call`). A request path that is always refused is not such an
+operation, which is exactly what the `absent` definition means by "a component may exist and still
+score `absent`". Implementing that one interface is the single change that would make both rows
+`partial`; until then the honest score is unchanged and only the *reason* has moved on, from "the
+only installed backend refuses" to "no transport is implemented".
+
+**One test was corrected, not weakened, by advancing `comparison-date`.**
+`ParityCheckFalsifiability.DetectsAMissingProvenanceFieldAndAMalformedDate` anchored its mutation on
+the literal string `comparison-date: 2026-08-04`, so an ordinary re-score broke it — the anchor was
+absent and the malformed-date defect was never produced (a test that would have started passing
+vacuously had its `EXPECT_NE(at, npos)` guard not caught it). The anchor is now read back out of the
+parsed document (`report.provenance.comparisonDate`, asserted non-empty first); the mutation and the
+assertion are unchanged, so the case still proves the checker rejects a non-`YYYY-MM-DD` date. The
+two remaining `2026-08-04` / `16274d51…` literals in `tests/docs/` belong to *synthetic* documents
+built inside the tests and are deliberately left alone.
+
+**Two other rows were re-checked because `linux-ref` moved, and neither changed.** `git diff` of
+`src/` between the old and new ref touches only the generative backends, `main.cpp`/`AppSettings`,
+and `core::AddClipCommand` (which now registers a placed clip's asset in `Project.assets` — a
+document-integrity fix that adds no operation). **`src/ui/` is byte-identical**, so every row citing
+task 11.2 or 11.3 stands as written. The `main.cpp` wiring incidentally closes the first of the two
+product gaps recorded from task 10.6 above: the shipped executable no longer ignores the
+configuration file, the environment and the command line. The second gap — Requirement 12.9's
+unknown-`trackId` case reaching the network and leaving a media-library entry behind, documented as
+an explicit exclusion in Property 66 — **is still open**.
+
+**Task 12.13 is done and stage 12 is closed: `1217` registered tests, `100% tests passed, 0 tests
+failed out of 1217` in `build-nogui`, about 15 seconds of wall clock, with the four expected skips
+unchanged** (`ExportCoordinatorValidate.RejectsAnUnwritableParentDirectory`,
+`ExportHardwareSoftwareComparisonTest.HardwareAndSoftware…`,
+`OfflineModeAvailability.ExportWithTheHostEncoder`, `EditorEndToEndTest.ChainThroughTheHostEncoder`
+— all four for the same absent-encoder reason). 12.1 through 12.12 were verified `[x]` before 12.13
+and the stage-12 parent were ticked, and every document 12.6 lists is present in `docs/`.
+**Stage 11 is untouched and remains blocked**: Qt 6 is absent from this host, so 11.1–11.12 stay
+`[~]`/`[ ]`, the stage-11 parent stays open, and nothing above implies otherwise. The one remaining
+`must`-priority parity gap — a GUI user still cannot edit at all, because `MainWindow` is a
+placeholder — is stage 11's work, not stage 12's.

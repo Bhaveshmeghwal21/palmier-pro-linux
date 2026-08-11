@@ -404,8 +404,19 @@ TEST(ParityCheckFalsifiability, DetectsAMissingProvenanceFieldAndAMalformedDate)
     EXPECT_TRUE(testsupport::hasDefect(removed, DefectKind::MissingField, "comparison-date"))
         << testsupport::toString(removed);
 
+    // The date is read back out of the document rather than written here as a
+    // literal: `comparison-date` advances every time the report is re-scored (it did
+    // when the two generation rows were re-read), and a hard-coded anchor would turn
+    // an ordinary document revision into a test failure. The mutation is unchanged —
+    // the real date is still replaced by a non-`YYYY-MM-DD` spelling — and the
+    // assertion above it proves the anchor was found, so this cannot pass vacuously.
+    const std::string markdown = parityMarkdown();
+    std::vector<Defect> parseDefects;
+    const ParityReport report = testsupport::parseParityReport(markdown, parseDefects);
+    ASSERT_FALSE(report.provenance.comparisonDate.empty());
+
     const std::vector<Defect> malformed =
-        checkParity(mutated(parityMarkdown(), "comparison-date: 2026-08-04",
+        checkParity(mutated(markdown, "comparison-date: " + report.provenance.comparisonDate,
                             "comparison-date: 4 August 2026"));
     EXPECT_TRUE(testsupport::hasDefect(malformed, DefectKind::MissingField, "comparison-date"))
         << testsupport::toString(malformed);

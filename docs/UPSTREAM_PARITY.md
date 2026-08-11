@@ -16,8 +16,8 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: 16274d51b77ac9ffcf8db49592d2a90411610ab5 (branch `feat/end-to-end-editor-integration`)
-- comparison-date: 2026-08-04
+- linux-ref: 3516ba02574782c348294897bdeab93ff8185b3f (branch `feat/end-to-end-editor-integration`)
+- comparison-date: 2026-08-11
 
 ## Status definitions (Requirement 13.7)
 
@@ -77,7 +77,7 @@ every `N. ` line as a build-order item.
 | media | partial | services::MediaImportService, core::MediaManager, services::ToolRegistry media.import/media.list | should | Import and list are reachable; no tool removes, relinks or re-probes an asset, and the media browser panel is never constructed (task 11.2). | - | - |
 | import | present | services::MediaImportService, media::MediaProbe, media::ImportValidation, services::ToolRegistry media.import | - | - | - | - |
 | export | present | services::ExportCoordinator, media::ExportEngine, media::MediaEncoder, media::EncoderSelector, services::ToolRegistry timeline.export | - | - | - | - |
-| generate | absent | services::GenerativeClient, services::GenerativeMediaCoordinator, services::ToolRegistry generation.generate | should | generation.generate is registered but the only installed backend refuses submit, poll and fetch, so no generation can complete (task 10.5 unfinished). | - | - |
+| generate | absent | services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::GenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator, services::ToolRegistry generation.generate | should | 10.5 landed the backend registry and the hosted and BYOK clients, but no HTTPS transport is implemented in tree, so every configured backend fails at submit and no generation completes. | - | - |
 | projects | present | services::ProjectSession, services::ProjectStore, services::ProjectSaveService, services::ToolRegistry project.create/project.open/project.save/project.info | - | - | - | - |
 | project settings | partial | core::Project, services::ToolRegistry project.create/project.info | should | Frame rate, canvas and colour space are settable only at project.create and readable by project.info; no tool changes them later and no settings panel exists. | - | - |
 | search | absent | none | later | No search index, search tool or search field exists; assets and clips can only be listed in full, so a project cannot be searched. | - | - |
@@ -96,7 +96,7 @@ every `N. ` line as a build-order item.
 | text and graphics | absent | none | should | No text, title or shape layer exists in the domain core or the renderer, so on-screen graphics cannot be authored at all. | - | - |
 | color and effects | partial | gpu::EffectKernels, gpu::Compositor, core::EffectType, services::ToolRegistry timeline.add_effect | should | Six effects including the ported invert_colors render on both paths; nothing removes, reorders or edits an effect and there is no LUT, scope or denoise. | - | - |
 | audio scrub and metering | absent | none | should | The audio pipeline mixes and outputs, but no level meter, waveform or scrub-audio component exists, so levels cannot be monitored while editing. | SwiftUI | Qt 6 Widgets |
-| generation and upscaling | absent | services::GenerativeClient, services::GenerativeMediaCoordinator | should | Only the offline stub backend is installed and it refuses every submit; there is no model catalog (PR 406) and no upscale mode (PR 396). | - | - |
+| generation and upscaling | absent | services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::GenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator | should | Backend selection is reachable, but the sole in-tree transport reports Unsupported, so nothing generates; no model catalog (PR 406), upscale mode (PR 396) or audio generation (PR 395). | - | - |
 | project browser and search | absent | ui::MediaBrowserViewModel | later | The media browser view model is never constructed and no search index or tool exists, so projects and assets can be neither browsed nor searched. | SwiftUI | Qt 6 Widgets |
 | MCP and agent chat | partial | services::McpServer, services::McpProtocolHandler, services::McpSessionRegistry, services::RemoteAccessGate, services::AgentOrchestrator, services::OfflineIntentInterpreter | must | initialize, tools/list and tools/call work over JSON-RPC 2.0 and the offline interpreter maps utterances; no SSE stream, no tools/list_changed, and the chat panel is unmounted. | SwiftUI | Qt 6 Widgets |
 | settings | partial | app::AppSettings, app::AppConfig | should | Defaults, config file, environment and flags are honoured at startup only; nothing changes a setting at runtime and there is no preferences surface. | SwiftUI | Qt 6 Widgets |
@@ -182,18 +182,38 @@ those claims rest on weaker evidence than the rest.
    full export path is reachable through `timeline.export`; hardware encode on it remains
    unverified, because no host in this environment has a hardware or software H.264 encoder — see
    the task 9.8 note in `tasks.md`. Reachability and verification are tracked separately by design.
-- **The two generation rows are the first that will need re-scoring.** They are scored against
-  `linux-ref`, where the only installed generative backend is the offline stub in
-  `app/ApplicationComposition.cpp`, which refuses `submit`, `poll` and `fetchResult`. While this
-  report was being written, task 10.5's `services::GenerativeBackendRegistry` and its hosted and
-  BYOK clients appeared in the working tree as uncommitted work, and `ApplicationComposition` began
-  calling `selectGenerativeBackend()`. That is deliberately **not** reflected above, because it is
-  not in the tree at `linux-ref` and was still changing. When it lands, `generate` (tool category)
-  and `generation and upscaling` (capability area) should move from `absent` to `partial`: the
-  request path and backend selection become reachable, while the model catalog (PR 406), the upscale
-  mode (PR 396) and audio generation (PR 395) stay absent and the offline default still completes
-  no generation.
+- **The two generation rows have been re-scored, and they did not move.** The previous revision of
+  this report predicted that when task 10.5 landed, `generate` (tool category) and `generation and
+  upscaling` (capability area) would move from `absent` to `partial`. 10.5 has landed (`f0a7925`),
+  and this revision re-read both rows against it at the new `linux-ref`. What landed is real:
+  `services::GenerativeBackendRegistry` compiles all three backends in, `selectGenerativeBackend()`
+  is called by `ApplicationComposition`, `--generative-backend hosted|byok` is honoured from the
+  shipped binary now that `main.cpp` wires `AppSettings`, and the `generation.generate` hook asks
+  the selected backend for `unmetPrecondition()` before anything downstream runs. **But the
+  prediction rested on a premise that is false in this tree**: it assumed that only the *offline
+  default* completes no generation. In fact **no** configuration completes one, because the tree
+  implements no HTTPS transport — `services::GenerativeHttpTransport` is a declared seam whose only
+  implementation in product code is `makeUnavailableGenerativeHttpTransport()`, there is no
+  build option or `#ifdef` that supplies another, and `hosted` and `byok` therefore fail at
+  `submit` with `Unsupported` having sent no bytes. So the answer to the question this report
+  measures — can any operation of the entry actually be performed at the product surface? — is
+  still no, for every entry operation: prompt-to-video, prompt-to-image, catalog-driven model
+  choice (PR 406), upscale (PR 396) and audio generation (PR 395). `partial` requires **at least
+  one** reachable operation, and every row scored `partial` above cites a user operation that
+  *completes*; a request path that is always refused is not one, which is precisely what the
+  `absent` definition means by "a component may exist and still score `absent`". Both rows keep
+  `absent` with `should`, so the build-order projection and the status counts are unchanged; only
+  their `linux-components` and `rationale` moved, because the *reason* changed — the blocker is no
+  longer "the only installed backend refuses" but "no transport is implemented". Implementing that
+  one interface is what would make these rows `partial`.
 - **`linux-ref` is a moving target.** It records the commit this comparison was read from. Work on
    this feature is ongoing, so a later revision of this report should update `linux-ref` and
-   re-check every row whose components have changed — in particular every row that cites
-   task 11.2, 11.3 or 10.5, all of which are unbuilt at `linux-ref`.
+   re-check every row whose components have changed. At the current `linux-ref` that re-check was
+   done by diffing `src/` against the previous ref: the only product changes are task 10.5's
+   generative backends (both generation rows re-read above), `main.cpp` and `AppSettings` finally
+   wiring the configuration surface into the shipped binary (which makes the `settings` row's
+   "honoured at startup only" claim more literally true, not less), and `core::AddClipCommand` now
+   registering a clip's asset in `Project.assets` (a document-integrity fix that adds no operation).
+   **`src/ui/` is byte-identical to the previous ref**, so every row that cites task 11.2 or 11.3 —
+   the unmounted panels and the placeholder `MainWindow` — stands unchanged, and stage 11 remains
+   unbuilt.
