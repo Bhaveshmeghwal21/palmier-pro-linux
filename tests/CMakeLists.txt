@@ -2853,3 +2853,137 @@ if(CMAKE_DL_LIBS)
 endif()
 
 palmier_register_test(palmier_services_offline_mode_tests)
+
+
+
+
+# ---------------------------------------------------------------------------
+# End-to-end test + build-time fixture generator (task 12.10; Requirements 3.6,
+# 15.1, 15.9).
+#
+# This is the one target in the tree that drives the ASSEMBLED composition root
+# from a single client's point of view: `project.create` -> `timeline.add_track`
+# -> `media.import` -> `timeline.add_clip` -> playback -> `project.save` ->
+# `project.open` -> `timeline.export`, every step a tool call on the one shared
+# ToolRegistry, followed by reading the exported file back through
+# `media::probeMediaFile` and `media::MediaDecoder`. Requirement 3.6's "produce a
+# file at the requested export path that the media engine can probe and decode" is
+# asserted here and nowhere else.
+#
+# Two support pieces make that possible on a host with no encoder, and both are
+# shared rather than private to the test:
+#
+#   * tests/support/SyntheticMedia.cpp — a libav*-backed writer of REAL, decodable
+#     bytes. It is what the fixture generator writes the synthetic source with, and
+#     what the injected export encode backend muxes the export's own frames and
+#     audio into. It negotiates the encoder from a candidate list and the pixel
+#     format from the encoder, which is precisely what `media::MediaEncoder`'s
+#     production backend deliberately does not do (it fixes 4:2:0 and takes its
+#     encoder name from `gpu::softwareEncoderName`), so it cannot live behind the
+#     product seam.
+#   * palmier_e2e_fixture_generator — the build-time producer of the two fixtures.
+#     Task 12.10 forbids checking a binary in, so the 2-second synthetic A/V source
+#     and the reference `.palmier` document are GENERATED, deterministically, by a
+#     custom command below. They land in ${CMAKE_CURRENT_BINARY_DIR}/fixtures —
+#     "tests/fixtures" inside the BUILD tree — so a build never writes into the
+#     source tree and the repository stays free of generated media.
+#
+# The source list mirrors palmier_app_composition_tests (the composition root and
+# every service source it constructs) because the subject is the same object; this
+# target adds only the synthetic-media support source. Palmier::media supplies the
+# probe/decode/encode surface and the audio engine, and brings in Palmier::gpu and
+# Palmier::core.
+#
+# No Qt, no display, no GPU, no vendor SDK, no sound device and no network: the
+# audio sink selection falls through to the null sink, the compositor runs the
+# software reference, and the MCP server is never started. Nothing sleeps — the
+# playback leg is paced by a clock the test advances through
+# `ui::PreviewController::setAudioMasterClock`.
+#
+# The export leg exists in two cases. One leaves the encode backend at its
+# production default and SKIPS, with a reason naming the absent encoder, on a host
+# whose libavcodec carries no software H.264/HEVC/VP9 encoder (Requirement 15.5's
+# idiom, as tasks 9.8 and 10.9 use it). The other injects the real-bytes backend
+# above and therefore runs the whole chain, including the probe-and-decode
+# assertion, on every host.
+# ---------------------------------------------------------------------------
+
+set(PALMIER_E2E_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/fixtures")
+set(PALMIER_E2E_FIXTURE_SOURCE "${PALMIER_E2E_FIXTURE_DIR}/e2e_source_2s.mov")
+set(PALMIER_E2E_FIXTURE_DOCUMENT "${PALMIER_E2E_FIXTURE_DIR}/e2e_reference.palmier")
+
+# --- The generator ---------------------------------------------------------
+add_executable(palmier_e2e_fixture_generator
+    e2e/fixture_generator_main.cpp
+    support/SyntheticMedia.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp")
+target_include_directories(palmier_e2e_fixture_generator PRIVATE
+    "${PROJECT_SOURCE_DIR}/src"
+    "${PROJECT_SOURCE_DIR}/tests")
+target_link_libraries(palmier_e2e_fixture_generator PRIVATE
+    Palmier::media)
+
+# --- Running it at build time ----------------------------------------------
+#
+# One command producing both fixtures, so neither can be regenerated without the
+# other. A failure here fails the BUILD, which is strictly earlier and louder than
+# Requirement 15.9's "report that test as failed with an error naming the missing
+# fixture" — which the test still does, for the case where the fixture is removed
+# after the build.
+add_custom_command(
+    OUTPUT "${PALMIER_E2E_FIXTURE_SOURCE}" "${PALMIER_E2E_FIXTURE_DOCUMENT}"
+    COMMAND palmier_e2e_fixture_generator "${PALMIER_E2E_FIXTURE_DIR}"
+    DEPENDS palmier_e2e_fixture_generator
+    COMMENT "Generating the end-to-end media and project fixtures (task 12.10)"
+    VERBATIM)
+
+add_custom_target(palmier_e2e_fixtures
+    DEPENDS "${PALMIER_E2E_FIXTURE_SOURCE}" "${PALMIER_E2E_FIXTURE_DOCUMENT}")
+
+# --- The test --------------------------------------------------------------
+add_executable(palmier_e2e_tests
+    e2e/editor_end_to_end_test.cpp
+    support/SyntheticMedia.cpp
+    "${PROJECT_SOURCE_DIR}/src/app/ApplicationComposition.cpp"
+    "${PROJECT_SOURCE_DIR}/src/app/AppSettings.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/RemoteAccessGate.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/TlsTransport.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/MentionResolver.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/AgentInterpreterRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/OfflineIntentInterpreter.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeBackendRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeHttpTransport.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ExportCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/MediaImportService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/LocalizationManager.cpp")
+target_include_directories(palmier_e2e_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src"
+    "${PROJECT_SOURCE_DIR}/tests")
+target_compile_definitions(palmier_e2e_tests PRIVATE
+    PALMIER_E2E_FIXTURE_DIR="${PALMIER_E2E_FIXTURE_DIR}")
+target_link_libraries(palmier_e2e_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_test_enable_openssl(palmier_e2e_tests)
+
+# The fixtures must exist before the binary that consumes them is discovered/run.
+add_dependencies(palmier_e2e_tests palmier_e2e_fixtures)
+
+palmier_register_test(palmier_e2e_tests)
