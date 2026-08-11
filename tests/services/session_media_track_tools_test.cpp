@@ -52,6 +52,7 @@
 #include "core/FrameRate.hpp"
 #include "core/MediaAssetRef.hpp"
 #include "core/Project.hpp"
+#include "core/ProjectValidation.hpp"
 #include "core/Resolution.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Track.hpp"
@@ -61,6 +62,7 @@
 #include "services/Json.hpp"
 #include "services/MediaImportService.hpp"
 #include "services/ProjectSession.hpp"
+#include "services/ProjectStore.hpp"
 #include "services/ToolSchema.hpp"
 
 namespace palmier::services {
@@ -703,6 +705,110 @@ TEST_F(MediaToolsTest, MediaListReportsEveryRegisteredAssetWithItsDisplayName) {
 
     // project.info agrees with media.list on the asset count.
     EXPECT_EQ(invokeOk(registry(), "project.info", Json::object()).intOr("assetCount"), 2);
+}
+
+// ---------------------------------------------------------------------------
+// Regression — an imported asset placed on the timeline survives save + open
+// ---------------------------------------------------------------------------
+//
+// `media.import` registers its asset in ProjectSession::mediaLibrary() (the
+// session-level MediaManager) only; Project.assets — the table ProjectStore
+// serializes and the table ProjectSession::openProject rebuilds the library from —
+// is populated by AddClipCommand when the clip is placed. Before that
+// registration existed, `media.import` + `timeline.add_clip` + `project.save`
+// wrote a document whose clips referenced nothing, and `project.open` rejected it
+// with "assetRef does not resolve to any entry in Project.assets": the file the
+// user had just saved could not be re-opened. This drives exactly that sequence
+// through the tool surface and asserts the document loads AND validates.
+TEST_F(MediaToolsTest, ImportedAssetPlacedOnATrackRoundTripsThroughSaveAndOpen) {
+    wire(mp4WithVideoAndAudio());
+    const std::filesystem::path media = writeFile("round-trip.mp4");
+    const std::filesystem::path document = dir_ / "imported.palmier";
+
+    invokeOk(registry(), "project.create", createArgs("Imported Cut", 30.0, 1920, 1080));
+    const Json track = invokeOk(registry(), "timeline.add_track", kindArgs("video"));
+    const Json imported = invokeOk(registry(), "media.import", pathArgs(media));
+    const std::string assetId = imported.stringOr("assetId");
+    ASSERT_FALSE(assetId.empty());
+
+    Json clipArgs = Json::object();
+    clipArgs.set("trackId", track.stringOr("trackId"));
+    clipArgs.set("assetId", assetId);
+    clipArgs.set("sourcePath", imported.stringOr("sourcePath"));
+    clipArgs.set("timelineStartNs", static_cast<std::int64_t>(0));
+    clipArgs.set("sourceInNs", static_cast<std::int64_t>(0));
+    clipArgs.set("sourceOutNs", static_cast<std::int64_t>(1'000'000'000));
+    const Json clip = invokeOk(registry(), "timeline.add_clip", clipArgs);
+    ASSERT_FALSE(clip.stringOr("clipId").empty());
+
+    // The placement put the imported asset in the project's own asset table, so
+    // the saved document is self-contained.
+    const Project placed = session_.engine().snapshot();
+    ASSERT_EQ(placed.assets.size(), 1u);
+    EXPECT_EQ(placed.assets[0].assetId.toString(), assetId);
+    EXPECT_EQ(placed.assets[0].sourcePath, imported.stringOr("sourcePath"));
+    ASSERT_TRUE(validateProject(placed).isOk()) << validateProject(placed).error().toString();
+
+    invokeOk(registry(), "project.save", pathArgs(document));
+    ASSERT_TRUE(std::filesystem::exists(document));
+
+    // The document on disk is a valid project in its own right.
+    Result<Project> loaded = loadProjectFromFile(document);
+    ASSERT_TRUE(loaded.isOk()) << loaded.error().toString();
+    const Result<void> valid = validateProject(loaded.value());
+    ASSERT_TRUE(valid.isOk()) << valid.error().toString();
+    ASSERT_EQ(loaded.value().assets.size(), 1u);
+    EXPECT_EQ(loaded.value().assets[0].assetId.toString(), assetId);
+
+    // And it re-opens through the tool surface into a fresh session, with the
+    // media library rebuilt from the document's asset table.
+    ProjectSession     reopenedSession;
+    const ToolRegistry reopenedRegistry = buildDefaultToolRegistry(reopenedSession);
+    const Json         opened = invokeOk(reopenedRegistry, "project.open", pathArgs(document));
+    EXPECT_EQ(opened.intOr("trackCount"), 1);
+    EXPECT_EQ(opened.intOr("clipCount"), 1);
+    EXPECT_FALSE(opened.boolOr("modified", true));
+
+    ASSERT_EQ(reopenedSession.mediaLibrary().assetCount(), 1u);
+    const std::optional<Uuid> parsedAssetId = Uuid::parse(assetId);
+    ASSERT_TRUE(parsedAssetId.has_value());
+    EXPECT_TRUE(reopenedSession.mediaLibrary().hasAsset(*parsedAssetId));
+    EXPECT_EQ(reopenedSession.mediaLibrary().library()[0].sourcePath,
+              imported.stringOr("sourcePath"));
+}
+
+// Two clips over ONE imported asset leave one entry in the asset table: the
+// document's library rebuild rejects a duplicate asset id, so a second
+// registration of the same identity would make the document unopenable again.
+TEST_F(MediaToolsTest, TwoClipsOverOneImportedAssetRegisterItOnce) {
+    wire(mp4WithVideoAndAudio());
+    const std::filesystem::path media = writeFile("shared.mp4");
+    const std::filesystem::path document = dir_ / "shared.palmier";
+
+    invokeOk(registry(), "project.create", createArgs("Shared Asset", 30.0, 1920, 1080));
+    const Json video = invokeOk(registry(), "timeline.add_track", kindArgs("video"));
+    const Json audio = invokeOk(registry(), "timeline.add_track", kindArgs("audio"));
+    const Json imported = invokeOk(registry(), "media.import", pathArgs(media));
+
+    for (const Json& track : {video, audio}) {
+        Json clipArgs = Json::object();
+        clipArgs.set("trackId", track.stringOr("trackId"));
+        clipArgs.set("assetId", imported.stringOr("assetId"));
+        clipArgs.set("sourcePath", imported.stringOr("sourcePath"));
+        clipArgs.set("timelineStartNs", static_cast<std::int64_t>(0));
+        clipArgs.set("sourceInNs", static_cast<std::int64_t>(0));
+        clipArgs.set("sourceOutNs", static_cast<std::int64_t>(1'000'000'000));
+        invokeOk(registry(), "timeline.add_clip", clipArgs);
+    }
+
+    EXPECT_EQ(session_.engine().snapshot().assets.size(), 1u);
+
+    invokeOk(registry(), "project.save", pathArgs(document));
+    ProjectSession     reopenedSession;
+    const ToolRegistry reopenedRegistry = buildDefaultToolRegistry(reopenedSession);
+    const Json         opened = invokeOk(reopenedRegistry, "project.open", pathArgs(document));
+    EXPECT_EQ(opened.intOr("clipCount"), 2);
+    EXPECT_EQ(reopenedSession.mediaLibrary().assetCount(), 1u);
 }
 
 // ===========================================================================

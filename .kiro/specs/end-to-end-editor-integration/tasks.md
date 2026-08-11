@@ -2025,3 +2025,57 @@ Suite: **1154 tests, 0 failures, 4 skips** in `build-nogui` (the three pre-exist
 > `project.assets`, mirroring `PlaceGeneratedClipCommand`), which is outside task 12.10's scope and
 > is left for a decision. Once it is fixed, the four `seen.reopened` assertions already present in
 > `expectChainSucceeded` become live with no further change.
+
+
+### ✅ Defect fix — the finding above is fixed: `AddClipCommand` registers the clip's asset in `Project.assets` (no task ticked)
+
+`Project.assets` is the only asset table a saved document carries: `ProjectStore` serializes it and
+`ProjectSession::openProject` rebuilds the media library from it (`libraryFor`), while
+`core::validateProject` requires every `Clip.assetRef` to resolve in it. `MediaImportService::import`
+registers into `ProjectSession::mediaLibrary()` — the session-level `core::MediaManager` — only, so
+`media.import` → `timeline.add_clip` → `project.save` wrote a document whose clips referenced
+nothing and which `project.open` then rejected. Data loss for the user, and Requirement 15.1's
+re-open leg blocked.
+
+**The registration was put in `core::AddClipCommand::apply`**, mirroring `PlaceGeneratedClipCommand`
+in `services/GenerativeMediaCoordinator.cpp`, and NOT in the import path. `AddClipCommand` is the
+single choke point through which a clip carrying a new `assetRef` reaches a `Project` — the
+`timeline.add_clip` tool, `ui::TimelineViewModel::addClip` (drag-and-drop) and the agent all go
+through it, and it is the only command in `core/EditCommands.cpp` that introduces an `assetRef`
+(delete/move/trim/split/reorder only ever carry an existing one forward). Registering there makes
+the invariant hold by construction for **every** caller that places a clip, including one whose
+asset was registered only in a session-level library, instead of fixing the one import path and
+leaving the state reachable from the next one. Fixing it in `MediaImportService` would also have had
+to reach the project through the engine to be undoable, turning an import into an undo-stack entry
+and desynchronising `Project.assets` from `mediaLibrary()` on undo.
+
+Properties of the fix: dedup is by `assetId` (`MediaAssetRef::operator==` compares identity only), so
+a ref the table already resolves adds no second entry — a duplicate id would make the document
+unopenable again, since `libraryFor` rejects one; `revert()` removes the entry **only** when that
+apply added it (`assetAdded_`), so undo/redo round-trips exactly and undoing the second of two clips
+sharing an asset keeps the entry the first created; a rejected add is unchanged from before, because
+`TimelineEngine::apply` restores its whole snapshot on failure; the nil identity is never added,
+because the library rebuild cannot catalogue it.
+
+**Requirement 15.1's re-open leg is now genuinely asserted.** In `tests/e2e/editor_end_to_end_test.cpp`,
+step (8) of `runChain()` goes through `invokeOk(kProjectOpen, …)` — the same hard assertion as every
+other call in the chain — and the "reported, not asserted" gate, the `reopenSucceeded` /
+`reopenError` fields and the explanatory comment are gone; the `trackCount` / `clipCount` /
+`modified` assertions in `expectChainSucceeded` are now unconditional.
+
+**Tests: 1160 total, from 1154** — same 4 expected skips, no existing test weakened, skipped or
+changed. **No existing test had encoded the buggy behaviour**: the only pre-existing save/open
+round-trip over a clip, `SessionToolsTest.ProjectSaveThenOpenReportsTheLoadedProjectAccurately`,
+pushes its asset into `Project.assets` by hand before saving, so it never exercised the import path.
+The 6 new cases were each confirmed to FAIL on the unfixed tree with exactly the reported
+`assetRef does not resolve to any entry in Project.assets` error:
+
+- `tests/core/edit_commands_test.cpp` (4, unit): the asset is registered and `validateProject`
+  accepts the result, undo removes it and redo restores it; an already-registered asset is not
+  duplicated and undoing the later add keeps it; a rejected add (overlap, and a missing track)
+  leaves the table unchanged; a nil `assetRef` is not registered.
+- `tests/services/session_media_track_tools_test.cpp` (2, service level, through the real tool
+  surface + a real `MediaImportService`): `media.import` → `timeline.add_clip` → `project.save` →
+  `project.open` round-trips, the document on disk loads and `validateProject` accepts it, and the
+  reopened session's media library carries the asset with its resolved source path; and two clips
+  over one imported asset register it exactly once and still re-open.

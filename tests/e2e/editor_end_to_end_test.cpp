@@ -443,8 +443,6 @@ struct ChainObservation {
     Json               saved{};
     Json               reopened{};
     Json               exported{};
-    bool               reopenSucceeded{false};
-    std::string        reopenError{};
     std::uint64_t      framesPresented{0};
     std::uint64_t      framesDropped{0};
     std::string        playbackNotice{};
@@ -555,37 +553,15 @@ protected:
         saveArgs.set("path", document.string());
         seen.saved = invokeOk(kProjectSave, saveArgs);
 
-        // (8) project.open — the document just written.
-        //
-        // NOT asserted here, and that is a finding rather than an omission. On the
-        // current tree this call FAILS:
-        //
-        //   NotFound: could not open project '<...>.palmier': Clip <id>: assetRef
-        //   does not resolve to any entry in Project.assets
-        //
-        // `media.import` registers the asset in `ProjectSession::mediaLibrary()`
-        // (the `core::MediaManager` view) but never appends it to `Project.assets`,
-        // which is the table `ProjectStore` serializes and the table
-        // `ProjectSession::openProject` rebuilds the library from. The generative
-        // path already solves exactly this — `PlaceGeneratedClipCommand` in
-        // `GenerativeMediaCoordinator.cpp` registers its asset in `project.assets`
-        // as part of the same command — but `timeline.add_clip` over
-        // `core::AddClipCommand` does not, so a document saved after
-        // `media.import` + `timeline.add_clip` carries clips whose `assetRef`
-        // resolves to nothing and is rejected on load.
-        //
-        // Requirement 3.6 — the sequence this task exists to cover — stops at
-        // `project.save` and `timeline.export`, both of which SUCCEED, so it is
-        // asserted in full below. Requirement 15.1's "re-opens the saved document"
-        // leg is blocked by the defect above; fixing it means changing stage-4
-        // import/edit code, which is outside task 12.10. The outcome is recorded
-        // and reported so the defect is visible rather than skipped over.
+        // (8) project.open — the document just written. This is Requirement 15.1's
+        // "re-opens the saved document" leg, and it is asserted like every other
+        // call in the chain: a document this chain saved must load back through the
+        // tool surface, which requires the clips' `assetRef`s to resolve in the
+        // saved `Project.assets` (`core::AddClipCommand` registers the asset it
+        // places as part of the same command, so they do).
         Json openArgs = Json::object();
         openArgs.set("path", document.string());
-        Result<Json> reopened = invoke(kProjectOpen, openArgs);
-        seen.reopenSucceeded = reopened.isOk();
-        seen.reopenError = reopened.isOk() ? std::string{} : reopened.error().toString();
-        seen.reopened = reopened.isOk() ? reopened.value() : Json::object();
+        seen.reopened = invokeOk(kProjectOpen, openArgs);
 
         // (9) timeline.export — to a path that does not exist yet, so no
         // overwrite acknowledgement is implied (Requirement 7.11).
@@ -701,17 +677,11 @@ protected:
         // --- project.save wrote a document ------------------------------------
         EXPECT_GT(seen.saved.intOr("bytesWritten"), 0);
         EXPECT_FALSE(seen.saved.stringOr("documentPath").empty());
-        if (!seen.reopenSucceeded) {
-            // Reported, not asserted — see the comment at step (8) of runChain().
-            std::cout << "[ e2e      ] NOTE: `project.open` of the document this chain saved "
-                         "failed: "
-                      << seen.reopenError << '\n';
-        } else {
-            EXPECT_EQ(seen.reopened.intOr("trackCount"), 2);
-            EXPECT_EQ(seen.reopened.intOr("clipCount"), 2);
-            EXPECT_FALSE(seen.reopened.boolOr("modified"))
-                << "a freshly opened document is unmodified (Requirement 3.4)";
-        }
+        // --- and re-opening it yields the same timeline (Requirement 15.1) -----
+        EXPECT_EQ(seen.reopened.intOr("trackCount"), 2);
+        EXPECT_EQ(seen.reopened.intOr("clipCount"), 2);
+        EXPECT_FALSE(seen.reopened.boolOr("modified"))
+            << "a freshly opened document is unmodified (Requirement 3.4)";
 
         // --- the export reported a completed encode ---------------------------
         const std::int64_t planned = seen.exported.intOr("plannedFrames");

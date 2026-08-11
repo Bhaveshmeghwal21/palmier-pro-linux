@@ -85,6 +85,21 @@ struct Project;  // core/Project.hpp — the mutation target (forward-declared).
 // whose existing clip starts strictly later). Whether the placement overlaps an
 // existing clip is left to the engine's invariant check, which rejects and rolls
 // back an overlapping add. revert() removes the inserted clip by id.
+//
+// The clip's asset is registered in Project.assets as part of the SAME command
+// (as PlaceGeneratedClipCommand already does for a generated clip), because
+// Project.assets is the only asset table a document carries: it is what
+// ProjectStore serializes and what ProjectSession::openProject rebuilds the media
+// library from, and validateProject requires every Clip.assetRef to resolve in it.
+// Registering here — rather than in whichever service produced the asset — is what
+// makes "a saved project can be re-opened" hold for EVERY caller that places a
+// clip (the `timeline.add_clip` tool, the timeline view model's drag-and-drop, the
+// agent), including callers whose asset was registered only in a session-level
+// MediaManager. Registration is skipped when the table already resolves the
+// identity (resolution is by assetId, so no duplicate entry is created) and when
+// the ref is the nil identity (an unregisterable asset id, which the media library
+// rebuild rejects); revert() removes the entry only when this command added it, so
+// undo/redo round-trips exactly and a rolled-back add leaves the table untouched.
 class AddClipCommand final : public EditCommand {
 public:
     AddClipCommand(Uuid trackId, Clip clip);
@@ -99,6 +114,7 @@ public:
 private:
     Uuid trackId_;
     Clip clip_;
+    bool assetAdded_ = false;  ///< True iff apply() appended clip_.assetRef to Project.assets.
 };
 
 // ---------------------------------------------------------------------------

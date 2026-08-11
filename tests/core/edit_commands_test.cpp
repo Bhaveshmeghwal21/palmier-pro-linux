@@ -27,6 +27,8 @@
 #include "core/Clip.hpp"
 #include "core/FrameRate.hpp"
 #include "core/Project.hpp"
+#include "core/ProjectValidation.hpp"
+#include "core/Resolution.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Track.hpp"
 #include "core/Transition.hpp"
@@ -110,6 +112,102 @@ TEST(AddClipCommand, UndoRemovesAndRedoRestores) {
     EXPECT_FALSE(engine.clip(id).has_value());
     ASSERT_TRUE(engine.redo().changed());
     EXPECT_TRUE(engine.clip(id).has_value());
+}
+
+// The asset table is what a saved document carries and what validateProject
+// resolves a clip's assetRef against, so placing a clip must register its asset
+// there — otherwise a project saved after an import cannot be re-opened. Undo
+// removes the entry the add created; redo puts it back.
+TEST(AddClipCommand, RegistersTheClipsAssetAndUndoRemovesIt) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);
+    project.timelineFps = FrameRate::fps30();
+    project.canvas = Resolution(1920, 1080);
+    TimelineEngine engine(std::move(project));
+
+    const ClipId id = Uuid::generateV4();
+    const Clip   clip = makeClip(id, ms(0), ms(0), ms(1000));
+    ASSERT_TRUE(engine.apply(std::make_unique<AddClipCommand>(trackId, clip)).changed());
+
+    Project snap = engine.snapshot();
+    ASSERT_EQ(snap.assets.size(), 1u);
+    EXPECT_EQ(snap.assets[0].assetId, clip.assetRef.assetId);
+    EXPECT_EQ(snap.assets[0].sourcePath, clip.assetRef.sourcePath);
+    // The clip's assetRef now resolves, which is what makes the project loadable.
+    EXPECT_TRUE(validateProject(snap).isOk()) << validateProject(snap).error().toString();
+
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_TRUE(engine.snapshot().assets.empty());
+
+    ASSERT_TRUE(engine.redo().changed());
+    snap = engine.snapshot();
+    ASSERT_EQ(snap.assets.size(), 1u);
+    EXPECT_EQ(snap.assets[0].assetId, clip.assetRef.assetId);
+}
+
+// Resolution is by assetId, so an asset the table already carries — whether from a
+// previous add or from the loaded document — gets no second entry, and undoing the
+// later add must not remove the entry it did not create.
+TEST(AddClipCommand, DoesNotDuplicateAnAlreadyRegisteredAsset) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);
+    const MediaAssetRef shared(Uuid::generateV4(), "mem://shared");
+    TimelineEngine engine(std::move(project));
+
+    Clip first = makeClip(Uuid::generateV4(), ms(0), ms(0), ms(500));
+    first.assetRef = shared;
+    Clip second = makeClip(Uuid::generateV4(), ms(1000), ms(0), ms(500));
+    second.assetRef = shared;
+
+    ASSERT_TRUE(engine.apply(std::make_unique<AddClipCommand>(trackId, first)).changed());
+    ASSERT_TRUE(engine.apply(std::make_unique<AddClipCommand>(trackId, second)).changed());
+    ASSERT_EQ(engine.snapshot().assets.size(), 1u);
+
+    // Undoing the second add leaves the entry the FIRST add created in place.
+    ASSERT_TRUE(engine.undo().changed());
+    ASSERT_EQ(engine.snapshot().assets.size(), 1u);
+    EXPECT_EQ(engine.snapshot().assets[0].assetId, shared.assetId);
+
+    // Undoing the first removes it.
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_TRUE(engine.snapshot().assets.empty());
+}
+
+// A rejected add is atomic down to the asset table: the engine's rollback must
+// leave no orphaned asset entry behind.
+TEST(AddClipCommand, RejectedAddLeavesTheAssetTableUnchanged) {
+    Uuid trackId;
+    TimelineEngine engine(makeProjectWithOneTrack(trackId));
+    ASSERT_TRUE(engine.apply(std::make_unique<AddClipCommand>(
+                                 trackId, makeClip(Uuid::generateV4(), ms(0), ms(0), ms(1000))))
+                    .changed());
+    ASSERT_EQ(engine.snapshot().assets.size(), 1u);
+
+    // Overlaps [0,1000) with no transition -> rejected and rolled back.
+    const auto overlapping = engine.apply(std::make_unique<AddClipCommand>(
+        trackId, makeClip(Uuid::generateV4(), ms(500), ms(0), ms(1000))));
+    ASSERT_TRUE(overlapping.isError());
+    EXPECT_EQ(engine.snapshot().assets.size(), 1u);
+
+    // An add naming a track that does not exist likewise registers nothing.
+    const auto noTrack = engine.apply(std::make_unique<AddClipCommand>(
+        Uuid::generateV4(), makeClip(Uuid::generateV4(), ms(5000), ms(0), ms(500))));
+    ASSERT_TRUE(noTrack.isError());
+    EXPECT_EQ(engine.snapshot().assets.size(), 1u);
+}
+
+// The nil identity cannot be catalogued when a document's media library is
+// rebuilt, so it is never added to the table; the clip is still placed.
+TEST(AddClipCommand, NilAssetRefIsNotRegistered) {
+    Uuid trackId;
+    TimelineEngine engine(makeProjectWithOneTrack(trackId));
+
+    Clip clip = makeClip(Uuid::generateV4(), ms(0), ms(0), ms(500));
+    clip.assetRef = MediaAssetRef{};
+    ASSERT_TRUE(engine.apply(std::make_unique<AddClipCommand>(trackId, clip)).changed());
+
+    EXPECT_TRUE(engine.snapshot().assets.empty());
+    EXPECT_EQ(engine.snapshot().tracks[0].clips.size(), 1u);
 }
 
 // --- DeleteClipCommand -----------------------------------------------------

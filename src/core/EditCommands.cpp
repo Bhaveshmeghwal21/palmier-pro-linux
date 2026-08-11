@@ -112,6 +112,23 @@ Result<void> AddClipCommand::apply(Project& project) {
         return err(notFound("AddClipCommand: track " + idLabel(trackId_) + " not found"));
     }
 
+    // Register the clip's asset in the project asset table if it is not already
+    // resolvable there, so the clip's assetRef resolves (project validation rule).
+    // Project.assets is the ONLY asset table a saved document carries, so an asset
+    // known merely to a session-level MediaManager (as an imported asset is) would
+    // otherwise produce a document that validateProject rejects on load. Doing it
+    // here makes that impossible for every caller that places a clip, not just for
+    // one import path. Resolution is by assetId, so a ref already in the table adds
+    // nothing; the nil identity is never added, because it cannot be catalogued
+    // when the library is rebuilt from the document.
+    assetAdded_ = false;
+    if (clip_.assetRef.isValid() &&
+        std::none_of(project.assets.begin(), project.assets.end(),
+                     [this](const MediaAssetRef& a) { return a == clip_.assetRef; })) {
+        project.assets.push_back(clip_.assetRef);
+        assetAdded_ = true;
+    }
+
     // Insert keeping the track ordered by timelineStart: before the first clip
     // that starts strictly later than the new clip.
     auto pos = std::find_if(track->clips.begin(), track->clips.end(),
@@ -131,6 +148,19 @@ Result<void> AddClipCommand::revert(Project& project) {
     clips.erase(std::remove_if(clips.begin(), clips.end(),
                                [&](const Clip& c) { return c.id == clip_.id; }),
                 clips.end());
+
+    // Undo the asset registration too, and ONLY when this command performed it, so
+    // revert() is an exact inverse and an asset another clip still references (or
+    // one the table already carried) is never removed.
+    if (assetAdded_) {
+        auto& assets = project.assets;
+        assets.erase(std::remove_if(assets.begin(), assets.end(),
+                                    [this](const MediaAssetRef& a) {
+                                        return a == clip_.assetRef;
+                                    }),
+                     assets.end());
+        assetAdded_ = false;
+    }
     return ok();
 }
 
