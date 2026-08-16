@@ -33,6 +33,8 @@ class MediaManager;
 
 namespace palmier::ui {
 
+class GuiToolGateway;  // ui/GuiToolGateway.hpp — optional gateway-backed import.
+
 /// The Media Browser panel: an import control, the media library list, the
 /// selected clip's selectable version list, and the clip's key-moment marker
 /// summary. All state comes from an owned MediaBrowserViewModel built over the
@@ -51,6 +53,12 @@ public:
 
     /// Rebuild the library / version / marker views from the current model state.
     void refresh();
+
+    /// Install (or clear) the gateway the panel's import button routes new
+    /// imports through (task 11.4). When set, `promptImport()` calls
+    /// `MediaBrowserViewModel::importMediaViaGateway` instead of the
+    /// validator-injected `importMedia()`.
+    void setGateway(GuiToolGateway* gateway) noexcept { viewModel_.setGateway(gateway); }
 
 public slots:
     /// Prompt for a media file and import it through the view model, surfacing a

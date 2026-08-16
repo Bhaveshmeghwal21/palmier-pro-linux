@@ -22,6 +22,9 @@
 #include <string>
 #include <utility>
 
+#include "services/Json.hpp"
+#include "ui/GuiToolGateway.hpp"
+
 namespace palmier::ui {
 
 MediaBrowserPanel::MediaBrowserPanel(MediaManager& media,
@@ -74,6 +77,26 @@ void MediaBrowserPanel::buildUi() {
 void MediaBrowserPanel::promptImport() {
     const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("Import Media"));
     if (file.isEmpty()) {
+        return;
+    }
+
+    // Task 11.4: when a gateway is installed (the real application shell always
+    // installs one), route the import through it — the SAME `media.import`
+    // tool call the MCP endpoint and the in-app agent use — rather than through
+    // the validator-injected importMedia() path, which predates the shared tool
+    // surface and does not register the asset with the current ProjectSession.
+    if (GuiToolGateway* gateway = viewModel_.gateway(); gateway != nullptr) {
+        const Result<services::Json> result =
+            viewModel_.importMediaViaGateway(file.toStdString());
+        if (result.isError()) {
+            importErrorLabel_->setText(QStringLiteral("Could not import: %1")
+                                           .arg(QString::fromStdString(
+                                               result.error().message())));
+            importErrorLabel_->show();
+            return;
+        }
+        importErrorLabel_->hide();
+        refreshLibrary();
         return;
     }
 

@@ -558,6 +558,8 @@ add_executable(palmier_core_timeline_undo_redo_roundtrip_property_tests
     core/timeline_undo_redo_roundtrip_property_test.cpp)
 target_link_libraries(palmier_core_timeline_undo_redo_roundtrip_property_tests PRIVATE
     Palmier::core
+    Palmier::services
+    Palmier::ui_gateway
     Palmier::test_support)
 
 palmier_register_test(palmier_core_timeline_undo_redo_roundtrip_property_tests)
@@ -1089,7 +1091,8 @@ add_executable(palmier_services_edit_equivalence_property_tests
     "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
+    "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/GuiToolGateway.cpp")
 target_include_directories(palmier_services_edit_equivalence_property_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(palmier_services_edit_equivalence_property_tests PRIVATE
@@ -1234,12 +1237,14 @@ palmier_register_test(palmier_services_mention_auth_gating_tests)
 add_executable(palmier_ui_media_browser_viewmodel_tests
     ui/media_browser_viewmodel_test.cpp
     "${PROJECT_SOURCE_DIR}/src/ui/MediaBrowserViewModel.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/GuiToolGateway.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/KeyMomentMarkers.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/KeyMomentDetector.cpp")
 target_include_directories(palmier_ui_media_browser_viewmodel_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(palmier_ui_media_browser_viewmodel_tests PRIVATE
     Palmier::core
+    Palmier::services
     Palmier::test_support)
 
 palmier_register_test(palmier_ui_media_browser_viewmodel_tests)
@@ -1264,11 +1269,13 @@ palmier_register_test(palmier_ui_media_browser_viewmodel_tests)
 # ---------------------------------------------------------------------------
 add_executable(palmier_ui_inspector_viewmodel_tests
     ui/inspector_viewmodel_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/ui/InspectorViewModel.cpp")
+    "${PROJECT_SOURCE_DIR}/src/ui/InspectorViewModel.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/GuiToolGateway.cpp")
 target_include_directories(palmier_ui_inspector_viewmodel_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(palmier_ui_inspector_viewmodel_tests PRIVATE
     Palmier::core
+    Palmier::services
     Palmier::test_support)
 
 palmier_register_test(palmier_ui_inspector_viewmodel_tests)
@@ -1290,11 +1297,13 @@ palmier_register_test(palmier_ui_inspector_viewmodel_tests)
 # ---------------------------------------------------------------------------
 add_executable(palmier_ui_timeline_viewmodel_tests
     ui/timeline_viewmodel_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/ui/TimelineViewModel.cpp")
+    "${PROJECT_SOURCE_DIR}/src/ui/TimelineViewModel.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/GuiToolGateway.cpp")
 target_include_directories(palmier_ui_timeline_viewmodel_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(palmier_ui_timeline_viewmodel_tests PRIVATE
     Palmier::core
+    Palmier::services
     Palmier::test_support)
 
 palmier_register_test(palmier_ui_timeline_viewmodel_tests)
@@ -2224,6 +2233,53 @@ target_link_libraries(palmier_ui_preview_playback_tests PRIVATE
     Palmier::test_support)
 
 palmier_register_test(palmier_ui_preview_playback_tests)
+
+
+# ---------------------------------------------------------------------------
+# Shell tests (tasks 11.8, 11.11; Requirements 1.2, 1.3, 1.4, 1.6, 1.9, 4.5, 7.3,
+# 14.6) — the docked-shell layout property test and the shell unit /
+# responsiveness tests. Both need a REAL, compiled MainWindow (palmier_ui_shell)
+# and a display, so they are built only when Qt 6 Widgets is present and are run
+# under `xvfb-run -a` in CI (see .github/workflows/ci.yml); a build with no Qt
+# still registers a single explicit-skip test for each file (see the #else
+# branch in each .cpp), so their absence is a recorded reason rather than a
+# silently missing test target.
+# ---------------------------------------------------------------------------
+if(TARGET Qt6::Widgets)
+    add_executable(palmier_ui_shell_tests
+        ui/shell_layout_property_test.cpp
+        ui/shell_unit_test.cpp)
+    target_include_directories(palmier_ui_shell_tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/src")
+    set_target_properties(palmier_ui_shell_tests PROPERTIES AUTOMOC ON)
+    target_compile_definitions(palmier_ui_shell_tests PRIVATE PALMIER_HAVE_QT=1)
+    target_link_libraries(palmier_ui_shell_tests PRIVATE
+        Palmier::core
+        Palmier::services
+        Palmier::ui_shell
+        Palmier::ui_gateway
+        Palmier::ui_project_file_actions
+        Palmier::app_composition
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Widgets
+        Palmier::test_support)
+
+    palmier_register_test(palmier_ui_shell_tests)
+else()
+    # No Qt: register the two skip-only translation units directly against
+    # GoogleTest so `palmier_ui_shell_tests` still exists as a recorded skip
+    # rather than silently vanishing from the suite.
+    add_executable(palmier_ui_shell_tests
+        ui/shell_layout_property_test.cpp
+        ui/shell_unit_test.cpp)
+    target_include_directories(palmier_ui_shell_tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/src")
+    target_link_libraries(palmier_ui_shell_tests PRIVATE
+        Palmier::test_support)
+
+    palmier_register_test(palmier_ui_shell_tests)
+endif()
 
 
 

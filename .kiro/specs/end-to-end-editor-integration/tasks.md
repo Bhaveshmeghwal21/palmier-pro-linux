@@ -697,7 +697,7 @@ generated cases.
 ### Stage 11 — GUI assembly (last, because it consumes every service above)
 
 - [ ] 11. Mount the editor shell on the composed graph
-  - [~] 11.1 Implement `ui::GuiToolGateway`
+  - [x] 11.1 Implement `ui::GuiToolGateway`
     - `src/ui/GuiToolGateway.{hpp,cpp}`: one method per gesture (`moveClip`, `trimClip`,
       `splitClip`, `reorderClips`, `addClip`, `deleteClip`, `addEffect`, `addTransition`,
       `addTrack`, `removeTrack`, `importMedia`, `createProject`, `openProject`, `saveProject`,
@@ -706,7 +706,7 @@ generated cases.
       `ui::GestureResult`
     - _Requirements: 1.7_
 
-  - [~] 11.2 Build the docked shell, the menu bar and the status bar
+  - [x] 11.2 Build the docked shell, the menu bar and the status bar
     - `src/ui/MainWindow.{hpp,cpp}` takes `app::ApplicationComposition&` and builds five
       `QDockWidget`s — timeline (bottom), preview (central), inspector (right), media browser
       (left), agent chat (right, tabbed with the inspector) — each bound to the composition's single
@@ -722,21 +722,21 @@ generated cases.
       per-frame layout recomputation
     - _Requirements: 1.2, 1.3, 1.4, 1.6, 1.8, 1.11, 5.6, 6.7_
 
-  - [~] 11.3 Add the timeline panel and the timer-driven preview view
+  - [x] 11.3 Add the timeline panel and the timer-driven preview view
     - `src/ui/TimelinePanel.{hpp,cpp}`: a `QTreeView` over the existing `TimelineModel` plus a
       transport bar and the playhead indicator
     - `src/ui/PreviewView.{hpp,cpp}`: drive `PreviewController::pump` from a `QTimer` and paint the
       presented frame
     - _Requirements: 1.2, 5.3_
 
-  - [~] 11.4 Re-point view-model gesture methods at the gateway
+  - [x] 11.4 Re-point view-model gesture methods at the gateway
     - In `TimelineViewModel`, `InspectorViewModel`, `MediaBrowserViewModel` and
       `AgentChatViewModel`, keep the read-side projections but route every mutating gesture through
       `GuiToolGateway` instead of `TimelineEngine::apply`, so the GUI stops mutating project state
       directly
     - _Requirements: 1.7_
 
-  - [~] 11.5 Implement `ui::ProjectFileActions` and the file dialogs
+  - [x] 11.5 Implement `ui::ProjectFileActions` and the file dialogs
     - `src/ui/ProjectFileActions.{hpp,cpp}`: File > Save to the recorded document path with a
       confirmation naming the written path; File > Save As / first save via a destination prompt
       defaulting to `.palmier`; File > Open refreshing all four panels through the existing
@@ -747,7 +747,7 @@ generated cases.
       continues without writing, cancel abandons the pending operation
     - _Requirements: 4.1, 4.2, 4.3, 4.5, 4.9, 4.10_
 
-  - [~] 11.6 Implement `ui::ExportDialog` and the export progress surface
+  - [x] 11.6 Implement `ui::ExportDialog` and the export progress surface
     - `src/ui/ExportDialog.{hpp,cpp}`: output path, container, codec, resolution, frame rate, bit
       rate, audio inclusion, hardware preference and overwrite acknowledgement, submitted through
       `GuiToolGateway::exportTimeline`
@@ -755,7 +755,7 @@ generated cases.
       callback, keeping the window responsive throughout
     - _Requirements: 7.1, 7.3, 7.7_
 
-  - [~] 11.7 Guard startup construction and finish the accessor set
+  - [x] 11.7 Guard startup construction and finish the accessor set
     - Wrap composition so a failure to construct any component named in Requirement 1.1 yields
       `ComponentConstructionError{componentName, reason}`; `src/app/main.cpp` reports it and exits
       without showing the shell
@@ -764,25 +764,25 @@ generated cases.
       project current
     - _Requirements: 1.1, 1.9, 1.10_
 
-  - [ ]* 11.8 Write the shell layout property test
+  - [x]* 11.8 Write the shell layout property test
     - **Property 1: Panel reachability under any window size** — **Validates: Requirements 1.4**
     - File: `tests/ui/shell_layout_property_test.cpp`; new target `palmier_ui_shell_tests` run under
       `xvfb`
     - _Requirements: 1.4_
 
-  - [ ]* 11.9 Extend the edit-equivalence property test
+  - [x]* 11.9 Extend the edit-equivalence property test
     - **Property 2: GUI, MCP and agent produce identical project state** —
       **Validates: Requirements 1.7, 9.4, 11.5**
     - File: `tests/services/edit_equivalence_property_test.cpp` (extends the existing test) — this
       is what proves the gesture re-pointing in 11.4 changed no behaviour
     - _Requirements: 1.7, 9.4, 11.5_
 
-  - [ ]* 11.10 Extend the undo round-trip property test
+  - [x]* 11.10 Extend the undo round-trip property test
     - **Property 3: Undo restores the immediately prior state** — **Validates: Requirements 1.8**
     - File: `tests/core/timeline_undo_redo_roundtrip_property_test.cpp` (extends the existing test)
     - _Requirements: 1.8_
 
-  - [ ]* 11.11 Write the shell unit and responsiveness tests
+  - [x]* 11.11 Write the shell unit and responsiveness tests
     - Qt widget tests under `xvfb`: five panels present and visible, five menus in the required
       order each with an activatable action, each notice persistent until dismissal or exit, and
       Undo disabled on an empty history

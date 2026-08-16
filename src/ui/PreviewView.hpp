@@ -23,6 +23,7 @@
 #ifdef PALMIER_HAVE_QT
 
 #include <memory>
+#include <optional>
 
 #include <QImage>
 #include <QWidget>
@@ -44,6 +45,16 @@ class PreviewView : public QWidget {
 public:
     PreviewView(gpu::Compositor& compositor, const gpu::GpuContext& context,
                 PreviewProjectSource projectSource, QWidget* parent = nullptr);
+
+    /// Bind to an EXISTING PreviewController instead of constructing an owned
+    /// one (task 11.3; Requirement 1.1). Used by the application shell, which
+    /// must present the SAME PreviewController instance ApplicationComposition
+    /// constructs as the process's single Playback_Engine — sharing it with
+    /// TimelinePanel's transport bar and with any headless driver of the same
+    /// composition — rather than a second, independent controller. `controller`
+    /// must outlive the view.
+    explicit PreviewView(PreviewController& controller, QWidget* parent = nullptr);
+
     ~PreviewView() override;
 
     /// Access the underlying playback engine (transport, path selection, state).
@@ -61,8 +72,12 @@ protected:
 private:
     void onTimer();
     void uploadFrame(const gpu::RenderedFrame& frame, RenderPath path);
+    void wireSinkAndTimer();
 
-    PreviewController controller_;
+    /// Owns a controller when constructed over (compositor, context, source);
+    /// empty when bound to an externally-owned one via the second constructor.
+    std::optional<PreviewController> ownedController_;
+    PreviewController&                controller_;
     QTimer*           timer_{nullptr};
     QImage            frameImage_{};
 };

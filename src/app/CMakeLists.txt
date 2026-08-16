@@ -126,6 +126,18 @@ if(PALMIER_WERROR)
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic -Werror>)
 endif()
 
+# Complete the other half of the MainWindow <-> ApplicationComposition link
+# (task 11.2): src/ui/CMakeLists.txt defines palmier_ui_shell (MainWindow,
+# TimelinePanel, ExportDialog) WITHOUT linking Palmier::app_composition, because
+# src/ui is added before src/app in the top-level CMakeLists.txt and
+# app_composition does not exist yet at that point. Extending an existing
+# target's link interface from a later CMakeLists.txt (after the referenced
+# target has been created) is ordinary, supported CMake, and keeps the existing
+# subdirectory order unchanged.
+if(TARGET palmier_ui_shell)
+    target_link_libraries(palmier_ui_shell PUBLIC Palmier::app_composition)
+endif()
+
 # Link the composition root into the editor executable. Appended (guarded by a
 # TARGET check) so the existing palmier-pro target definition above is not
 # modified or reordered; main.cpp constructs the composition after the

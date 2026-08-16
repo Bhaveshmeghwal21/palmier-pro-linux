@@ -10,9 +10,12 @@
 
 #include "ui/TimelineViewModel.hpp"
 
+#include <algorithm>
 #include <memory>
 
 #include "core/Error.hpp"
+#include "services/Json.hpp"
+#include "ui/GuiToolGateway.hpp"
 
 namespace palmier::ui {
 
@@ -28,8 +31,8 @@ std::string_view toStringView(GestureIndication indication) noexcept {
     return "None";
 }
 
-TimelineViewModel::TimelineViewModel(TimelineEngine& engine)
-    : engine_(engine), cached_(engine.snapshot()) {
+TimelineViewModel::TimelineViewModel(TimelineEngine& engine, GuiToolGateway* gateway)
+    : engine_(engine), gateway_(gateway), cached_(engine.snapshot()) {
     // Stay in sync with every state-changing engine operation, whoever issued it
     // (UI gesture, MCP tool call, or agent), so readers never observe stale rows.
     subscription_ = engine_.observe([this](const ChangeSet& change) { onChange(change); });
@@ -94,22 +97,37 @@ Duration TimelineViewModel::timelineDuration() const { return palmier::timelineD
 // --- Gestures --------------------------------------------------------------
 
 GestureResult TimelineViewModel::moveClip(ClipId id, Duration newStart) {
+    if (gateway_ != nullptr) {
+        return classifyToolResult(gateway_->moveClip(id, newStart), GestureIndication::InvalidDrop);
+    }
     return run(std::make_unique<MoveClipCommand>(id, newStart), GestureIndication::InvalidDrop);
 }
 
 GestureResult TimelineViewModel::trimClip(ClipId id, TrimClipCommand::Edge edge,
                                           Duration newBoundary, FrameRate fps,
                                           Duration sourceDuration) {
+    if (gateway_ != nullptr) {
+        return classifyToolResult(gateway_->trimClip(id, edge, newBoundary, sourceDuration),
+                                  GestureIndication::Rejected);
+    }
     return run(std::make_unique<TrimClipCommand>(id, edge, newBoundary, fps, sourceDuration),
                GestureIndication::Rejected);
 }
 
 GestureResult TimelineViewModel::splitClip(ClipId id, Duration playhead) {
+    if (gateway_ != nullptr) {
+        return classifyToolResult(gateway_->splitClip(id, playhead),
+                                  GestureIndication::NothingToSplit);
+    }
     return run(std::make_unique<SplitClipCommand>(id, playhead),
                GestureIndication::NothingToSplit);
 }
 
 GestureResult TimelineViewModel::reorderClips(Uuid trackId, std::vector<ClipId> newOrder) {
+    if (gateway_ != nullptr) {
+        return classifyToolResult(gateway_->reorderClips(trackId, std::move(newOrder)),
+                                  GestureIndication::Rejected);
+    }
     return run(std::make_unique<ReorderClipsCommand>(trackId, std::move(newOrder)),
                GestureIndication::Rejected);
 }
@@ -118,11 +136,21 @@ GestureResult TimelineViewModel::addClip(Uuid trackId, Clip clip) {
     // An add that overlaps an existing clip is rejected by the engine invariant
     // check; surface that as an invalid drop so the placement gesture matches
     // the move gesture's indication (Requirement 2.3).
+    if (gateway_ != nullptr) {
+        return classifyToolResult(
+            gateway_->addClip(trackId, clip.assetRef.assetId, clip.assetRef.sourcePath,
+                              clip.id, clip.timelineStart, clip.sourceIn, clip.sourceOut,
+                              clip.opacity, clip.gain),
+            GestureIndication::InvalidDrop);
+    }
     return run(std::make_unique<AddClipCommand>(trackId, std::move(clip)),
                GestureIndication::InvalidDrop);
 }
 
 GestureResult TimelineViewModel::removeClip(ClipId id) {
+    if (gateway_ != nullptr) {
+        return classifyToolResult(gateway_->deleteClip(id), GestureIndication::Rejected);
+    }
     return run(std::make_unique<DeleteClipCommand>(id), GestureIndication::Rejected);
 }
 
@@ -170,6 +198,50 @@ GestureResult TimelineViewModel::classify(const CommandResult& result,
             out.message = result.error().message();
             break;
     }
+
+    lastIndication_ = out.indication;
+    lastMessage_ = out.message;
+    return out;
+}
+
+GestureResult TimelineViewModel::classifyToolResult(const Result<services::Json>& result,
+                                                    GestureIndication onFailure) {
+    GestureResult out;
+
+    if (result.isOk()) {
+        // The gateway's tool call applies its EditCommand to the SAME engine this
+        // adapter observes, so the subscription above has already refreshed
+        // cached_ and lastChange_ synchronously by the time control returns here
+        // (Requirements 1.7, 9.4, 11.5 — GUI/MCP/agent equivalence).
+        out.outcome = CommandOutcome::Applied;
+        out.indication = GestureIndication::Applied;
+        if (lastChange_.has_value()) {
+            out.addedClips = lastChange_->addedClips;
+        }
+        // A split's right half is also named in the tool's own JSON result;
+        // fold it in too in case the ChangeSet path did not carry it (defensive
+        // — the ChangeSet is expected to be the authoritative source).
+        if (const services::Json& payload = result.value(); payload.isObject()) {
+            if (const services::Json* rightId = payload.find("rightClipId");
+                rightId != nullptr && rightId->isString()) {
+                if (std::optional<Uuid> parsed = Uuid::parse(rightId->asString())) {
+                    if (std::find(out.addedClips.begin(), out.addedClips.end(), *parsed) ==
+                        out.addedClips.end()) {
+                        out.addedClips.push_back(*parsed);
+                    }
+                }
+            }
+        }
+        lastIndication_ = out.indication;
+        lastMessage_ = out.message;
+        return out;
+    }
+
+    const Error& error = result.error();
+    out.outcome = CommandOutcome::Failed;
+    out.indication =
+        (error.code() == ErrorCode::NotFound) ? GestureIndication::Rejected : onFailure;
+    out.message = error.message();
 
     lastIndication_ = out.indication;
     lastMessage_ = out.message;

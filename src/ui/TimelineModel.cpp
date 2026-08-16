@@ -36,8 +36,8 @@ std::optional<Uuid> parseId(const QString& text) {
 
 }  // namespace
 
-TimelineModel::TimelineModel(TimelineEngine& engine, QObject* parent)
-    : QAbstractItemModel(parent), vm_(engine) {
+TimelineModel::TimelineModel(TimelineEngine& engine, QObject* parent, GuiToolGateway* gateway)
+    : QAbstractItemModel(parent), vm_(engine, gateway) {
     // Reflect every engine change back into the view. beginResetModel/endResetModel
     // brackets keep attached views consistent across the snapshot swap.
     vm_.setChangeListener([this](const ChangeSet&) {

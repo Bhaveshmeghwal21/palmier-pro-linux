@@ -28,9 +28,11 @@
 // the launch gate is exercisable even where Qt is not installed.
 
 #include <iostream>
+#include <memory>
 
 #include "app/AppSettings.hpp"
 #include "app/ApplicationComposition.hpp"
+#include "app/ComponentConstructionError.hpp"
 #include "app/PlatformCompatibility.hpp"
 #include "core/Result.hpp"
 
@@ -138,7 +140,33 @@ int main(int argc, char** argv) {
     // generative client, the MCP server + executor, the agent orchestrator, and
     // localization together; constructing it performs no network activity, so the
     // editor still starts without a network connection (13.3/13.4).
-    ApplicationComposition composition{settings.config()};
+    //
+    // Startup construction guard (task 11.7; Requirements 1.1, 1.9): every
+    // component the composition owns is designed to degrade gracefully rather
+    // than throw (a missing GPU falls back to software, an unconfigured backend
+    // falls back offline, ...), so this is not expected to fire on a supported
+    // host. It exists for the residual case an exception nonetheless escapes
+    // construction, in which case the failure is reported and the editor shell
+    // is never constructed or shown.
+    std::unique_ptr<ApplicationComposition> compositionPtr;
+    try {
+        compositionPtr = std::make_unique<ApplicationComposition>(settings.config());
+    } catch (const palmier::app::ComponentConstructionError& ex) {
+        std::cerr << "palmier-pro: " << ex.what() << '\n';
+        QMessageBox::critical(
+            nullptr, QStringLiteral("Startup failed"),
+            QStringLiteral("Palmier Pro could not start: failed to construct '%1':\n%2")
+                .arg(QString::fromStdString(ex.componentName()),
+                    QString::fromStdString(ex.reason())));
+        return 1;
+    } catch (const std::exception& ex) {
+        std::cerr << "palmier-pro: startup failed: " << ex.what() << '\n';
+        QMessageBox::critical(nullptr, QStringLiteral("Startup failed"),
+                              QStringLiteral("Palmier Pro could not start:\n%1")
+                                  .arg(QString::fromStdString(ex.what())));
+        return 1;
+    }
+    ApplicationComposition& composition = *compositionPtr;
 
     // Start the MCP endpoint (127.0.0.1:19789/mcp unless configuration moved it).
     // On a port-in-use conflict the server refuses to start and leaves the project
@@ -157,7 +185,7 @@ int main(int argc, char** argv) {
     // that start() has evaluated the remote-access prerequisites too.
     reportStartupErrors(composition);
 
-    palmier::ui::MainWindow window;
+    palmier::ui::MainWindow window(composition);
     window.show();
     const int exitCode = app.exec();
 
@@ -177,7 +205,17 @@ int main(int argc, char** argv) {
     // path is runnable where Qt is not installed (Requirements 1.6, 7.2, 7.9). The
     // resolved configuration reaches the composition on this path too, so the
     // console shell honours the same options as the editor.
-    ApplicationComposition composition{settings.config()};
+    std::unique_ptr<ApplicationComposition> compositionPtr;
+    try {
+        compositionPtr = std::make_unique<ApplicationComposition>(settings.config());
+    } catch (const palmier::app::ComponentConstructionError& ex) {
+        std::cerr << "palmier-pro: " << ex.what() << '\n';
+        return 1;
+    } catch (const std::exception& ex) {
+        std::cerr << "palmier-pro: startup failed: " << ex.what() << '\n';
+        return 1;
+    }
+    ApplicationComposition& composition = *compositionPtr;
     if (const palmier::Result<void> started = composition.start(); !started) {
         std::cerr << "MCP server did not start: " << started.error().toString() << '\n';
     } else {
