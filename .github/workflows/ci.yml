@@ -88,6 +88,16 @@ jobs:
 
       - name: Install native build dependencies
         run: |
+          # Work around a known GitHub-hosted-runner defect where a stale/corrupt
+          # cached apt package index (particularly the base "noble" archive, which
+          # carries the universe component nv-codec-headers ships in) causes
+          # `apt-get update` to report success while leaving some packages
+          # unresolvable ("Unable to locate package"). Clearing the cached lists
+          # before updating is the documented workaround (see e.g.
+          # https://github.com/actions/runner-images/discussions/10406) and is
+          # purely additive: it does not change which packages are installed or
+          # their versions, only forces a clean re-fetch of the index.
+          sudo rm -rf /var/lib/apt/lists/*
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
