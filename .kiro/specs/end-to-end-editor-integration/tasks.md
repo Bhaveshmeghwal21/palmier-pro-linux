@@ -2510,7 +2510,9 @@ task 11.2 or 11.3 stands as written. The `main.cpp` wiring incidentally closes t
 product gaps recorded from task 10.6 above: the shipped executable no longer ignores the
 configuration file, the environment and the command line. The second gap — Requirement 12.9's
 unknown-`trackId` case reaching the network and leaving a media-library entry behind, documented as
-an explicit exclusion in Property 66 — **is still open**.
+an explicit exclusion in Property 66 — was still open at this point in the document's history.
+**RESOLVED**: see the "Both known post-stage-11 defects fixed and verified" note after Stage 11's
+entry below, which closes it via `ITimelinePlacement::trackExists()` (commit `52b153d`).
 
 **Task 12.13 is done and stage 12 is closed: `1217` registered tests, `100% tests passed, 0 tests
 failed out of 1217` in `build-nogui`, about 15 seconds of wall clock, with the four expected skips
@@ -2633,3 +2635,57 @@ produces, even though the video stream itself decodes the correct frame count) �
 scope (GUI assembly). Left as a known, documented, separate defect rather than fixed here; the CI
 run for this branch will continue to show red on this one test until it is investigated and fixed
 in a follow-up covering Stage 9 (export) / Stage 12 (the end-to-end test) rather than Stage 11.
+
+### ✅ Both known post-stage-11 defects fixed and verified — CI is now fully green
+
+The two issues the note above left open — `EditorEndToEndTest.ChainThroughTheHostEncoder`'s
+probed-duration bug and Requirement 12.9's unknown-`trackId` gap — were investigated and fixed in a
+follow-up round, each with its own commit, verified through the same GitHub Actions CI used
+throughout this stage.
+
+**`ChainThroughTheHostEncoder`'s root cause (commit `720edd3`):**
+`FfmpegEncodeBackend::encode()` (`src/media/MediaEncoder.cpp`) computed the video `AVFrame`'s `pts`
+by rescaling the frame's presentation time against `stream_->time_base`. But `avcodec_send_frame()`
+interprets `AVFrame::pts` against `codec_->time_base`, not the stream's — and
+`avformat_write_header()` (called once, before any frame is encoded) rewrites `AVStream::time_base`
+for many muxers, MOV/MP4 included, to whatever timescale the container format prefers, which need not
+equal `codec_->time_base`. So by the time `encode()` ran per frame, `stream_->time_base` could
+already differ from the value the pts calculation assumed. This fed x264 timestamps scaled for the
+wrong clock: the frame COUNT stayed exactly right (60/60, matching the plan — which is why every
+earlier assertion in the test, including the decoded-frame-count check, passed), but every frame's
+presentation time was wrong, and the muxed/probed container duration inflated to ~1006.9 s for a 2 s
+timeline. The CI log's own x264 stats confirmed this precisely: 60 total frames encoded (`I:1 P:16
+B:43`), but `kb/s:1.18` against a requested 2000 kb/s target proves x264 itself received grossly
+wrong per-frame timing, not merely a probe misreading. Fixed by rescaling against `codec_->time_base`
+instead — the same pattern the audio path already used correctly (which only ever rescales the
+*output packet* from `ctx->time_base` to `stream->time_base` via `av_packet_rescale_ts`, and never
+scales the *input frame's* pts against the stream's time base).
+
+**Requirement 12.9's unknown-`trackId` gap (commit `52b153d`):**
+`GenerativeMediaCoordinator::generateAndPlace` ran the generation (a network call) and imported the
+resulting asset into the media library before `TimelineEnginePlacer::place` ever checked whether the
+requested track existed — so a syntactically valid but unknown `trackId` reached the network and left
+an orphaned library entry that the tool executor's rollback does not remove (rollback undoes engine
+commands only; the import is not one). Fixed by adding `ITimelinePlacement::trackExists(const Uuid&)`
+— implemented by `TimelineEnginePlacer` via a cheap `engine_.snapshot()` scan — and calling it from
+`generateAndPlace` immediately after the source-range check and before the entitlement gate, the
+runner, or the library are ever touched, so an unknown track is now refused with `NotFound` before
+anything downstream runs. Both `ITimelinePlacement` test mocks were updated with a `trackExists()`
+override; a new unit test (`GenerativeMediaCoordinatorTest
+.UnknownTrackRejectedBeforeGeneratingOrTouchingLibrary`) asserts zero gate/runner/placement calls and
+an unchanged library for this case; and `tests/services/generative_lifecycle_property_test.cpp`'s
+Property 66 (`GenerativeLifecycleProperties.InvalidGenerationRequestsNeverReachTheNetwork`) — which
+had documented this exact case as an explicit, honest exclusion since task 10.6 — now generates and
+asserts it like every other pre-submission rejection, and the file's header prose was updated from
+"does NOT cover" to describing the case as covered.
+
+**Verification: CI run `32056009190` (commit `52b153d`) is fully green.** Both jobs passed
+(`Configure without vendor SDKs`: 1m2s; `Build & Test (ubuntu-24.04)`: 9m14s), and the downloaded
+`ctest-summary.md` confirms **1239 passed, 0 failed, 1 skipped, 1240 total.** The sole skip,
+`ExportHardwareSoftwareComparisonTest.HardwareAndSoftwareExportsOfTheFixtureAgreeOnFrameCountAndDuration`,
+records its own reason (`no hardware-encode-capable device reported for H.264 on "Software (CPU)"`)
+and is the same pre-existing, expected, documented skip this branch has always had on a runner with
+no real GPU — unrelated to either fix. `EditorEndToEndTest.ChainThroughTheHostEncoder` now passes
+in 0.39 s. No other test regressed. This is the first fully green CI run in this document's history
+for the `feat/end-to-end-editor-integration` branch: Stage 11 is complete, and both of the defects
+that were surfaced only once a real toolchain could compile and run this tree are now closed.
