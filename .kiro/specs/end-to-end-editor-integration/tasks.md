@@ -2609,14 +2609,27 @@ compiler:**
    keeps the NVENC path (Requirement 8.1) actually compiling in CI rather than silently dropping
    vendor-SDK coverage.
 
-**Final CI result: `Build & Test (ubuntu-24.04)` passes compile and link completely (all five defects
-above fixed); `ctest` reports `99% tests passed, 1 test failed out of 1239`.** The one remaining
-failure, `EditorEndToEndTest.ChainThroughTheHostEncoder`, is confirmed via `git log` to be
-**pre-existing and unrelated to stage 11** — last touched by task-12.10/an unrelated core-fix commit,
-weeks before this session, and it references nothing stage 11 added. It fails with a probed-duration
-mismatch (~1006.9 s decoded from a 2 s timeline) that only manifests on a host with a real software
-H.264 encoder present — every prior sandbox recorded in this document lacked one and always recorded
-this test as a `GTEST_SKIP()`, so its assertions were previously "written but never executed" (see
-the 12.10 progress note above). This CI run is the first time a real encoder has been present for
-this test, and it surfaced a genuine, previously-unverified defect in the encoder/duration-probing
-path — outside stage 11's scope (GUI assembly), and left for separate investigation.
+**Final CI status: the GitHub Actions run is RED overall** (`gh run list` reports `completed
+failure` for run `32011651687` / commit `de99261`), **not green.** To be precise about what that
+red status does and does not mean: the `Build & Test (ubuntu-24.04)` job's `Build` step — which
+compiles and links every Stage 11 source, all of `src/`, and the full test suite — succeeds
+completely, and `ctest` reports `99% tests passed, 1 test failed out of 1239`. But `ctest`'s
+non-zero exit on that one failure is what fails the `Test` step, which fails the job, which fails
+the run. "Stage 11 compiles, links and its own tests pass" is a true and verified statement; "CI is
+green" is not, and the run should not be read as a passing check.
+
+The one failing test, `EditorEndToEndTest.ChainThroughTheHostEncoder`, is confirmed via `git log` to
+be **pre-existing and unrelated to stage 11** — last touched by task-12.10/an unrelated core-fix
+commit, weeks before this session, and it references nothing stage 11 added. It fails with a
+probed-duration mismatch (~1006.9 s decoded from a 2 s timeline) that only manifests on a host with
+a real software H.264 encoder present — every prior sandbox recorded in this document lacked one
+and always recorded this test as a `GTEST_SKIP()`, so its assertions were previously "written but
+never executed" (see the 12.10 progress note above). This CI run is the first time a real encoder
+has been present for this test, and it surfaced a genuine, previously-unverified defect in the
+encoder/duration-probing path (traced as far as: `media::probeMediaFile` trusts FFmpeg's
+`AVFormatContext::duration` verbatim via `Duration::fromMicroseconds(ctx->duration)` in
+`src/media/MediaProbe.cpp`, and that container-level value is wrong for the `.mov` file this export
+produces, even though the video stream itself decodes the correct frame count) — outside stage 11's
+scope (GUI assembly). Left as a known, documented, separate defect rather than fixed here; the CI
+run for this branch will continue to show red on this one test until it is investigated and fixed
+in a follow-up covering Stage 9 (export) / Stage 12 (the end-to-end test) rather than Stage 11.
