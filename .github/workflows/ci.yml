@@ -129,13 +129,29 @@ jobs:
             spirv-tools \
             libshaderc-dev \
             libva-dev \
-            nv-codec-headers \
             libvpl-dev \
             liblcms2-dev \
             libsecret-1-dev \
             libssl-dev \
             libpipewire-0.3-dev \
             libasound2-dev
+
+      # The nv-codec-headers apt package is intermittently unresolvable on the
+      # GitHub-hosted ubuntu-24.04 runner image ("Unable to locate package"),
+      # even right after a clean `apt-get update` -- i.e. it is missing from
+      # whatever archive snapshot the runner currently resolves against, not a
+      # stale-cache problem. The package itself only installs a handful of
+      # headers plus an ffnvcodec.pc file (no library to compile), so building
+      # it from its upstream source -- the same repository the apt package is
+      # generated from -- is a reliable, low-risk substitute that keeps the
+      # NVENC path (Requirement 8.1) actually compiling and type-checked in CI.
+      - name: Install ffnvcodec (nv-codec-headers) from upstream source
+        run: |
+          git clone --depth 1 --branch n13.0.19.0 \
+            https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers
+          sudo make -C /tmp/nv-codec-headers install
+          rm -rf /tmp/nv-codec-headers
+          pkg-config --modversion ffnvcodec
 
       - name: Verify toolchain versions
         run: |
