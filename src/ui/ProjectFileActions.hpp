@@ -116,6 +116,12 @@ private:
     // returns false, with the save's own error preserved in `outSaveError`.
     bool resolvePendingIfModified(bool* outDismissed, std::string* outSaveError);
 
+    // The actual open+load against `path`, with NO unsaved-changes check of
+    // its own — every caller (open(), openPath()) resolves the pending prompt
+    // first and calls this only once that has succeeded, so the prompt is
+    // never run twice for one gesture.
+    FileActionResult loadFromPath(const std::string& path);
+
     services::ProjectSession& session_;
     GuiToolGateway&            gateway_;
     UiPrompts                  prompts_;

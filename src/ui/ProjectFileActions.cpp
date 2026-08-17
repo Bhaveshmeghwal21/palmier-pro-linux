@@ -109,6 +109,21 @@ FileActionResult ProjectFileActions::saveAs() {
 }
 
 FileActionResult ProjectFileActions::open() {
+    // Requirement 4.x's PendingIntent contract: unsaved changes must be
+    // resolved (Discard/Cancel/Save) BEFORE the user is even asked which file
+    // to open, so a Cancel never reaches the open-source prompt at all and a
+    // Save actually writes before the picker appears.
+    bool dismissed = false;
+    std::string saveError;
+    if (!resolvePendingIfModified(&dismissed, &saveError)) {
+        FileActionResult out;
+        out.ok = false;
+        out.dismissed = dismissed;
+        out.message = dismissed ? "Open cancelled" : saveError;
+        if (prompts_.notify) prompts_.notify(FileActionKind::Open, out);
+        return out;
+    }
+
     if (!prompts_.promptOpenSource) {
         FileActionResult out;
         out.ok = false;
@@ -123,7 +138,7 @@ FileActionResult ProjectFileActions::open() {
         out.message = "Open cancelled";
         return out;  // Requirement 4.10: a dismissed prompt reports no error.
     }
-    return openPath(*path);
+    return loadFromPath(*path);
 }
 
 FileActionResult ProjectFileActions::openPath(const std::string& path) {
@@ -137,7 +152,10 @@ FileActionResult ProjectFileActions::openPath(const std::string& path) {
         if (prompts_.notify) prompts_.notify(FileActionKind::Open, out);
         return out;
     }
+    return loadFromPath(path);
+}
 
+FileActionResult ProjectFileActions::loadFromPath(const std::string& path) {
     Result<services::Json> result = gateway_.openProject(path);
     FileActionResult out;
     if (result.isOk()) {
