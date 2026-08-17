@@ -45,6 +45,8 @@
 
 namespace palmier::ui {
 
+using services::Json;
+
 /// Routes every GUI mutating gesture through the shared tool surface
 /// (`services::McpToolExecutor`), tagging each call `InvocationSource::Gui`
 /// (Requirement 1.7). One method per gesture; each returns the tool's raw

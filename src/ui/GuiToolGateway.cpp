@@ -18,8 +18,6 @@ namespace palmier::ui {
 
 namespace {
 
-using services::Json;
-
 /// Effect type -> the string services::ToolRegistry's `add_effect` tool
 /// declares (its effectTypeValues() enum). Kept local and duplicated
 /// deliberately: this is a serialization detail of the gateway's own request
