@@ -29,6 +29,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QStatusBar>
 
 #include <gtest/gtest.h>
 
@@ -71,7 +72,7 @@ TEST_F(ShellUnitTest, AllFivePanelsArePresentAndVisibleWithNoFurtherAction) {
     MainWindow window(composition);
     window.show();
 
-    const std::vector<QDockWidget*> docks = window.findChildren<QDockWidget*>();
+    const QList<QDockWidget*> docks = window.findChildren<QDockWidget*>();
     ASSERT_EQ(docks.size(), 4u);
     for (QDockWidget* dock : docks) {
         EXPECT_FALSE(dock->isHidden()) << dock->objectName().toStdString();

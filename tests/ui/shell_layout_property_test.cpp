@@ -92,7 +92,7 @@ RC_GTEST_PROP(ShellLayoutProperties, EveryPanelReachableAtAnyValidWindowSize, ()
     // requested size (Qt clamps the window itself to setMinimumSize(1024, 640),
     // so a request below the floor still yields a compliant window — the
     // property's generator floor matches that contract rather than fighting it).
-    const std::vector<QDockWidget*> docks = window.findChildren<QDockWidget*>();
+    const QList<QDockWidget*> docks = window.findChildren<QDockWidget*>();
     RC_ASSERT(docks.size() >= expectedDockNames().size());
 
     for (const QString& name : expectedDockNames()) {
