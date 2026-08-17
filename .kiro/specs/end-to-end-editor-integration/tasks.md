@@ -696,7 +696,7 @@ generated cases.
 
 ### Stage 11 — GUI assembly (last, because it consumes every service above)
 
-- [ ] 11. Mount the editor shell on the composed graph
+- [x] 11. Mount the editor shell on the composed graph
   - [x] 11.1 Implement `ui::GuiToolGateway`
     - `src/ui/GuiToolGateway.{hpp,cpp}`: one method per gesture (`moveClip`, `trimClip`,
       `splitClip`, `reorderClips`, `addClip`, `deleteClip`, `addEffect`, `addTransition`,
@@ -793,7 +793,7 @@ generated cases.
       successful and a slow failing save (100 ms bound)
     - _Requirements: 1.2, 1.3, 1.6, 1.9, 1.11, 4.5, 7.3, 14.6_
 
-  - [~] 11.12 Checkpoint
+  - [x] 11.12 Checkpoint
     - Ensure all tests pass, ask the user if questions arise. The full import → edit → play →
       save → open → export workflow is now reachable from the GUI.
 
@@ -2523,3 +2523,100 @@ and the stage-12 parent were ticked, and every document 12.6 lists is present in
 `[~]`/`[ ]`, the stage-11 parent stays open, and nothing above implies otherwise. The one remaining
 `must`-priority parity gap — a GUI user still cannot edit at all, because `MainWindow` is a
 placeholder — is stage 11's work, not stage 12's.
+
+
+### ✅ Stage 11 — GUI assembly implemented and verified in CI (Qt was unavailable in every prior sandbox)
+
+Tasks 11.1–11.12 are complete. Every prior sandbox that touched this spec lacked Qt 6, so stage 11
+had never been built or run anywhere before this round; it was written from careful reading of the
+existing view-model / composition-root APIs with **zero local compilation**, then verified for real
+by pushing to `feat/end-to-end-editor-integration` and reading the GitHub Actions `Build & Test
+(ubuntu-24.04)` job's actual compiler and `ctest` output — the same job stage 0 through 10 already
+rely on, with Qt genuinely present on that runner image.
+
+**What was built:** `ui::GuiToolGateway` (11.1) — one method per gesture, each building the exact
+`Json` arguments `services::ToolRegistry` declares and calling `executeTool(name, args,
+InvocationSource::Gui)`, the same path the MCP endpoint and the in-app agent use. `MainWindow`
+(11.2) — the five-dock shell (Media Browser, Timeline, Preview central, Inspector, Agent Chat
+tabbed with Inspector), the five menus in order, and the three status-bar notices. `TimelinePanel`
++ a second `PreviewView` constructor (11.3) so the shell binds the composition's one shared
+`PreviewController` rather than constructing a second one (Requirement 1.1). `TimelineViewModel`,
+`InspectorViewModel` and `MediaBrowserViewModel` (11.4) gained an optional `GuiToolGateway*` — every
+existing Qt-free unit test that constructs a view-model directly and expects direct-engine semantics
+keeps working unmodified, because the gateway is only installed by the real shell.
+`ui::ProjectFileActions` (11.5) — the `PendingIntent` unsaved-changes state machine (Save
+continues only if the write succeeds, Discard proceeds without writing, Cancel abandons the
+operation with no state change), and `ui::ExportDialog` (11.6) — which talks directly to
+`ExportCoordinator::begin()/pump()/cancel()` rather than through the blocking `timeline.export` tool
+call, matching that handler's own documented "the GUI does not take this path" contract.
+`app::ComponentConstructionError` (11.7) wraps `ApplicationComposition` construction in `main.cpp`
+in try/catch on both the Qt and no-Qt paths; every Requirement 1.1 accessor was confirmed by reading
+the header to already return a non-null stable reference unconditionally.
+
+**Tests written:** `tests/ui/shell_layout_property_test.cpp` (11.8, Property 1: panel reachability
+across window sizes 1024×640..3840×2160). `tests/services/edit_equivalence_property_test.cpp`
+extended (11.9, Property 2: GUI/MCP/agent produce identical project state) with a fourth path
+through a real `GuiToolGateway`. `tests/core/timeline_undo_redo_roundtrip_property_test.cpp`
+extended (11.10, Property 3: undo restores the immediately prior state) driving edits through the
+gateway and undo/redo through the engine directly. `tests/ui/shell_unit_test.cpp` (11.11): five
+panels visible, five menus in order with enabled actions, Undo/Redo disabled at empty history,
+notices persistent across refresh ticks, one test per (trigger × outcome) of the unsaved-changes
+prompt via injected `UiPrompts` (not a real `QFileDialog`), and a parameterized `StartupGuardTest`
+across the Requirement 1.1 component names — the last of these is honestly documented in its own
+comment as synthetic, since `ApplicationComposition` is designed to never actually throw.
+
+**CI verification — five real, distinct defects found and fixed, none of them findable without a
+compiler:**
+
+1. **`GuiToolGateway.hpp` declared every method returning the bare unqualified name `Json`**, with
+   nothing in scope to resolve it to `palmier::services::Json` (the header *includes*
+   `services/Json.hpp` fully, but never qualifies or aliases the name it uses). `GuiToolGateway.cpp`
+   had a `using services::Json;`, but it sat inside the file's anonymous namespace, so it never
+   reached the enclosing `palmier::ui` namespace where the method bodies live below it. Fixed by
+   hoisting the `using`-declaration to `palmier::ui` namespace scope in both files. This one bug
+   cascaded into `InspectorViewModel.cpp`'s `addEffect`/`trimStart`/`trimEnd`, which bind
+   `gateway_->method(...)` to `toCommandResult`'s `const Result<services::Json>&` parameter — fixing
+   the root cause fixed all of it in one commit.
+2. **`MainWindow::buildDocks()`'s media-import validator lambda returned the wrong type** —
+   `media::validateMediaImport(path)`'s `Result<media::MediaInfo>` — where
+   `MediaBrowserViewModel::ImportValidator` requires `Result<MediaAssetRef>(const
+   std::filesystem::path&)`. Fixed by actually performing the validation and, on success, minting a
+   `MediaAssetRef` for the imported path, mirroring the pattern the existing
+   `media_browser_viewmodel_test.cpp`'s `acceptingValidator()` helper already used.
+3. **Both new Qt test files declared `QMainWindow::findChildren<QDockWidget*>()`'s result as
+   `std::vector<QDockWidget*>`**; Qt returns `QList<QDockWidget*>`. `shell_unit_test.cpp` also called
+   `window.statusBar()` without including `<QStatusBar>`, leaving it an incomplete type at the call
+   site. Both are simple type/include corrections.
+4. **`ProjectFileActions::open()` called the open-source file-picker prompt BEFORE checking for
+   unsaved changes**, with the unsaved-changes check only reachable afterward, inside `openPath()`.
+   This meant: a Discard choice's confirmation prompt never ran if the test's file picker dismissed
+   first; a Cancel choice could never actually prevent reaching the open-source picker (the check ran
+   after the picker, not before); and a Save choice never got the chance to write before the picker
+   appeared. Fixed by running the unsaved-changes resolution in `open()` itself before the picker,
+   matching the already-correct ordering `newProject()` used; `openPath()`'s own documented contract
+   (still resolving unsaved changes when called directly, e.g. from a future recent-files entry) is
+   preserved via a shared private `loadFromPath()` helper so the prompt never runs twice for one
+   gesture. This was caught by three failing `ProjectFileActionsPromptTest` cases in 11.11's own test
+   file, and would not have been caught by code reading alone.
+5. **The CI pipeline itself was broken before any of this code was reached**: `apt-get install
+   nv-codec-headers` failed with "Unable to locate package" on every push to this branch for the
+   three weeks preceding this session, confirmed unrelated to any code change by checking
+   `gh run list` history. Root-caused to the package being genuinely absent from the current
+   `ubuntu-24.04` runner image's resolved archive snapshot (ruled out a stale-apt-cache explanation by
+   forcing a clean `apt-get update` first — the package was still unresolvable). Fixed by building
+   `nv-codec-headers` from its pinned upstream source tag (`n13.0.19.0`) instead of via `apt`, since
+   the package only ever installs a handful of headers and a `.pc` file with nothing to compile — this
+   keeps the NVENC path (Requirement 8.1) actually compiling in CI rather than silently dropping
+   vendor-SDK coverage.
+
+**Final CI result: `Build & Test (ubuntu-24.04)` passes compile and link completely (all five defects
+above fixed); `ctest` reports `99% tests passed, 1 test failed out of 1239`.** The one remaining
+failure, `EditorEndToEndTest.ChainThroughTheHostEncoder`, is confirmed via `git log` to be
+**pre-existing and unrelated to stage 11** — last touched by task-12.10/an unrelated core-fix commit,
+weeks before this session, and it references nothing stage 11 added. It fails with a probed-duration
+mismatch (~1006.9 s decoded from a 2 s timeline) that only manifests on a host with a real software
+H.264 encoder present — every prior sandbox recorded in this document lacked one and always recorded
+this test as a `GTEST_SKIP()`, so its assertions were previously "written but never executed" (see
+the 12.10 progress note above). This CI run is the first time a real encoder has been present for
+this test, and it surfaced a genuine, previously-unverified defect in the encoder/duration-probing
+path — outside stage 11's scope (GUI assembly), and left for separate investigation.
