@@ -33,8 +33,10 @@
 
 #include "app/ApplicationComposition.hpp"
 #include "core/Duration.hpp"
+#include "core/MediaAssetRef.hpp"
 #include "core/MediaManager.hpp"
 #include "core/Project.hpp"
+#include "core/Uuid.hpp"
 #include "media/ImportValidation.hpp"
 #include "services/AgentOrchestrator.hpp"
 #include "services/KeyMomentMarkers.hpp"
@@ -89,8 +91,12 @@ void MainWindow::buildDocks() {
     // scope), so the panel shows "not analyzed" for every clip until it is —
     // an honest gap rather than a fabricated detector.
     static services::KeyMomentMarkerModel keyMomentMarkers;  // outlives the panel
-    auto validator = [](const std::filesystem::path& path) {
-        return media::validateMediaImport(path);
+    auto validator = [](const std::filesystem::path& path) -> Result<MediaAssetRef> {
+        Result<media::MediaInfo> probed = media::validateMediaImport(path);
+        if (probed.isError()) {
+            return err<MediaAssetRef>(probed.error());
+        }
+        return MediaAssetRef(Uuid::generateV4(), path.string());
     };
     mediaBrowserPanel_ =
         new MediaBrowserPanel(composition_.mediaLibrary(), keyMomentMarkers, validator, this);
