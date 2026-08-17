@@ -161,6 +161,7 @@ public:
         ++calls;
         return GeneratedMediaPlacement{r.asset, Uuid::generateV4(), Duration::zero()};
     }
+    bool trackExists(const Uuid&) const override { return true; }
 };
 
 // Scriptable auth backend for the real AuthServiceGenerationGate.

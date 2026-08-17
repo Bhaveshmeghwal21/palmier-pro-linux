@@ -58,6 +58,17 @@ Result<GeneratedMediaPlacement> GenerativeMediaCoordinator::generateAndPlace(
             invalidArgument("generated clip sourceOut must exceed sourceIn"));
     }
 
+    // Requirement 12.9 — a syntactically valid but unknown target track is also a
+    // caller error, and must be refused before anything downstream runs. Checked
+    // here rather than left to TimelineEnginePlacer::place: place() only runs
+    // once a generation has already produced an asset, so deferring this check
+    // to it would let an unknown-track request reach the network and catalogue
+    // an orphaned library entry before the refusal — exactly the gap this check
+    // closes.
+    if (!placement_.trackExists(where.trackId)) {
+        return err<GeneratedMediaPlacement>(notFound("target track does not exist"));
+    }
+
     // 6.5 / 9.7 — entitlement gate. An unauthorized request never contacts the
     // provider and never touches the timeline.
     Result<GenerationAuthorization> auth = gate_.authorize(request);
@@ -281,6 +292,12 @@ private:
 } // namespace
 
 TimelineEnginePlacer::TimelineEnginePlacer(TimelineEngine& engine) : engine_(engine) {}
+
+bool TimelineEnginePlacer::trackExists(const Uuid& trackId) const {
+    const Project project = engine_.snapshot();
+    return std::any_of(project.tracks.begin(), project.tracks.end(),
+                       [&](const Track& t) { return t.id == trackId; });
+}
 
 Result<GeneratedMediaPlacement> TimelineEnginePlacer::place(
     const TimelinePlacementRequest& request) {

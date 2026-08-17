@@ -53,24 +53,20 @@
 //     Property 66 provably DOES call it for a valid request in Property 65, so
 //     the seam is live and Property 66's zero is a refusal rather than a hole.
 //
-// What Property 66 does NOT cover, stated rather than implied
-// ----------------------------------------------------------
-// Requirement 12.9 lists five offending arguments. Four of them — an absent or
-// out-of-length prompt, a media kind outside {video, image}, a negative timeline
-// position, and a malformed source range ("out-of-range duration") — are refused
-// before the runner is ever entered, and are asserted below. The fifth, "names a
-// track identifier absent from the current project", is NOT asserted here,
-// because at this revision it is not refused before submission: a syntactically
-// valid but unknown `trackId` passes the declared schema, and
-// `GenerativeMediaCoordinator::generateAndPlace` runs the generation BEFORE
-// `TimelineEnginePlacer::place` looks the track up. A request naming an absent
-// track therefore does reach the transport, and the asset it produced is
-// imported into the media library before the placement is refused. Asserting the
-// property for that input would fail; asserting a weaker property for it would
-// disguise the gap. It is left to the source change that moves track existence
-// ahead of submission, and only the four pre-submission arguments are generated
-// here. An absent-track case is included in Property 66's generator only in the
-// malformed-UUID form, which the schema does refuse before dispatch.
+// What Property 66 covers for the track-identifier argument
+// ------------------------------------------------------------
+// Requirement 12.9 lists five offending arguments, and this file asserts all
+// five: an absent or out-of-length prompt, a media kind outside {video, image},
+// a negative timeline position, a malformed source range ("out-of-range
+// duration"), and — as of the source change that added
+// ITimelinePlacement::trackExists() — a track identifier absent from the
+// current project. `GenerativeMediaCoordinator::generateAndPlace` now checks
+// trackExists() immediately after the source-range check and BEFORE the
+// entitlement gate, the runner, or the media library are ever reached, so an
+// unknown (but syntactically valid) trackId is refused before submission in
+// exactly the same way as the four schema-level cases. The malformed-UUID form
+// is asserted separately below (refused by the declared schema, before dispatch
+// even reaches the coordinator).
 //
 // No test in this file contacts a network, needs an endpoint, or writes a file.
 
@@ -854,12 +850,23 @@ RC_GTEST_PROP(GenerativeLifecycleProperties, InvalidGenerationRequestsNeverReach
 
     cases.push_back({"model omitted", without(valid, "model"), "model", true});
 
-    // A track identifier that is not a track: in the form the declared schema can
-    // refuse before dispatch (see the file header for why the syntactically valid
-    // unknown-track form is out of scope at this revision).
+    // A track identifier that is not a track, in the form the declared schema
+    // refuses before dispatch: not a well-formed UUID at all.
     Json badTrack = valid;
     badTrack.set("trackId", malformedTrackId);
     cases.push_back({"malformed track identifier", badTrack, "trackId", true});
+
+    // "names a track identifier absent from the current project" (the fifth
+    // Requirement 12.9 argument): syntactically a valid UUID, but not one of the
+    // rig's actual tracks. GenerativeMediaCoordinator::generateAndPlace's
+    // trackExists() check refuses this before the entitlement gate, the runner,
+    // or the media library are ever reached — the source change task 10.6's
+    // notes called for. The refusal names "target track", not the argument
+    // "trackId", so `namesField` is false here for the same reason as the empty
+    // model id case above.
+    Json unknownTrack = valid;
+    unknownTrack.set("trackId", Uuid::generateV4().toString());
+    cases.push_back({"unknown (but well-formed) track identifier", unknownTrack, "trackId", false});
 
     // --- the exact pre-request state ---------------------------------------
     const std::string beforeDocument = serializeProject(engine.snapshot());
