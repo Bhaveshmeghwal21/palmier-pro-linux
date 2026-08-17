@@ -168,10 +168,21 @@ public:
         const int srcStride[4] = {w * 4, 0, 0, 0};
         sws_scale(sws_, srcData, srcStride, 0, h, frame_->data, frame_->linesize);
 
-        // Presentation timestamp in the stream time base.
+        // Presentation timestamp in the ENCODER's time base, not the stream's:
+        // avcodec_send_frame() interprets AVFrame::pts against codec_->time_base.
+        // avformat_write_header() rewrites AVStream::time_base for many muxers
+        // (MOV/MP4 included) to whatever timescale the container format prefers,
+        // which is why the packet-level rescale below (sendFrame) goes through
+        // av_packet_rescale_ts(codec_->time_base -> stream_->time_base) instead of
+        // assuming the two ever stay equal. Computing the frame's own pts against
+        // stream_->time_base here fed the encoder timestamps scaled for the wrong
+        // clock, so every encoded frame reported a presentation time far later
+        // than intended without changing the frame COUNT — this is what produced
+        // a probed/muxed duration wildly larger than the timeline duration while
+        // still encoding exactly the right number of frames.
         frame_->pts = av_rescale_q(frame.presentation.nanoseconds(),
                                    AVRational{1, static_cast<int>(Duration::kTicksPerSecond)},
-                                   stream_->time_base);
+                                   codec_->time_base);
 
         return sendFrame(frame_);
     }
