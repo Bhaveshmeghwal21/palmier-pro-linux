@@ -39,6 +39,7 @@
 #include <vector>
 
 #include "services/GenerativeHttpTransport.hpp"
+#include "core/Uuid.hpp"
 
 #if defined(PALMIER_HAVE_OPENSSL)
 #include <arpa/inet.h>
@@ -284,6 +285,116 @@ std::string jsonResponse(int status, const std::string& statusText, const std::s
           std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
 }
 
+/// A scripted, multi-connection HTTPS server: binds an ephemeral loopback port
+/// and, on a background thread, accepts one connection PER queued response, in
+/// order, writing back that response and closing before accepting the next.
+///
+/// This differs from OneShotHttpsServer above by necessity rather than by
+/// preference. `HttpGenerativeJobProtocol`'s submit/poll/fetchResult are each
+/// their own exchange, and this transport always sends `Connection: close`
+/// (see buildRequestText in OpenSslGenerativeHttpTransport.cpp), so a real
+/// submit -> poll -> poll -> fetch sequence — Requirement 11.6's actual shape,
+/// and what Property 65's undo-history claim needs exercised over a real
+/// transport rather than ScriptedTransport's in-process double — opens one new
+/// TCP+TLS connection per exchange, never reusing one. A single-shot server
+/// cannot serve that; this one accepts exactly `responses.size()` connections
+/// and then stops.
+class ScriptedHttpsServer {
+public:
+    ScriptedHttpsServer(const std::filesystem::path& certificate,
+                       const std::filesystem::path& privateKey,
+                       std::vector<std::string> responses)
+        : responses_(std::move(responses)) {
+        Result<std::unique_ptr<TlsContext>> ctx = TlsContext::create(certificate, privateKey);
+        if (ctx.isError()) {
+            ready_ = false;
+            return;
+        }
+        tlsContext_ = std::move(ctx).value();
+
+        listenFd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (listenFd_ < 0) {
+            ready_ = false;
+            return;
+        }
+        int one = 1;
+        ::setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        addr.sin_port = 0;  // ephemeral
+        if (::bind(listenFd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            ready_ = false;
+            return;
+        }
+        socklen_t addrLen = sizeof(addr);
+        ::getsockname(listenFd_, reinterpret_cast<sockaddr*>(&addr), &addrLen);
+        port_ = ntohs(addr.sin_port);
+        if (::listen(listenFd_, static_cast<int>(responses_.size())) != 0) {
+            ready_ = false;
+            return;
+        }
+
+        ready_ = true;
+        thread_ = std::thread([this]() { serveAll(); });
+    }
+
+    ~ScriptedHttpsServer() {
+        if (thread_.joinable()) thread_.join();
+        if (listenFd_ >= 0) ::close(listenFd_);
+    }
+
+    ScriptedHttpsServer(const ScriptedHttpsServer&) = delete;
+    ScriptedHttpsServer& operator=(const ScriptedHttpsServer&) = delete;
+
+    [[nodiscard]] bool ready() const noexcept { return ready_; }
+    [[nodiscard]] std::string baseUrl() const {
+        return "https://127.0.0.1:" + std::to_string(port_);
+    }
+    /// Every request this server received, in arrival order — one entry per
+    /// connection, so a caller can assert on the Nth exchange specifically
+    /// (e.g. that the credential arrived correctly on the fetch, not just the
+    /// submit).
+    [[nodiscard]] const std::vector<std::string>& receivedRequests() const noexcept {
+        return received_;
+    }
+
+private:
+    void serveAll() {
+        for (std::size_t i = 0; i < responses_.size(); ++i) {
+            const int clientFd = ::accept(listenFd_, nullptr, nullptr);
+            if (clientFd < 0) return;
+
+            Result<std::unique_ptr<TlsConnection>> accepted = tlsContext_->accept(clientFd);
+            if (accepted.isOk()) {
+                std::unique_ptr<TlsConnection> conn = std::move(accepted).value();
+                char buffer[8192];
+                std::string requestSoFar;
+                long n = 0;
+                while ((n = conn->read(buffer, sizeof(buffer))) > 0) {
+                    requestSoFar.append(buffer, static_cast<std::size_t>(n));
+                    if (requestSoFar.find("\r\n\r\n") != std::string::npos) break;
+                }
+                received_.push_back(requestSoFar);
+                (void)conn->writeAll(responses_[i].data(), responses_[i].size());
+                conn->shutdown();
+            } else {
+                received_.push_back(std::string{});
+            }
+            ::close(clientFd);
+        }
+    }
+
+    std::unique_ptr<TlsContext> tlsContext_;
+    int listenFd_ = -1;
+    std::uint16_t port_ = 0;
+    bool ready_ = false;
+    std::thread thread_;
+    std::vector<std::string> responses_;
+    std::vector<std::string> received_;
+};
+
 class OpenSslTransportServerTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -453,10 +564,13 @@ TEST_F(OpenSslTransportServerTest, ConnectingToAClosedPortFailsWithIoNotTimeout)
 // fixture choice.
 // ---------------------------------------------------------------------------
 
-TEST_F(OpenSslTransportServerTest, EndToEndSubmitPollFetchAgainstALocalHttpsEndpointCompletes) {
+TEST_F(OpenSslTransportServerTest, ASubmitExchangeAgainstALocalHttpsEndpointCompletes) {
     // Exercises the SAME layering HostedGenerativeBackend/ByokGenerativeBackend
     // use in production: HttpGenerativeJobProtocol built over this transport,
-    // driving a submit against a scripted local server.
+    // driving a submit against a scripted local server. This is the submit
+    // exchange in isolation; the full submit -> poll -> poll -> fetch sequence
+    // is TheFullSubmitPollPollFetchSequenceCompletesAgainstARealServer below,
+    // which is what Requirement 11.6 actually asks for.
     OneShotHttpsServer server(cert_, key_, jsonResponse(200, "OK", R"({"id":"job-e2e-1"})"));
     ASSERT_TRUE(server.ready());
 
@@ -490,6 +604,90 @@ TEST_F(OpenSslTransportServerTest, EndToEndSubmitPollFetchAgainstALocalHttpsEndp
     EXPECT_NE(server.receivedRequest().find("Authorization: Bearer test-byok-key-value"),
              std::string::npos)
         << server.receivedRequest();
+}
+
+// ---------------------------------------------------------------------------
+// Task 6.6 / Requirement 11.6: the FULL submit -> poll -> poll -> fetch
+// sequence, over the real transport, against a real (if scripted) local
+// server — not merely submit() alone, which the test above already covers at
+// the transport level. This is also what task 6.7 needed proven before the
+// generation-lifecycle property (ASuccessfulGenerationIsOneUndoableEdit, in
+// tests/services/generative_lifecycle_property_test.cpp) could be trusted to
+// mean the same thing over a real transport as it does over its own in-process
+// ScriptedTransport double: the two are asserted, run for run, to observe an
+// identical job-status progression here first.
+TEST_F(OpenSslTransportServerTest, TheFullSubmitPollPollFetchSequenceCompletesAgainstARealServer) {
+    const std::string jobId = "job-full-sequence-1";
+    ScriptedHttpsServer server(
+        cert_, key_,
+        {
+            jsonResponse(201, "Created", R"({"id":")" + jobId + R"("})"),
+            jsonResponse(200, "OK", R"({"status":"queued","progress":0})"),
+            jsonResponse(200, "OK", R"({"status":"running","progress":40})"),
+            jsonResponse(200, "OK", R"({"status":"succeeded","progress":100})"),
+            jsonResponse(200, "OK",
+                        R"({"assetId":")" + Uuid::generateV4().toString() +
+                            R"(","sourcePath":"/var/tmp/generated.mp4","mediaType":"video"})"),
+        });
+    ASSERT_TRUE(server.ready());
+
+    std::unique_ptr<GenerativeHttpTransport> transport =
+        makeOpenSslGenerativeHttpTransport(OpenSslTransportOptions{
+            .connectTimeout = std::chrono::milliseconds(10'000),
+            .ioTimeout = std::chrono::milliseconds(10'000),
+            .verifyServerCertificate = false,  // the local fixture cert is self-signed
+        });
+    ASSERT_NE(transport, nullptr);
+
+    HttpGenerativeJobProtocol::Options protocolOptions;
+    protocolOptions.endpoint.baseUrl = server.baseUrl();
+    protocolOptions.endpoint.jobsPath = "/v1/generations";
+    HttpGenerativeJobProtocol protocol(*transport, protocolOptions);
+
+    GenerationRequest request;
+    request.model = "test-model";
+    request.mediaType = GenerationMediaType::Video;
+    request.prompt = "a rolling wave at sunset";
+
+    // 1. submit
+    const Result<JobId> submitted = protocol.submit(request, "test-full-sequence-credential");
+    ASSERT_TRUE(submitted.isOk()) << submitted.error().message();
+    EXPECT_EQ(submitted.value().value, jobId);
+
+    // 2. poll — queued
+    const Result<GenerationStatus> queued = protocol.poll(submitted.value(), "test-full-sequence-credential");
+    ASSERT_TRUE(queued.isOk()) << queued.error().message();
+    EXPECT_EQ(queued.value().phase, GenerationPhase::Pending);
+    EXPECT_FALSE(queued.value().isTerminal());
+
+    // 3. poll — running
+    const Result<GenerationStatus> running = protocol.poll(submitted.value(), "test-full-sequence-credential");
+    ASSERT_TRUE(running.isOk()) << running.error().message();
+    EXPECT_EQ(running.value().phase, GenerationPhase::Running);
+    EXPECT_EQ(running.value().progressPercent, 40);
+    EXPECT_FALSE(running.value().isTerminal());
+
+    // 4. poll — succeeded (terminal)
+    const Result<GenerationStatus> succeeded = protocol.poll(submitted.value(), "test-full-sequence-credential");
+    ASSERT_TRUE(succeeded.isOk()) << succeeded.error().message();
+    EXPECT_EQ(succeeded.value().phase, GenerationPhase::Succeeded);
+    EXPECT_TRUE(succeeded.value().isTerminal());
+
+    // 5. fetch the result
+    const Result<MediaAsset> fetched = protocol.fetchResult(submitted.value(), "test-full-sequence-credential");
+    ASSERT_TRUE(fetched.isOk()) << fetched.error().message();
+    EXPECT_EQ(fetched.value().ref.sourcePath, "/var/tmp/generated.mp4");
+    EXPECT_EQ(fetched.value().mediaType, GenerationMediaType::Video);
+
+    // Exactly one connection per exchange (Requirement 11's transport never
+    // reuses a connection), and the credential arrived on every one of them,
+    // not merely the submit.
+    ASSERT_EQ(server.receivedRequests().size(), 5u);
+    for (const std::string& received : server.receivedRequests()) {
+        EXPECT_NE(received.find("Authorization: Bearer test-full-sequence-credential"),
+                 std::string::npos)
+            << received;
+    }
 }
 
 #endif  // PALMIER_HAVE_OPENSSL
