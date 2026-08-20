@@ -85,6 +85,16 @@ public:
     /// timeline.delete_clip
     [[nodiscard]] Result<Json> deleteClip(ClipId id);
 
+    /// timeline.ripple_delete (task 8.3; Requirement 5.1)
+    [[nodiscard]] Result<Json> rippleDelete(ClipId id);
+
+    /// timeline.ripple_trim (task 8.3; Requirement 5.2)
+    [[nodiscard]] Result<Json> rippleTrim(ClipId id, RippleTrimCommand::Edge edge,
+                                          Duration newBoundary, Duration sourceDuration);
+
+    /// timeline.close_gap (task 8.3; Requirement 5.5)
+    [[nodiscard]] Result<Json> closeGap(ClipId id);
+
     /// timeline.add_track
     [[nodiscard]] Result<Json> addTrack(TrackKind kind);
 

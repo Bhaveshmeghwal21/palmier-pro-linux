@@ -388,7 +388,29 @@ private:
     services::Json split = object();
     split.set("clipId", firstClip);
     split.set("playheadNs", 1 * kSecond);
-    observer.run("timeline.split_clip", split);
+    const services::Json splitResult = observer.run("timeline.split_clip", split);
+    const std::string rightOfSplit = splitResult.stringOr("rightClipId");
+
+    // Ripple editing and gap management (task 8; Requirement 5), exercised on the
+    // split's own right-hand piece so nothing `secondClip` is used for downstream
+    // is disturbed. Trimming `firstClip` shorter (it is 1s long, [0,1s)) pulls
+    // `rightOfSplit` earlier by the same amount under `timeline.ripple_trim`.
+    services::Json rippleTrim = object();
+    rippleTrim.set("clipId", firstClip);
+    rippleTrim.set("edge", std::string{"end"});
+    rippleTrim.set("boundaryNs", static_cast<std::int64_t>(kSecond / 2));
+    rippleTrim.set("sourceDurationNs", kSecond);
+    observer.run("timeline.ripple_trim", rippleTrim);
+
+    // `rightOfSplit` now ends well before `secondClip` (at 6s); closing that gap
+    // moves `secondClip` earlier too, which is fine — nothing downstream depends on
+    // its absolute position, only on the `secondClip` id captured above.
+    observer.run("timeline.close_gap", with("clipId", services::Json(rightOfSplit)));
+
+    // Removed via `timeline.ripple_delete` rather than `timeline.delete_clip`, so
+    // this tool's payload is observed too; only `firstClip` and `secondClip` remain
+    // for the reorder immediately below.
+    observer.run("timeline.ripple_delete", with("clipId", services::Json(rightOfSplit)));
 
     // A genuine reordering (the reverse of the current order), so the tool applies
     // an edit rather than reporting a no-op.

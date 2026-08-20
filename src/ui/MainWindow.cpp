@@ -205,6 +205,20 @@ void MainWindow::buildMenus() {
     splitAction_->setEnabled(false);  // no clip is selected at startup
     connect(splitAction_, &QAction::triggered, this, &MainWindow::onSplitAtPlayhead);
 
+    // Ripple editing and gap management (usable-editor task 8.3; Requirement 5.4
+    // and 5.5): all three are selection-gated, exactly like the two actions above.
+    rippleDeleteAction_ = editMenu->addAction(QStringLiteral("Ripple &Delete Clip"));
+    rippleDeleteAction_->setEnabled(false);  // no clip is selected at startup
+    connect(rippleDeleteAction_, &QAction::triggered, this, &MainWindow::onRippleDelete);
+
+    rippleTrimAction_ = editMenu->addAction(QStringLiteral("Ripple &Trim to Playhead"));
+    rippleTrimAction_->setEnabled(false);  // no clip is selected at startup
+    connect(rippleTrimAction_, &QAction::triggered, this, &MainWindow::onRippleTrimToPlayhead);
+
+    closeGapAction_ = editMenu->addAction(QStringLiteral("Close &Gap After Clip"));
+    closeGapAction_->setEnabled(false);  // no clip is selected at startup
+    connect(closeGapAction_, &QAction::triggered, this, &MainWindow::onCloseGap);
+
     editMenu->addSeparator();
     addVideoTrackAction_ = editMenu->addAction(QStringLiteral("Add &Video Track"));
     connect(addVideoTrackAction_, &QAction::triggered, this, [this]() {
@@ -413,6 +427,42 @@ void MainWindow::onSplitAtPlayhead() {
     (void)gateway_.splitClip(*inspectorViewModel_.selectedClipId(), playhead);
 }
 
+void MainWindow::onRippleDelete() {
+    if (!inspectorViewModel_.hasSelection()) {
+        return;  // disabled per refreshSelectionActions(); a shortcut race is a no-op
+    }
+    (void)gateway_.rippleDelete(*inspectorViewModel_.selectedClipId());
+}
+
+void MainWindow::onRippleTrimToPlayhead() {
+    if (!inspectorViewModel_.hasSelection() || previewView_ == nullptr) {
+        return;  // disabled per refreshSelectionActions(); a shortcut race is a no-op
+    }
+    // The tool takes a SOURCE boundary, while the playhead is a timeline position,
+    // so the offset from the clip's start is what carries over. The clip's own
+    // geometry comes from the Inspector's projection of the engine snapshot.
+    const std::optional<ClipInspectorView> clip = inspectorViewModel_.selectedClip();
+    if (!clip) {
+        return;  // the selection no longer resolves; nothing to trim
+    }
+    const Duration playhead = previewView_->controller().playhead();
+    const Duration offset = playhead - clip->timelineStart;
+    if (offset.isNegative()) {
+        return;  // the playhead is before the clip; there is no out-point to set
+    }
+    // Trimming the out-point to the playhead is the ripple edit an editor means by
+    // "trim to playhead"; the command clamps the boundary into the legal range.
+    (void)gateway_.rippleTrim(clip->id, RippleTrimCommand::Edge::End,
+                              clip->sourceIn + offset, clip->sourceOut);
+}
+
+void MainWindow::onCloseGap() {
+    if (!inspectorViewModel_.hasSelection()) {
+        return;  // disabled per refreshSelectionActions(); a shortcut race is a no-op
+    }
+    (void)gateway_.closeGap(*inspectorViewModel_.selectedClipId());
+}
+
 // ---------------------------------------------------------------------------
 // Selection (usable-editor Requirement 1): the Timeline panel reports which
 // row is selected; this is where "what does a clip selection mean to the rest
@@ -439,6 +489,18 @@ void MainWindow::refreshSelectionActions() {
     }
     if (splitAction_ != nullptr) {
         splitAction_->setEnabled(hasSelection);
+    }
+    // Requirement 5.4: the ripple actions are activatable exactly where a clip is
+    // selected. Whether the edit is *applicable* (a gap actually follows the clip,
+    // say) stays with the command, which refuses without changing the project.
+    if (rippleDeleteAction_ != nullptr) {
+        rippleDeleteAction_->setEnabled(hasSelection);
+    }
+    if (rippleTrimAction_ != nullptr) {
+        rippleTrimAction_->setEnabled(hasSelection);
+    }
+    if (closeGapAction_ != nullptr) {
+        closeGapAction_->setEnabled(hasSelection);
     }
 }
 

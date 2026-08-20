@@ -946,5 +946,285 @@ TEST(SetTransitionCommand, IsUndoableThroughTheEngine) {
     EXPECT_EQ(engine.clip(a)->transitionIn->id, transition.id);
 }
 
+// ===========================================================================
+// Ripple editing and gap management (usable-editor task 8; Requirement 5)
+//
+// Each of the three commands is checked for the three things Requirement 5.3 and
+// task 8.4 ask of it: the shift is exactly the stated amount, the track still
+// satisfies the ordered/non-overlapping invariant afterwards (asserted through the
+// engine, which rejects and rolls back any command that breaks it), and the whole
+// change reverses in ONE undo. Refusals are checked to leave the project untouched.
+// ===========================================================================
+
+// A project with `trackCount` empty video tracks; ids are returned in order.
+Project makeProjectWithTracks(std::size_t trackCount, std::vector<Uuid>& trackIdsOut) {
+    Project project;
+    project.id = Uuid::generateV4();
+    project.name = "ripple";
+    for (std::size_t i = 0; i < trackCount; ++i) {
+        Track track;
+        track.id = Uuid::generateV4();
+        track.kind = TrackKind::Video;
+        trackIdsOut.push_back(track.id);
+        project.tracks.push_back(std::move(track));
+    }
+    return project;
+}
+
+// Three one-second clips separated by half-second gaps: 0..1000, 1500..2500,
+// 3000..4000. The gaps are what a ripple edit closes.
+Project makeRippleProject(Uuid& trackIdOut, ClipId& a, ClipId& b, ClipId& c) {
+    std::vector<Uuid> ids;
+    Project project = makeProjectWithTracks(1, ids);
+    trackIdOut = ids[0];
+    a = Uuid::generateV4();
+    b = Uuid::generateV4();
+    c = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeClip(a, ms(0), ms(0), ms(1000)));
+    project.tracks[0].clips.push_back(makeClip(b, ms(1500), ms(0), ms(1000)));
+    project.tracks[0].clips.push_back(makeClip(c, ms(3000), ms(0), ms(1000)));
+    return project;
+}
+
+TEST(RippleDeleteCommand, ShiftsLaterClipsEarlierByTheRemovedDuration) {
+    Uuid trackId;
+    ClipId a, b, c;
+    TimelineEngine engine(makeRippleProject(trackId, a, b, c));
+
+    // Removing the middle clip (one second long) pulls only what followed it.
+    ASSERT_TRUE(engine.apply(std::make_unique<RippleDeleteCommand>(b)).changed());
+
+    const Project after = engine.snapshot();
+    ASSERT_EQ(after.tracks[0].clips.size(), 2u);
+    EXPECT_EQ(after.tracks[0].clips[0].id, a);
+    EXPECT_EQ(after.tracks[0].clips[0].timelineStart, ms(0));   // before it: unmoved
+    EXPECT_EQ(after.tracks[0].clips[1].id, c);
+    EXPECT_EQ(after.tracks[0].clips[1].timelineStart, ms(2000));  // 3000 - 1000
+    EXPECT_EQ(after.tracks[0].clips[1].duration(), ms(1000));     // duration untouched
+    EXPECT_TRUE(checkTimelineInvariants(after).isOk());
+}
+
+TEST(RippleDeleteCommand, ReversesInOneUndo) {
+    Uuid trackId;
+    ClipId a, b, c;
+    TimelineEngine engine(makeRippleProject(trackId, a, b, c));
+    const Project before = engine.snapshot();
+
+    ASSERT_TRUE(engine.apply(std::make_unique<RippleDeleteCommand>(a)).changed());
+    ASSERT_EQ(engine.snapshot().tracks[0].clips.size(), 2u);
+
+    // ONE undo, not one per shifted clip (Requirement 5.3).
+    ASSERT_TRUE(engine.undo().changed());
+    const Project restored = engine.snapshot();
+    ASSERT_EQ(restored.tracks[0].clips.size(), 3u);
+    for (std::size_t i = 0; i < restored.tracks[0].clips.size(); ++i) {
+        EXPECT_EQ(restored.tracks[0].clips[i].id, before.tracks[0].clips[i].id);
+        EXPECT_EQ(restored.tracks[0].clips[i].timelineStart,
+                  before.tracks[0].clips[i].timelineStart);
+    }
+    EXPECT_FALSE(engine.canUndo());  // exactly one entry was recorded
+}
+
+TEST(RippleDeleteCommand, AnUnknownClipChangesNothing) {
+    Uuid trackId;
+    ClipId a, b, c;
+    TimelineEngine engine(makeRippleProject(trackId, a, b, c));
+
+    const CommandResult result =
+        engine.apply(std::make_unique<RippleDeleteCommand>(Uuid::generateV4()));
+    EXPECT_FALSE(result.changed());
+    EXPECT_EQ(engine.snapshot().tracks[0].clips.size(), 3u);
+    EXPECT_FALSE(engine.canUndo());
+}
+
+TEST(RippleTrimCommand, EndEdgeShiftsLaterClipsByTheDurationChange) {
+    Uuid trackId;
+    ClipId a, b, c;
+    TimelineEngine engine(makeRippleProject(trackId, a, b, c));
+
+    // Shorten the first clip from 1000ms to 600ms: a -400ms duration change.
+    ASSERT_TRUE(engine.apply(std::make_unique<RippleTrimCommand>(
+                                 a, RippleTrimCommand::Edge::End, ms(600),
+                                 FrameRate::fps25(), ms(1000)))
+                    .changed());
+
+    const Project after = engine.snapshot();
+    EXPECT_EQ(after.tracks[0].clips[0].duration(), ms(600));
+    EXPECT_EQ(after.tracks[0].clips[0].timelineStart, ms(0));      // leading edge fixed
+    EXPECT_EQ(after.tracks[0].clips[1].timelineStart, ms(1100));   // 1500 - 400
+    EXPECT_EQ(after.tracks[0].clips[2].timelineStart, ms(2600));   // 3000 - 400
+    EXPECT_EQ(after.tracks[0].clips[1].duration(), ms(1000));      // followers unretimed
+    EXPECT_TRUE(checkTimelineInvariants(after).isOk());
+
+    ASSERT_TRUE(engine.undo().changed());
+    const Project restored = engine.snapshot();
+    EXPECT_EQ(restored.tracks[0].clips[0].duration(), ms(1000));
+    EXPECT_EQ(restored.tracks[0].clips[1].timelineStart, ms(1500));
+    EXPECT_EQ(restored.tracks[0].clips[2].timelineStart, ms(3000));
+    EXPECT_FALSE(engine.canUndo());
+}
+
+TEST(RippleTrimCommand, StartEdgeLeavesTheTrailingEdgeAndLaterClipsWhereTheyWere) {
+    Uuid trackId;
+    ClipId a, b, c;
+    TimelineEngine engine(makeRippleProject(trackId, a, b, c));
+
+    // Move the first clip's in-point 200ms later: its leading edge moves with it,
+    // its trailing edge does not, so nothing after it may move.
+    ASSERT_TRUE(engine.apply(std::make_unique<RippleTrimCommand>(
+                                 a, RippleTrimCommand::Edge::Start, ms(200),
+                                 FrameRate::fps25(), ms(1000)))
+                    .changed());
+
+    const Project after = engine.snapshot();
+    EXPECT_EQ(after.tracks[0].clips[0].sourceIn, ms(200));
+    EXPECT_EQ(after.tracks[0].clips[0].timelineStart, ms(200));
+    EXPECT_EQ(after.tracks[0].clips[0].timelineEnd(), ms(1000));  // unchanged
+    EXPECT_EQ(after.tracks[0].clips[1].timelineStart, ms(1500));  // untouched
+    EXPECT_EQ(after.tracks[0].clips[2].timelineStart, ms(3000));  // untouched
+    EXPECT_TRUE(checkTimelineInvariants(after).isOk());
+}
+
+// --- PR 397: multicam ripple-trim synchronisation --------------------------
+//
+// The backlog entry's own acceptance check, expressed as a test: two clips on
+// DIFFERENT tracks in one clipGroup, plus a third ungrouped clip; extending the
+// in-point of one grouped clip moves both grouped clips by exactly that duration,
+// leaves the ungrouped clip alone, and undoes as one history entry.
+TEST(RippleTrimCommand, KeepsGroupedMulticamAnglesSynchronised) {
+    std::vector<Uuid> trackIds;
+    Project project = makeProjectWithTracks(3, trackIds);
+
+    // Both grouped angles start at the same place with the same source range, and
+    // both have source to spare before their in-point so the trim can extend it.
+    const ClipId angleOne = Uuid::generateV4();
+    const ClipId angleTwo = Uuid::generateV4();
+    const ClipId ungrouped = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeClip(angleOne, ms(1000), ms(500), ms(1500)));
+    project.tracks[1].clips.push_back(makeClip(angleTwo, ms(1000), ms(500), ms(1500)));
+    project.tracks[2].clips.push_back(makeClip(ungrouped, ms(1000), ms(500), ms(1500)));
+
+    ClipGroup group;
+    group.id = Uuid::generateV4();
+    group.clipIds = {angleOne, angleTwo};
+    project.clipGroups.push_back(group);
+
+    TimelineEngine engine(std::move(project));
+
+    // Extend the in-point by 300ms (500 -> 200): each grouped clip's leading edge
+    // moves 300ms EARLIER, which is what "moves by exactly that duration" means.
+    ASSERT_TRUE(engine.apply(std::make_unique<RippleTrimCommand>(
+                                 angleOne, RippleTrimCommand::Edge::Start, ms(200),
+                                 FrameRate::fps25(), ms(1500)))
+                    .changed());
+
+    const Project after = engine.snapshot();
+    EXPECT_EQ(after.tracks[0].clips[0].sourceIn, ms(200));
+    EXPECT_EQ(after.tracks[0].clips[0].timelineStart, ms(700));  // 1000 - 300
+    // The other angle followed by the same amount and stays aligned with the first.
+    EXPECT_EQ(after.tracks[1].clips[0].sourceIn, ms(200));
+    EXPECT_EQ(after.tracks[1].clips[0].timelineStart, ms(700));
+    EXPECT_EQ(after.tracks[1].clips[0].timelineStart, after.tracks[0].clips[0].timelineStart);
+    EXPECT_EQ(after.tracks[1].clips[0].duration(), after.tracks[0].clips[0].duration());
+    // The ungrouped clip is untouched.
+    EXPECT_EQ(after.tracks[2].clips[0].sourceIn, ms(500));
+    EXPECT_EQ(after.tracks[2].clips[0].timelineStart, ms(1000));
+    EXPECT_TRUE(checkTimelineInvariants(after).isOk());
+
+    // One history entry for the whole cross-track change.
+    ASSERT_TRUE(engine.undo().changed());
+    const Project restored = engine.snapshot();
+    EXPECT_EQ(restored.tracks[0].clips[0].timelineStart, ms(1000));
+    EXPECT_EQ(restored.tracks[0].clips[0].sourceIn, ms(500));
+    EXPECT_EQ(restored.tracks[1].clips[0].timelineStart, ms(1000));
+    EXPECT_EQ(restored.tracks[1].clips[0].sourceIn, ms(500));
+    EXPECT_FALSE(engine.canUndo());
+}
+
+TEST(RippleTrimCommand, AGroupedAngleThatCannotAbsorbTheTrimRefusesTheWholeEdit) {
+    std::vector<Uuid> trackIds;
+    Project project = makeProjectWithTracks(2, trackIds);
+
+    // The second angle has no source before its in-point, so extending by 300ms
+    // cannot apply to it; the whole command must then change nothing at all.
+    const ClipId angleOne = Uuid::generateV4();
+    const ClipId angleTwo = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeClip(angleOne, ms(1000), ms(500), ms(1500)));
+    project.tracks[1].clips.push_back(makeClip(angleTwo, ms(1000), ms(0), ms(1000)));
+
+    ClipGroup group;
+    group.id = Uuid::generateV4();
+    group.clipIds = {angleOne, angleTwo};
+    project.clipGroups.push_back(group);
+
+    TimelineEngine engine(std::move(project));
+    const Project before = engine.snapshot();
+
+    const CommandResult result = engine.apply(std::make_unique<RippleTrimCommand>(
+        angleOne, RippleTrimCommand::Edge::Start, ms(200), FrameRate::fps25(), ms(1500)));
+    EXPECT_FALSE(result.changed());
+
+    const Project after = engine.snapshot();
+    EXPECT_EQ(after.tracks[0].clips[0].timelineStart, before.tracks[0].clips[0].timelineStart);
+    EXPECT_EQ(after.tracks[0].clips[0].sourceIn, before.tracks[0].clips[0].sourceIn);
+    EXPECT_EQ(after.tracks[1].clips[0].timelineStart, before.tracks[1].clips[0].timelineStart);
+    EXPECT_EQ(after.tracks[1].clips[0].sourceIn, before.tracks[1].clips[0].sourceIn);
+    EXPECT_FALSE(engine.canUndo());
+}
+
+TEST(CloseGapCommand, ClosesTheFollowingGapAndLeavesDurationsUnchanged) {
+    Uuid trackId;
+    ClipId a, b, c;
+    TimelineEngine engine(makeRippleProject(trackId, a, b, c));
+
+    // The gap after the first clip is 500ms (it ends at 1000, b starts at 1500).
+    ASSERT_TRUE(engine.apply(std::make_unique<CloseGapCommand>(a)).changed());
+
+    const Project after = engine.snapshot();
+    EXPECT_EQ(after.tracks[0].clips[0].timelineStart, ms(0));     // the clip itself stays
+    EXPECT_EQ(after.tracks[0].clips[1].timelineStart, ms(1000));  // abuts its predecessor
+    EXPECT_EQ(after.tracks[0].clips[2].timelineStart, ms(2500));  // 3000 - 500
+    for (const Clip& clip : after.tracks[0].clips) {
+        EXPECT_EQ(clip.duration(), ms(1000));  // Requirement 5.5: durations unchanged
+    }
+    EXPECT_TRUE(checkTimelineInvariants(after).isOk());
+
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_EQ(engine.snapshot().tracks[0].clips[1].timelineStart, ms(1500));
+    EXPECT_FALSE(engine.canUndo());
+}
+
+TEST(CloseGapCommand, RefusesWhenTheClipIsLastOnItsTrack) {
+    Uuid trackId;
+    ClipId a, b, c;
+    TimelineEngine engine(makeRippleProject(trackId, a, b, c));
+    const Project before = engine.snapshot();
+
+    const CommandResult result = engine.apply(std::make_unique<CloseGapCommand>(c));
+    EXPECT_FALSE(result.changed());
+    const Project after = engine.snapshot();
+    for (std::size_t i = 0; i < after.tracks[0].clips.size(); ++i) {
+        EXPECT_EQ(after.tracks[0].clips[i].timelineStart,
+                  before.tracks[0].clips[i].timelineStart);
+    }
+    EXPECT_FALSE(engine.canUndo());
+}
+
+TEST(CloseGapCommand, RefusesWhenNoGapFollows) {
+    std::vector<Uuid> trackIds;
+    Project project = makeProjectWithTracks(1, trackIds);
+    const ClipId a = Uuid::generateV4();
+    const ClipId b = Uuid::generateV4();
+    // Abutting clips: the second begins exactly where the first ends.
+    project.tracks[0].clips.push_back(makeClip(a, ms(0), ms(0), ms(1000)));
+    project.tracks[0].clips.push_back(makeClip(b, ms(1000), ms(0), ms(1000)));
+    TimelineEngine engine(std::move(project));
+
+    const CommandResult result = engine.apply(std::make_unique<CloseGapCommand>(a));
+    EXPECT_FALSE(result.changed());
+    EXPECT_EQ(engine.snapshot().tracks[0].clips[1].timelineStart, ms(1000));
+    EXPECT_FALSE(engine.canUndo());
+}
+
 }  // namespace
 }  // namespace palmier

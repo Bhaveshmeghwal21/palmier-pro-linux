@@ -85,6 +85,10 @@ private slots:
     void onRedo();
     void onDeleteClip();
     void onSplitAtPlayhead();
+    // Ripple editing and gap management (task 8.3; Requirement 5).
+    void onRippleDelete();
+    void onRippleTrimToPlayhead();
+    void onCloseGap();
     void onPlayPause();
     void onStop();
     void onGoToStart();
@@ -131,6 +135,9 @@ private:
     QAction* redoAction_ = nullptr;
     QAction* deleteClipAction_ = nullptr;
     QAction* splitAction_ = nullptr;
+    QAction* rippleDeleteAction_ = nullptr;
+    QAction* rippleTrimAction_ = nullptr;
+    QAction* closeGapAction_ = nullptr;
     QAction* addVideoTrackAction_ = nullptr;
     QAction* addAudioTrackAction_ = nullptr;
     QAction* placeAtPlayheadAction_ = nullptr;

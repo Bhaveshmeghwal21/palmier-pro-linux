@@ -58,6 +58,10 @@ std::string_view edgeName(TrimClipCommand::Edge edge) noexcept {
     return edge == TrimClipCommand::Edge::Start ? "start" : "end";
 }
 
+std::string_view edgeName(RippleTrimCommand::Edge edge) noexcept {
+    return edge == RippleTrimCommand::Edge::Start ? "start" : "end";
+}
+
 }  // namespace
 
 Result<Json> GuiToolGateway::moveClip(ClipId id, Duration newStart) {
@@ -120,6 +124,28 @@ Result<Json> GuiToolGateway::deleteClip(ClipId id) {
     Json args = Json::object();
     args.set("clipId", id.toString());
     return executor_.executeTool("timeline.delete_clip", args, services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::rippleDelete(ClipId id) {
+    Json args = Json::object();
+    args.set("clipId", id.toString());
+    return executor_.executeTool("timeline.ripple_delete", args, services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::rippleTrim(ClipId id, RippleTrimCommand::Edge edge,
+                                       Duration newBoundary, Duration sourceDuration) {
+    Json args = Json::object();
+    args.set("clipId", id.toString());
+    args.set("edge", std::string(edgeName(edge)));
+    args.set("boundaryNs", newBoundary.nanoseconds());
+    args.set("sourceDurationNs", sourceDuration.nanoseconds());
+    return executor_.executeTool("timeline.ripple_trim", args, services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::closeGap(ClipId id) {
+    Json args = Json::object();
+    args.set("clipId", id.toString());
+    return executor_.executeTool("timeline.close_gap", args, services::InvocationSource::Gui);
 }
 
 Result<Json> GuiToolGateway::addTrack(TrackKind kind) {
