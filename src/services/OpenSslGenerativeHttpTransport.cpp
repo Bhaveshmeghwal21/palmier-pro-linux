@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <csignal>
 #include <cstring>
 #include <optional>
 #include <string>
@@ -496,7 +497,24 @@ private:
 class OpenSslGenerativeHttpTransport final : public GenerativeHttpTransport {
 public:
     explicit OpenSslGenerativeHttpTransport(OpenSslTransportOptions options)
-        : options_(options) {}
+        : options_(options) {
+        // SSL_write() ultimately calls write()/send() with no MSG_NOSIGNAL
+        // equivalent available to it, so writing to a peer that has already
+        // closed its side of the connection (a generative endpoint timing out
+        // or hanging up, or this transport's OWN configured I/O timeout racing
+        // a slow peer's close) raises SIGPIPE, whose default disposition is to
+        // terminate the whole process — not merely fail this one request. This
+        // is process-wide, standard practice for any Linux network client (the
+        // BSD/macOS-only SO_NOSIGPIPE socket option this project could
+        // otherwise reach for does not exist on the Linux target this project
+        // ships for), and idempotent: a caller that already ignores SIGPIPE for
+        // its own reasons is unaffected.
+        static const bool sigpipeIgnored = [] {
+            std::signal(SIGPIPE, SIG_IGN);
+            return true;
+        }();
+        (void)sigpipeIgnored;
+    }
 
     [[nodiscard]] Result<GenerativeHttpResponse> send(
         const GenerativeHttpRequest& request) override {

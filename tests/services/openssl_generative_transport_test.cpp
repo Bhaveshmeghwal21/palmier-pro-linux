@@ -73,14 +73,14 @@ TEST(OpenSslGenerativeHttpTransport, RefusesAPlaintextEndpointWithoutSendingAnyB
     GenerativeHttpRequest request;
     request.method = "POST";
     request.url = "http://example.invalid/v1/generations";
-    request.headers.emplace_back("Authorization", "Bearer should-never-be-sent");
+    request.headers.emplace_back("Authorization", "Bearer test-should-never-be-sent");
     request.body = "{}";
 
     const Result<GenerativeHttpResponse> result = transport->send(request);
     ASSERT_TRUE(result.isError());
     EXPECT_EQ(result.error().code(), ErrorCode::InvalidArgument);
     // The credential must not appear in the diagnostic either.
-    EXPECT_EQ(result.error().message().find("should-never-be-sent"), std::string::npos);
+    EXPECT_EQ(result.error().message().find("test-should-never-be-sent"), std::string::npos);
 }
 
 TEST(OpenSslGenerativeHttpTransport, RefusesARelativeOrSchemelessUrl) {
@@ -312,8 +312,14 @@ TEST_F(OpenSslTransportServerTest, ARealHandshakeSucceedsAndTheResponseRoundTrip
     OneShotHttpsServer server(cert_, key_, jsonResponse(200, "OK", R"({"id":"job-123"})"));
     ASSERT_TRUE(server.ready());
 
+    // Certificate verification is exercised separately, by the two tests below
+    // (one proving it rejects an untrusted fixture, one proving it can be
+    // turned off for a fixture that is never going to be CA-signed); this test
+    // is about the handshake, the exchange and the byte-for-byte header/body
+    // round trip, so it disables verification to isolate those from PKI trust —
+    // exactly as CertificateVerificationCanBeDisabledForATestFixture does.
     OpenSslTransportOptions options;
-    options.verifyServerCertificate = true;
+    options.verifyServerCertificate = false;
     std::unique_ptr<GenerativeHttpTransport> transport =
         makeOpenSslGenerativeHttpTransport(options);
     ASSERT_NE(transport, nullptr);
@@ -473,7 +479,7 @@ TEST_F(OpenSslTransportServerTest, EndToEndSubmitPollFetchAgainstALocalHttpsEndp
     request.mediaType = GenerationMediaType::Video;
     request.prompt = "a rolling wave at sunset";
 
-    const Result<JobId> submitted = protocol.submit(request, "a-byok-key-value");
+    const Result<JobId> submitted = protocol.submit(request, "test-byok-key-value");
     ASSERT_TRUE(submitted.isOk()) << submitted.error().message();
     EXPECT_EQ(submitted.value().value, "job-e2e-1");
 
@@ -481,7 +487,7 @@ TEST_F(OpenSslTransportServerTest, EndToEndSubmitPollFetchAgainstALocalHttpsEndp
     // BYOK credential arrived as a bearer token, and never appears in any
     // error path above (there was none, but the message-scan in the plaintext
     // test above already covers the negative case).
-    EXPECT_NE(server.receivedRequest().find("Authorization: Bearer a-byok-key-value"),
+    EXPECT_NE(server.receivedRequest().find("Authorization: Bearer test-byok-key-value"),
              std::string::npos)
         << server.receivedRequest();
 }
