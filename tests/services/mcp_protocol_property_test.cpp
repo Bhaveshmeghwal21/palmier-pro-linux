@@ -44,9 +44,10 @@
 // Two facts about a test binary shape the expectations, and are asserted rather
 // than avoided:
 //
-//   * `generation.generate`, `timeline.export` and `media.import` are hook-backed
-//     (the generative backend, the export engine and the media import service are
-//     wired by the composition root). With no hook they answer `Unsupported`, so
+//   * `generation.generate`, `generation.list_models`, `timeline.export` and
+//     `media.import` are hook-backed (the generative backend, the model catalog,
+//     the export engine and the media import service are wired by the composition
+//     root). With no hook they answer `Unsupported`, so
 //     Property 46 requires of them the same result *shape* plus `isError` true
 //     naming the tool — the capability is absent from this build, which is not a
 //     protocol fault.
@@ -145,13 +146,17 @@ constexpr std::string_view kReorderClips  = "timeline.reorder_clips";
 constexpr std::string_view kAddEffect     = "timeline.add_effect";
 constexpr std::string_view kAddTransition = "timeline.add_transition";
 constexpr std::string_view kGenerate      = "generation.generate";
+constexpr std::string_view kListModels    = "generation.list_models";
 constexpr std::string_view kExport        = "timeline.export";
 
-/// The three tools whose capability is supplied by the composition root. In a test
+/// The four tools whose capability is supplied by the composition root. In a test
 /// binary no hook is wired, so they answer `Unsupported` — accounted for, not
-/// treated as a failure.
+/// treated as a failure. `generation.list_models` (usable-editor Phase 2 task 7;
+/// PR 406) belongs here for the same reason as `generation.generate`: its handler
+/// is a guarded hook, and the model catalog is supplied by `ApplicationComposition`,
+/// so without that hook it reports that no catalog is configured.
 [[nodiscard]] bool isHookBacked(std::string_view tool) {
-    return tool == kGenerate || tool == kExport || tool == kMediaImport;
+    return tool == kGenerate || tool == kListModels || tool == kExport || tool == kMediaImport;
 }
 
 // ---------------------------------------------------------------------------
@@ -610,7 +615,7 @@ struct Invocation {
 
     Json args = Json::object();
 
-    // The arg-less tools, and the hook-backed trio, take their arguments straight
+    // The arg-less tools, and the hook-backed tools, take their arguments straight
     // from the schema. `edit.undo` / `edit.redo` (task 10.1) belong here: they take
     // no arguments and an empty history is the engine's documented successful
     // no-op, never an error, so they are applicable to every generated project.
@@ -1087,8 +1092,9 @@ RC_GTEST_PROP(McpProtocolProperties, ToolsListDescribesEveryRegisteredTool, ()) 
 // undo-history recording — and return a result object containing a `content` array
 // whose first entry has `"type":"text"`, plus `isError` set to false."
 //
-// `generation.generate`, `timeline.export` and `media.import` are hook-backed and
-// no hook is wired in a test binary, so their capability is absent from this build:
+// `generation.generate`, `generation.list_models`, `timeline.export` and
+// `media.import` are hook-backed and no hook is wired in a test binary, so their
+// capability is absent from this build:
 // they are required to answer in the identical result shape with `isError` true
 // naming the tool, which is what "the capability is not configured" looks like
 // through the protocol rather than a protocol fault.
