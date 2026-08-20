@@ -327,7 +327,7 @@ all of which were already built.
 ## Phase 2 progress
 
 **Task 6 (the HTTPS generative transport) landed and is CI-verified green on `main` as of commit
-`e1f196d` (run `32392161099`, completed success, 2m36s): 1267 of 1267 tests passing (up from 1257
+`8355878` (run `32393760684`, completed success, 2m7s): 1267 of 1267 tests passing (up from 1257
 at the end of Phase 1).**
 
 ### What was actually built (commits `f0841f7`, `8d75e98`, `00df0ae`, `e1f196d`)
@@ -410,6 +410,17 @@ at the end of Phase 1).**
    `submit()` — the test was misleadingly named. Renamed it
    (`ASubmitExchangeAgainstALocalHttpsEndpointCompletes`) and added the genuinely full-sequence test
    described above in commit `e1f196d`, verified green in run `32392161099`: 1267/1267.
+4. **Run `32393206437` (the `docs/UPSTREAM_PARITY.md` re-score commit, `3939a4b`) failed: 2 of
+   1267.** Both failures were in `ParityCheckFalsifiability` — `DetectsAnEntryMissingFromTheBuildOrderList`
+   and `DetectsABuildOrderPriorityThatDisagreesWithItsTable` — the checker's own negative-control
+   tests, which prove it CAN detect a defect by mutating the real, checked-in document at a literal
+   hardcoded anchor string (`"22. denoise (tool category) — later\n"`, `"31. auto-update
+   (capability area) — later"`). Re-scoring `generate` to `present` removed it from the build-order
+   projection entirely, shifting every later item up by one — `denoise` is now item 21, `auto-update`
+   is now item 30 — so both anchors silently stopped matching. Fixed in commit `8355878` by updating
+   both hardcoded numbers to the real, current values; verified no other position-dependent (rather
+   than name-keyed) reference exists in either `tests/docs/report_parser_test.cpp` or
+   `tests/docs/parity_report_property_test.cpp`. Run `32393760684`: 1267/1267, fully green.
 
 ---
 
