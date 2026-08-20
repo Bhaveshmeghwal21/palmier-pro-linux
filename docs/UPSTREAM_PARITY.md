@@ -16,8 +16,8 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: 3516ba02574782c348294897bdeab93ff8185b3f (branch `feat/end-to-end-editor-integration`)
-- comparison-date: 2026-08-11
+- linux-ref: 65fb3d9e524a9c1defe0ea08da5fd8623fd4e28d (branch `main`)
+- comparison-date: 2026-08-20
 
 ## Status definitions (Requirement 13.7)
 
@@ -64,17 +64,17 @@ every `N. ` line as a build-order item.
 | category | status | linux-components | priority | rationale | macos-framework | linux-replacement |
 |---|---|---|---|---|---|---|
 | clips | partial | core::EditCommands, services::ToolRegistry timeline.add_clip/delete_clip/move_clip/trim_clip/split_clip/reorder_clips | should | Add, delete, move, trim, split and reorder are reachable; no ripple trim and no grouped edit exist, so a cut cannot be propagated across clips. | - | - |
-| timeline | partial | core::TimelineEngine, services::ToolRegistry timeline.read/add_track/remove_track/set_track_muted, edit.undo, edit.redo | should | Read, track add/remove/mute and undo/redo are reachable; no marker, zoom or playhead tool exists and no timeline panel is mounted (task 11.3 unbuilt). | - | - |
+| timeline | partial | core::TimelineEngine, services::ToolRegistry timeline.read/add_track/remove_track/set_track_muted, edit.undo, edit.redo, ui::TimelinePanel | should | Read, track add/remove/mute, undo/redo, a scrub/step/timecode playhead control and Add Video/Audio Track menu actions are reachable from the mounted TimelinePanel; no marker or zoom tool exists yet. | - | - |
 | texts | absent | none | should | No text or title clip type, tool or text renderer exists anywhere in the tree, so titles and lower thirds cannot be created on Linux. | - | - |
 | captions | absent | none | should | core::TrackKind has only Video and Audio; no caption track, burn-in path or sidecar export exists, so captions cannot be authored or delivered. | - | - |
 | transcription | absent | services::TranscriptionService | should | TranscriptionService is unreachable: no tool registers it, the composition root never constructs it and no recognizer backend is bundled. | - | - |
 | color | partial | core::EffectType::ColorGrade, core::ColorSpace, gpu::EffectKernels | should | Only one color_grade effect is reachable via timeline.add_effect; no curve, wheel, scope or LUT operation exists, so a grade cannot be shaped or judged. | - | - |
-| effects | partial | core::EffectType, gpu::EffectKernels, gpu::Compositor, services::ToolRegistry timeline.add_effect | should | Six effect types can be appended; no tool removes, reorders or re-parameterises an effect, and the inspector effect list is unmounted (task 11.2). | - | - |
+| effects | partial | core::EffectType, gpu::EffectKernels, gpu::Compositor, services::ToolRegistry timeline.add_effect, ui::InspectorPanel | should | Six effect types can be appended and the inspector panel is mounted and shows a selected clip's effect chain; no tool removes, reorders or re-parameterises an effect from any mounted UI. | - | - |
 | denoise | absent | none | later | No denoise effect type and no denoise kernel exist in core::Effect or gpu::EffectKernels, so noise reduction is unavailable on every surface. | - | - |
 | multicam | absent | core::ClipGroup | should | Nothing reads clipGroups: schema 1.1 only reserves it, and PR 397's RippleTrimCommand and timeline.ripple_trim are deferred, so angle-synced trims cannot be made. | - | - |
 | organize | absent | none | later | The media library is a flat list; no bin, folder, tag, rating or colour-label operation exists, so a project cannot be organised. | - | - |
-| layout | partial | core::EffectType::CropTransform, gpu::EffectKernels | later | Only crop_transform changes clip geometry; there is no multi-clip layout or picture-in-picture operation, and panel layout is unreachable while the shell is a placeholder. | - | - |
-| media | partial | services::MediaImportService, core::MediaManager, services::ToolRegistry media.import/media.list | should | Import and list are reachable; no tool removes, relinks or re-probes an asset, and the media browser panel is never constructed (task 11.2). | - | - |
+| layout | partial | core::EffectType::CropTransform, gpu::EffectKernels | later | Only crop_transform changes clip geometry; there is no multi-clip layout or picture-in-picture operation, so composing more than one clip on screen is not possible regardless of the shell now being mounted. | - | - |
+| media | partial | services::MediaImportService, core::MediaManager, services::ToolRegistry media.import/media.list, ui::MediaBrowserPanel | should | Import and list are reachable and the media browser panel is mounted, showing the library and a selected clip's retained versions and key moments; no tool removes, relinks or re-probes an asset. | - | - |
 | import | present | services::MediaImportService, media::MediaProbe, media::ImportValidation, services::ToolRegistry media.import | - | - | - | - |
 | export | present | services::ExportCoordinator, media::ExportEngine, media::MediaEncoder, media::EncoderSelector, services::ToolRegistry timeline.export | - | - | - | - |
 | generate | absent | services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::GenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator, services::ToolRegistry generation.generate | should | 10.5 landed the backend registry and the hosted and BYOK clients, but no HTTPS transport is implemented in tree, so every configured backend fails at submit and no generation completes. | - | - |
@@ -90,15 +90,15 @@ every `N. ` line as a build-order item.
 
 | area | status | linux-components | priority | rationale | macos-framework | linux-replacement |
 |---|---|---|---|---|---|---|
-| timeline editing | partial | core::TimelineEngine, core::EditCommands, services::ToolRegistry, ui::TimelineViewModel, ui::TimelineModel | must | Every edit is reachable through the Tool_Surface but none from the shell: MainWindow is still a placeholder label, so a GUI user cannot edit at all (tasks 11.2, 11.3). | SwiftUI | Qt 6 Widgets |
+| timeline editing | partial | core::TimelineEngine, core::EditCommands, services::ToolRegistry, ui::TimelineViewModel, ui::TimelineModel, ui::TimelinePanel, ui::MainWindow, ui::InspectorViewModel, ui::MediaBrowserViewModel | must | The shell is mounted and every edit is now reachable from it: clip selection drives the Inspector, Add Video/Audio Track and Place at Playhead create tracks and clips, and a scrub/step/timecode control positions the playhead — all through the same Tool_Surface path the MCP endpoint and the agent use. The timeline itself is still a QTreeView rather than a graphical time-axis view (no drag-to-move, drag-to-trim or clip-rectangle rendering), and there is no ripple trim, grouped edit or effect removal/reorder from any mounted UI. | SwiftUI | Qt 6 Widgets |
 | multicam | absent | core::ClipGroup | should | Nothing reads clipGroups, and ripple trim and angle switching are deferred with PR 397, so multi-angle footage cannot be cut in sync. | - | - |
 | transcription and captions | absent | services::TranscriptionService | should | No recognizer backend is bundled and nothing reaches TranscriptionService; there is also no caption track kind, so captions cannot be produced or burned in. | - | - |
 | text and graphics | absent | none | should | No text, title or shape layer exists in the domain core or the renderer, so on-screen graphics cannot be authored at all. | - | - |
 | color and effects | partial | gpu::EffectKernels, gpu::Compositor, core::EffectType, services::ToolRegistry timeline.add_effect | should | Six effects including the ported invert_colors render on both paths; nothing removes, reorders or edits an effect and there is no LUT, scope or denoise. | - | - |
 | audio scrub and metering | absent | none | should | The audio pipeline mixes and outputs, but no level meter, waveform or scrub-audio component exists, so levels cannot be monitored while editing. | SwiftUI | Qt 6 Widgets |
 | generation and upscaling | absent | services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::GenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator | should | Backend selection is reachable, but the sole in-tree transport reports Unsupported, so nothing generates; no model catalog (PR 406), upscale mode (PR 396) or audio generation (PR 395). | - | - |
-| project browser and search | absent | ui::MediaBrowserViewModel | later | The media browser view model is never constructed and no search index or tool exists, so projects and assets can be neither browsed nor searched. | SwiftUI | Qt 6 Widgets |
-| MCP and agent chat | partial | services::McpServer, services::McpProtocolHandler, services::McpSessionRegistry, services::RemoteAccessGate, services::AgentOrchestrator, services::OfflineIntentInterpreter | must | initialize, tools/list and tools/call work over JSON-RPC 2.0 and the offline interpreter maps utterances; no SSE stream, no tools/list_changed, and the chat panel is unmounted. | SwiftUI | Qt 6 Widgets |
+| project browser and search | partial | ui::MediaBrowserViewModel, ui::MediaBrowserPanel | later | The media browser panel is mounted and lists the library, but there is no bin, folder or tag structure and no search index or tool exists, so projects and assets can be browsed only as a flat list and cannot be searched. | SwiftUI | Qt 6 Widgets |
+| MCP and agent chat | partial | services::McpServer, services::McpProtocolHandler, services::McpSessionRegistry, services::RemoteAccessGate, services::AgentOrchestrator, services::OfflineIntentInterpreter, ui::AgentChatPanel | must | initialize, tools/list and tools/call work over JSON-RPC 2.0, the offline interpreter maps utterances, and the agent chat panel is mounted (tabbed with the Inspector); no SSE stream and no tools/list_changed. | SwiftUI | Qt 6 Widgets |
 | settings | partial | app::AppSettings, app::AppConfig | should | Defaults, config file, environment and flags are honoured at startup only; nothing changes a setting at runtime and there is no preferences surface. | SwiftUI | Qt 6 Widgets |
 | telemetry | absent | none | later | No telemetry, metrics or crash-reporting component exists in the tree, and Requirements 1 to 16 do not ask for one, so nothing is collected or reported. | - | - |
 | auto-update | absent | none | later | No in-app update check exists; Linux delivery is by distribution packaging (deb, flatpak and AppImage under packaging/), so updates arrive through the package manager. | - | - |
@@ -217,3 +217,21 @@ those claims rest on weaker evidence than the rest.
    **`src/ui/` is byte-identical to the previous ref**, so every row that cites task 11.2 or 11.3 —
    the unmounted panels and the placeholder `MainWindow` — stands unchanged, and stage 11 remains
    unbuilt.
+- **2026-08-20 re-check (`.kiro/specs/usable-editor` Phase 1).** `src/ui/` is no longer
+  byte-identical to the previous ref: the shell was mounted (task 11.2/11.3, already reflected in
+  the `end-to-end-editor-integration` spec) and this pass closed the gap that discovery surfaced —
+  the mounted shell had no clip selection, no track-creation affordance, no clip-placement
+  affordance and no playhead-positioning control, so `InspectorViewModel::selectClip()`,
+  `GuiToolGateway::addTrack()` and `GuiToolGateway::addClip()` were reachable in code but had no
+  caller anywhere in `src/`. Four changes closed it: `TimelinePanel` now reports its tree
+  selection (clip and track) to `MainWindow`, which drives the Inspector and the two
+  selection-gated Edit actions; `TimelineViewModel::addTrack()` plus two menu actions call the
+  existing `GuiToolGateway::addTrack()`; a new "Place at Playhead" gesture plus a new
+  library-asset-selection concept on `MediaBrowserViewModel` call the existing
+  `GuiToolGateway::addClip()`; and `TimelinePanel` gained a scrub slider, frame-step buttons and an
+  editable timecode field, all snapping to the project's edit frame rate. This re-scored the
+  `timeline`, `timeline editing`, `effects`, `layout`, `media`, `project browser and search` and
+  `MCP and agent chat` rows above, each citing exactly what changed. It did **not** touch the
+  `generate` row (`services::GenerativeHttpTransport` still has no real implementation) or add a
+  graphical (non-tree) timeline view, ripple editing, effect removal/reorder, or any of the
+  `absent` rows below `timeline editing` in the build order; those remain open exactly as scored.
