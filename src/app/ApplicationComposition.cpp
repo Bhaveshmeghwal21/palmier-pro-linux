@@ -59,6 +59,7 @@
 #include "services/ExportCoordinator.hpp"
 #include "services/GenerativeClient.hpp"
 #include "services/GenerativeMediaCoordinator.hpp"
+#include "services/OpenSslGenerativeHttpTransport.hpp"
 #include "services/Json.hpp"
 #include "services/MediaImportService.hpp"
 #include "services/LocalizationManager.hpp"
@@ -407,7 +408,22 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
         backendRequest.id = config.generativeBackendId;
         backendRequest.credentials = credentialProbe;
         backendRequest.secretStore = secretStore_;
-        backendRequest.transport = config.generativeTransport;
+        // usable-editor spec Phase 2, task 6 (Requirement 11.5): install a real
+        // HTTPS transport by default rather than leaving `hosted`/`byok`
+        // permanently unreachable. A caller that injected its OWN transport
+        // (config.generativeTransport != nullptr — every existing test that
+        // exercises this path) is honoured unchanged; only the previously-dead
+        // "nothing was injected" default changes, and only on a build compiled
+        // with PALMIER_HAVE_OPENSSL, so a build without TLS support keeps
+        // falling back to the unavailable transport exactly as before
+        // (Requirement 11.5's own "falls back... only where the build excludes
+        // TLS support").
+        if (config.generativeTransport != nullptr) {
+            backendRequest.transport = config.generativeTransport;
+        } else if (services::openSslGenerativeHttpTransportAvailable()) {
+            ownedGenerativeTransport_ = services::makeOpenSslGenerativeHttpTransport();
+            backendRequest.transport = ownedGenerativeTransport_.get();
+        }
         backendRequest.endpoint = config.generativeEndpoint;
         // The provider whose stored key `byok` reads: the first configured one that
         // is authorized. No key VALUE is involved here, only a provider name.

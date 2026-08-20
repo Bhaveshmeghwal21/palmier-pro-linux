@@ -55,6 +55,7 @@ positional path. Lists are comma-separated, trimmed, with blank entries dropped.
 | `mcp.port` | `PALMIER_MCP_PORT` | `--mcp-port` | `19789` | 0..65535; `0` binds an ephemeral port |
 | `agent.interpreter` | `PALMIER_AGENT_INTERPRETER` | `--agent-interpreter` | `offline` | `offline`, `hosted` or `byok`. An unrecognised id falls back to `offline` and reports a startup error naming what was rejected, rather than failing to start |
 | `generative.backend` | `PALMIER_GENERATIVE_BACKEND` | `--generative-backend` | `offline` | `offline`, `hosted` or `byok`, with the same unrecognised-id fallback |
+| `generative.endpoint` | `PALMIER_GENERATIVE_ENDPOINT` | `--generative-endpoint` | *(unset)* | an `https://` base URL; a non-`https://` value is rejected and the setting is left unset |
 
 The table is the whole configuration surface, not just the remote-access part of it: it is the key
 table in `src/app/AppSettings.cpp`, one row per key, and the task 12.7 consistency checker compares

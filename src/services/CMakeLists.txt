@@ -372,3 +372,32 @@ target_sources(palmier_services PRIVATE
 # existing source list above is preserved verbatim.
 target_sources(palmier_services PRIVATE
     ExportCoordinator.cpp)
+
+
+
+# --- usable-editor spec Phase 2, task 6: a real HTTPS GenerativeHttpTransport --
+#
+# services::GenerativeHttpTransport (added above under task 10.5) is the single
+# seam standing between HostedGenerativeBackend/ByokGenerativeBackend and an
+# actual network: `makeUnavailableGenerativeHttpTransport()` is the only
+# implementation this library carried before this task, so selecting `hosted` or
+# `byok` always failed at submit having sent no bytes. This adds a real one:
+# services::OpenSslGenerativeHttpTransport, a client-side HTTPS implementation
+# over the SAME OpenSSL dependency TlsTransport.cpp (server-side, task 6.x)
+# already links, verifying the server certificate by default.
+#
+# Deliberately its OWN translation unit rather than added to
+# GenerativeHttpTransport.cpp: six test executables compile that file as a
+# standalone source (see tests/CMakeLists.txt) to exercise
+# HttpGenerativeJobProtocol's request-building/error-mapping with no TLS
+# dependency, and four of those six link no OpenSSL at all. Putting real OpenSSL
+# calls in GenerativeHttpTransport.cpp would force all six to link OpenSSL or
+# fail to build; a separate file added only to THIS target changes none of them.
+#
+# No separate `target_compile_definitions`/`target_link_libraries` call is needed
+# here: the `if(PALMIER_ENABLE_OPENSSL AND OPENSSL_FOUND)` block already present
+# on this target (added alongside TlsTransport.cpp above) already defines
+# PALMIER_HAVE_OPENSSL and links PkgConfig::OPENSSL for every source in
+# palmier_services, this one included.
+target_sources(palmier_services PRIVATE
+    OpenSslGenerativeHttpTransport.cpp)

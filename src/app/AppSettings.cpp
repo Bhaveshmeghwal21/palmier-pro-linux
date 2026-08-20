@@ -288,6 +288,32 @@ constexpr KeySpec kKeys[] = {
          config.generativeBackendId = std::string(id);
          return true;
      }},
+    // usable-editor spec Phase 2, task 6: the base URL the selected `hosted`/
+    // `byok` HTTPS client sends its requests to. A location, never a credential
+    // (Requirement 12.6 applies here exactly as it does to `generative.backend`
+    // above): the credential VALUE is still read from the SecretStore at request
+    // time and never touches this setting. Without this key set, `generative
+    // BackendRequest::endpoint.baseUrl` stays empty and the selected client
+    // reports "no generative endpoint is configured" per request — a working
+    // transport (task 6.2) with nowhere configured to send to is exactly as
+    // unreachable as no transport at all, which is why this key exists alongside
+    // it rather than being deferred.
+    {"generative.endpoint", "PALMIER_GENERATIVE_ENDPOINT", "--generative-endpoint", false,
+     [](std::string_view value, AppConfig& config, std::string& error) {
+         const std::string_view url = trim(value);
+         if (url.empty()) {
+             error = "expected an https:// base URL";
+             return false;
+         }
+         constexpr std::string_view kScheme = "https://";
+         if (url.size() <= kScheme.size() || url.substr(0, kScheme.size()) != kScheme) {
+             error = "expected an https:// URL; a plaintext endpoint is refused before any "
+                     "request is built";
+             return false;
+         }
+         config.generativeEndpoint.baseUrl = std::string(url);
+         return true;
+     }},
 };
 
 [[nodiscard]] const KeySpec* findKey(std::string_view key) {

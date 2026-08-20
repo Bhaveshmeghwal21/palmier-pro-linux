@@ -2062,6 +2062,50 @@ palmier_register_test(palmier_services_remote_access_tests)
 
 
 # ---------------------------------------------------------------------------
+# usable-editor spec Phase 2, task 6 — services/openssl_generative_transport_
+# test.cpp: unit tests for services::OpenSslGenerativeHttpTransport, the real
+# HTTPS implementation of the GenerativeHttpTransport seam
+# (GenerativeHttpTransport.cpp's own six standalone-source test targets
+# deliberately keep testing that seam's request-building/error-mapping with NO
+# TLS dependency; this is the seventh target, and the only one that links
+# OpenSSL and exercises a real implementation of it end to end against a local
+# HTTPS server built on services::TlsContext — the same server-side TLS
+# primitive services/remote_access_http_integration_test.cpp above already
+# uses).
+#
+# Needs GenerativeClient.cpp (GenerationRequest/JobId/GenerationMediaType and
+# their toStringView helpers) in addition to the transport pair, but none of
+# HostedGenerativeBackend/ByokGenerativeBackend/GenerativeBackendRegistry: this
+# target tests the transport and HttpGenerativeJobProtocol directly, not the
+# backend selection layer above them.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_openssl_generative_transport_tests
+    services/openssl_generative_transport_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeHttpTransport.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/OpenSslGenerativeHttpTransport.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/TlsTransport.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_openssl_generative_transport_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+# find_package(Threads) is called here, at point of use, rather than assumed
+# available: this is the first target in this file to link std::thread
+# directly (the test's one-shot HTTPS server fixture runs its accept loop on a
+# background thread), and CMake's Threads::Threads imported target is only
+# guaranteed to exist once find_package(Threads) has actually run.
+find_package(Threads REQUIRED)
+target_link_libraries(palmier_services_openssl_generative_transport_tests PRIVATE
+    Palmier::core
+    Palmier::test_support
+    Threads::Threads)
+
+palmier_test_enable_openssl(palmier_services_openssl_generative_transport_tests)
+
+palmier_register_test(palmier_services_openssl_generative_transport_tests)
+
+
+
+# ---------------------------------------------------------------------------
 # Decoder teardown tests (tasks 7.1, 7.2; Requirement 14.8) — Property 75 plus
 # the unit tests for media::DecoderTeardownQueue.
 #
