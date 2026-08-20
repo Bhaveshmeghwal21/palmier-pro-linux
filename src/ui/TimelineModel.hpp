@@ -30,6 +30,7 @@
 #include <QVariant>
 
 #include "core/TimelineEngine.hpp"
+#include "core/FrameRate.hpp"
 #include "ui/GuiToolGateway.hpp"
 #include "ui/TimelineViewModel.hpp"
 
@@ -94,6 +95,22 @@ public:
     [[nodiscard]] bool canUndo() const { return vm_.canUndo(); }
     [[nodiscard]] bool canRedo() const { return vm_.canRedo(); }
 
+    /// Whether another track could be added without exceeding the 50-track cap
+    /// (Requirement 2.1 of usable-editor; TimelineViewModel::canAddTrack()).
+    [[nodiscard]] bool canAddTrack() const noexcept { return vm_.canAddTrack(); }
+
+    /// Total timeline length in milliseconds (usable-editor Requirement 4: the
+    /// scrub control's upper bound). 0 for an empty project.
+    [[nodiscard]] qint64 timelineDurationMs() const {
+        return vm_.timelineDuration().milliseconds();
+    }
+
+    /// The project's edit frame rate (usable-editor Requirement 4: frame
+    /// snapping and single-frame stepping use THIS rate, not the >= 24 fps
+    /// preview-display rate PreviewController::previewFrameRate() reports,
+    /// since editing precision should match what the project was authored at).
+    [[nodiscard]] FrameRate timelineFps() const noexcept { return vm_.project().timelineFps; }
+
     // --- Gestures invokable from QML ---------------------------------------
     // Positions/boundaries are milliseconds on the timeline / in source time; a
     // clip id is its canonical UUID string. Each returns true iff the gesture
@@ -108,6 +125,14 @@ public:
     Q_INVOKABLE bool reorderClips(const QString& trackId, const QStringList& clipIdOrder);
     Q_INVOKABLE bool undo();
     Q_INVOKABLE bool redo();
+
+    /// Append a track of `kind` ("video" or "audio") after the last existing
+    /// track of that kind (usable-editor Requirement 2). An unrecognized kind
+    /// string is treated as a no-op returning false without touching the
+    /// project. Gated on canAddTrack() by the caller (MainWindow disables the
+    /// menu action at the 50-track ceiling), but also safe to call unconditionally
+    /// since AddTrackCommand enforces its own cap regardless.
+    Q_INVOKABLE bool addTrack(const QString& kind);
 
 signals:
     void modelRefreshed();

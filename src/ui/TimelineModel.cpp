@@ -241,6 +241,20 @@ bool TimelineModel::redo() {
     return r.changed();
 }
 
+bool TimelineModel::addTrack(const QString& kind) {
+    TrackKind parsed;
+    if (kind == QStringLiteral("video")) {
+        parsed = TrackKind::Video;
+    } else if (kind == QStringLiteral("audio")) {
+        parsed = TrackKind::Audio;
+    } else {
+        return false;
+    }
+    const GestureResult r = vm_.addTrack(parsed);
+    emit indicationChanged();
+    return r.changed();
+}
+
 }  // namespace palmier::ui
 
 #endif  // PALMIER_HAVE_QT

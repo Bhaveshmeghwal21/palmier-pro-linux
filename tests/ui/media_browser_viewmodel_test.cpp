@@ -94,6 +94,58 @@ TEST(MediaBrowserViewModelTest, LibraryPreservesImportOrder) {
     EXPECT_EQ(rows[2].displayName, "third.wav");
 }
 
+// --- Library asset selection (usable-editor Requirement 3) ------------------
+//
+// Distinct from selectClip()/selectedClip() below (which pick a TIMELINE
+// CLIP's version history to show); this is "which library row is the
+// placement candidate". Before this existed, nothing recorded a library
+// selection at all, so a Place-at-Playhead gesture had no way to know which
+// asset the user meant.
+
+TEST(MediaBrowserViewModelTest, LibraryAssetSelectionRoundTrips) {
+    MediaManager media;
+    KeyMomentMarkerModel markers;
+    MediaBrowserViewModel vm(media, markers, acceptingValidator());
+
+    EXPECT_EQ(vm.selectedLibraryAsset(), std::nullopt);
+
+    const auto imported = vm.importMedia("/clips/a.mp4");
+    ASSERT_TRUE(imported.isOk());
+    vm.selectLibraryAsset(imported.value().assetId);
+    EXPECT_EQ(vm.selectedLibraryAsset(), imported.value().assetId);
+
+    vm.clearLibraryAssetSelection();
+    EXPECT_EQ(vm.selectedLibraryAsset(), std::nullopt);
+}
+
+TEST(MediaBrowserViewModelTest, ALibrarySelectionThatLeftTheLibraryReadsAsNoSelection) {
+    // The Media Manager offers no removal API today, so this models the same
+    // "selection points at something gone" case InspectorViewModel handles for
+    // a deleted clip: select an id, then observe it is reported as cleared once
+    // it is no longer present — using a second, independent MediaManager that
+    // never had the id to represent "no longer resolvable".
+    MediaManager media;
+    KeyMomentMarkerModel markers;
+    MediaBrowserViewModel vm(media, markers, acceptingValidator());
+
+    vm.selectLibraryAsset(Uuid::generateV4());  // never imported into `media`
+    EXPECT_EQ(vm.selectedLibraryAsset(), std::nullopt);
+}
+
+TEST(MediaBrowserViewModelTest, AssetDurationIsUnknownUntilCachedByAGatewayImport) {
+    MediaManager media;
+    KeyMomentMarkerModel markers;
+    MediaBrowserViewModel vm(media, markers, acceptingValidator());
+
+    const auto imported = vm.importMedia("/clips/a.mp4");
+    ASSERT_TRUE(imported.isOk());
+    // importMedia() (the plain validator-injected path) never probes a
+    // duration, so nothing is cached for it — this is the documented gap
+    // assetDuration()'s contract calls out, exercised end to end with a real
+    // gateway in ShellPlacementTest (tests/ui/shell_unit_test.cpp).
+    EXPECT_EQ(vm.assetDuration(imported.value().assetId), std::nullopt);
+}
+
 // --- Import rejection (Requirements 3.2, 3.3) ------------------------------
 
 TEST(MediaBrowserViewModelTest, UnsupportedFormatRejectionLeavesLibraryUnchanged) {

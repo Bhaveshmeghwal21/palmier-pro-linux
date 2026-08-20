@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <string>
 
 #include "core/Error.hpp"
 #include "services/Json.hpp"
@@ -152,6 +153,27 @@ GestureResult TimelineViewModel::removeClip(ClipId id) {
         return classifyToolResult(gateway_->deleteClip(id), GestureIndication::Rejected);
     }
     return run(std::make_unique<DeleteClipCommand>(id), GestureIndication::Rejected);
+}
+
+GestureResult TimelineViewModel::addTrack(TrackKind kind) {
+    // Enforce the 50-track UI ceiling here: AddTrackCommand itself only rejects
+    // at the (much higher) 64-tracks-per-kind cap of Requirement 3.8, so without
+    // this check a 51st track could still be added by construction even though
+    // canAddTrack() (and the menu action MainWindow disables from it) says no.
+    if (!canAddTrack()) {
+        GestureResult out;
+        out.outcome = CommandOutcome::Failed;
+        out.indication = GestureIndication::Rejected;
+        out.message = "the timeline already holds the maximum of " +
+                      std::to_string(kMaxTracks) + " tracks";
+        lastIndication_ = out.indication;
+        lastMessage_ = out.message;
+        return out;
+    }
+    if (gateway_ != nullptr) {
+        return classifyToolResult(gateway_->addTrack(kind), GestureIndication::Rejected);
+    }
+    return run(std::make_unique<AddTrackCommand>(kind), GestureIndication::Rejected);
 }
 
 GestureResult TimelineViewModel::undo() {

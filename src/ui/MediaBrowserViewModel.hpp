@@ -67,6 +67,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "core/Clip.hpp"  // ClipId
@@ -223,6 +224,33 @@ public:
     /// True iff an asset with `assetId` is in the library.
     [[nodiscard]] bool libraryContains(const Uuid& assetId) const;
 
+    /// The probed duration of `assetId`, if known. Populated only for assets
+    /// imported through importMediaViaGateway() (the media.import tool's result
+    /// carries durationMs; the plain validator-injected importMedia() path does
+    /// not probe a duration at all, so an asset imported that way has none
+    /// cached). std::nullopt for an unknown or untracked asset. Placement
+    /// (usable-editor Requirement 3) uses this to size a placed clip's source
+    /// range without re-probing the file.
+    [[nodiscard]] std::optional<Duration> assetDuration(const Uuid& assetId) const;
+
+    // --- Library asset selection (usable-editor Requirement 3) -------------
+    //
+    // Distinct from the clip VERSION selection below (selectClip() / selectedClip()
+    // select which TIMELINE CLIP's version history and key moments the panel
+    // shows). This is "which LIBRARY ROW is the placement candidate" — the asset
+    // a Place-at-Playhead gesture will place, independent of any clip already on
+    // the timeline.
+
+    /// Select the library asset a placement gesture should use.
+    void selectLibraryAsset(Uuid assetId);
+
+    /// Clear the current library asset selection.
+    void clearLibraryAssetSelection() noexcept;
+
+    /// The currently selected library asset, or std::nullopt if none is selected
+    /// or the selected id has left the library (e.g. removed by another surface).
+    [[nodiscard]] std::optional<Uuid> selectedLibraryAsset() const;
+
     // --- Clip selection ----------------------------------------------------
 
     /// Select the clip whose versions and key-moment markers the panel shows.
@@ -271,7 +299,9 @@ private:
     ImportValidator                  validator_;
     GuiToolGateway*                  gateway_ = nullptr;
     std::optional<ClipId>            selectedClip_;
+    std::optional<Uuid>              selectedLibraryAsset_;
     std::optional<std::string>       lastImportError_;
+    std::unordered_map<Uuid, Duration> assetDurations_;
 };
 
 }  // namespace palmier::ui

@@ -242,6 +242,13 @@ public:
     /// Remove a clip by id.
     GestureResult removeClip(ClipId id);
 
+    /// Append a track of `kind` after the last existing track of that kind
+    /// (usable-editor Requirement 2). Rejected (Rejected indication, no change)
+    /// once trackCount() has reached kMaxTracks; callers should also gate the
+    /// affordance on canAddTrack() so the rejection is the exceptional case
+    /// rather than the expected one.
+    GestureResult addTrack(TrackKind kind);
+
     /// Undo / redo the most recent edit. Empty history is a NoOp (Req 2.10).
     /// Always goes directly through the engine's own undo/redo stack (there is
     /// no `edit.undo`/`edit.redo` tool-call form these route through beyond

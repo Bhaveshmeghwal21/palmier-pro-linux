@@ -53,6 +53,8 @@ void MediaBrowserPanel::buildUi() {
 
     layout->addWidget(new QLabel(QStringLiteral("Library"), this));
     libraryList_ = new QListWidget(this);
+    connect(libraryList_, &QListWidget::currentRowChanged, this,
+            &MediaBrowserPanel::onLibraryRowChanged);
     layout->addWidget(libraryList_);
 
     layout->addWidget(new QLabel(QStringLiteral("Clip Versions"), this));
@@ -176,6 +178,20 @@ void MediaBrowserPanel::refreshKeyMoments() {
                 QStringLiteral("%1 key-moment marker(s)").arg(display.markers.size()));
             break;
     }
+}
+
+void MediaBrowserPanel::onLibraryRowChanged(int row) {
+    // Row index maps directly onto viewModel_.library()'s order (both are the
+    // Media Manager's import-order library, read fresh here rather than cached,
+    // so this stays correct even if the library changed since the list was last
+    // populated).
+    const std::vector<MediaLibraryEntry> rows = viewModel_.library();
+    if (row < 0 || static_cast<std::size_t>(row) >= rows.size()) {
+        viewModel_.clearLibraryAssetSelection();
+    } else {
+        viewModel_.selectLibraryAsset(rows[static_cast<std::size_t>(row)].assetId);
+    }
+    emit librarySelectionChanged();
 }
 
 }  // namespace palmier::ui

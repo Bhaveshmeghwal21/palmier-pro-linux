@@ -93,6 +93,10 @@ private slots:
     void onAbout();
     void onDocumentation();
     void onStatusRefreshTick();
+    void onTimelineClipSelected(const QString& clipId);
+    void onTimelineSelectionCleared();
+    void onPlaceAtPlayhead();
+    void onPlacementContextChanged();
 
 private:
     void buildDocks();
@@ -101,6 +105,8 @@ private:
     void refreshWindowTitle();
     void refreshUndoRedoActions();
     void refreshNotices();
+    void refreshSelectionActions();
+    void refreshPlacementAction();
     UiPrompts makeUiPrompts();
 
     app::ApplicationComposition& composition_;
@@ -123,6 +129,11 @@ private:
     // Menu actions that must reflect engine/session state (enabled/disabled).
     QAction* undoAction_ = nullptr;
     QAction* redoAction_ = nullptr;
+    QAction* deleteClipAction_ = nullptr;
+    QAction* splitAction_ = nullptr;
+    QAction* addVideoTrackAction_ = nullptr;
+    QAction* addAudioTrackAction_ = nullptr;
+    QAction* placeAtPlayheadAction_ = nullptr;
 
     // Status bar: the three persistent notices (GPU, software-compositing,
     // audio) plus the export progress surface's parent dialog.

@@ -168,6 +168,56 @@ TEST(TimelineViewModel, SupportsOneToFiftyTracks) {
     }
 }
 
+// --- Track creation gesture (usable-editor Requirement 2) ------------------
+//
+// Prior to this, GuiToolGateway::addTrack() existed and was tested at the
+// gateway/tool level, but no view-model gesture and no GUI affordance ever
+// called it — TimelineViewModel exposed only the canAddTrack() predicate.
+
+TEST(TimelineViewModel, AddTrackAppendsAfterTheLastTrackOfTheSameKind) {
+    Project p = makeProject();
+    p.tracks.push_back(makeTrack(TrackKind::Video));
+    p.tracks.push_back(makeTrack(TrackKind::Audio));
+
+    TimelineEngine engine(p);
+    TimelineViewModel vm(engine);
+
+    const GestureResult r = vm.addTrack(TrackKind::Video);
+    EXPECT_TRUE(r.changed());
+    EXPECT_EQ(r.indication, GestureIndication::Applied);
+    ASSERT_EQ(vm.trackCount(), 3u);
+    // Appended after the existing video track, ahead of the audio track's
+    // original position preserved: video, video, audio.
+    EXPECT_EQ(vm.trackAt(0)->kind, TrackKind::Video);
+    EXPECT_EQ(vm.trackAt(1)->kind, TrackKind::Video);
+    EXPECT_EQ(vm.trackAt(2)->kind, TrackKind::Audio);
+}
+
+TEST(TimelineViewModel, AddTrackIsUndoableRestoringTheExactPriorTrackList) {
+    Project p = makeProjectWithTracks(2);
+    TimelineEngine engine(p);
+    TimelineViewModel vm(engine);
+
+    ASSERT_TRUE(vm.addTrack(TrackKind::Audio).changed());
+    ASSERT_EQ(vm.trackCount(), 3u);
+
+    ASSERT_TRUE(engine.canUndo());
+    EXPECT_TRUE(engine.undo().changed());
+    EXPECT_EQ(vm.trackCount(), 2u);
+}
+
+TEST(TimelineViewModel, AddTrackAtTheFiftyTrackCeilingIsRejectedAndLeavesTheProjectUnchanged) {
+    Project p = makeProjectWithTracks(50);
+    TimelineEngine engine(p);
+    TimelineViewModel vm(engine);
+
+    ASSERT_FALSE(vm.canAddTrack());
+    const GestureResult r = vm.addTrack(TrackKind::Video);
+    EXPECT_FALSE(r.changed());
+    EXPECT_EQ(r.indication, GestureIndication::Rejected);
+    EXPECT_EQ(vm.trackCount(), 50u);
+}
+
 // --- Drag-move gesture (Requirements 2.2, 2.3) -----------------------------
 
 TEST(TimelineViewModel, MoveClipToValidPositionApplies) {

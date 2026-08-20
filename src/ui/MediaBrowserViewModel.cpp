@@ -76,7 +76,23 @@ Result<services::Json> MediaBrowserViewModel::importMediaViaGateway(const std::s
         return err<services::Json>(
             failedPrecondition("MediaBrowserViewModel: no gateway is installed"));
     }
-    return gateway_->importMedia(path);
+    Result<services::Json> result = gateway_->importMedia(path);
+    if (result.isOk()) {
+        // Cache the probed duration so a later placement gesture can size the
+        // clip without re-probing the file (usable-editor Requirement 3).
+        const services::Json& payload = result.value();
+        if (payload.isObject()) {
+            const services::Json* assetIdField = payload.find("assetId");
+            const services::Json* durationField = payload.find("durationMs");
+            if (assetIdField != nullptr && assetIdField->isString() && durationField != nullptr &&
+                durationField->isNumber()) {
+                if (const std::optional<Uuid> assetId = Uuid::parse(assetIdField->asString())) {
+                    assetDurations_[*assetId] = Duration::fromMilliseconds(durationField->asInt());
+                }
+            }
+        }
+    }
+    return result;
 }
 
 // --- Library (Requirement 3.1) ----------------------------------------------
@@ -95,6 +111,35 @@ std::size_t MediaBrowserViewModel::libraryCount() const { return media_.assetCou
 
 bool MediaBrowserViewModel::libraryContains(const Uuid& assetId) const {
     return media_.hasAsset(assetId);
+}
+
+std::optional<Duration> MediaBrowserViewModel::assetDuration(const Uuid& assetId) const {
+    const auto it = assetDurations_.find(assetId);
+    if (it == assetDurations_.end()) {
+        return std::nullopt;
+    }
+    return it->second;
+}
+
+// --- Library asset selection (usable-editor Requirement 3) ------------------
+
+void MediaBrowserViewModel::selectLibraryAsset(Uuid assetId) { selectedLibraryAsset_ = assetId; }
+
+void MediaBrowserViewModel::clearLibraryAssetSelection() noexcept {
+    selectedLibraryAsset_.reset();
+}
+
+std::optional<Uuid> MediaBrowserViewModel::selectedLibraryAsset() const {
+    if (!selectedLibraryAsset_.has_value()) {
+        return std::nullopt;
+    }
+    // A selection pointing at an asset no longer in the library (removed by
+    // another surface) is reported as no selection, mirroring how
+    // InspectorViewModel treats a selected clip that has disappeared.
+    if (!media_.hasAsset(*selectedLibraryAsset_)) {
+        return std::nullopt;
+    }
+    return selectedLibraryAsset_;
 }
 
 // --- Clip selection ---------------------------------------------------------

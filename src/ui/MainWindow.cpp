@@ -39,6 +39,7 @@
 #include "core/Uuid.hpp"
 #include "media/ImportValidation.hpp"
 #include "services/AgentOrchestrator.hpp"
+#include "services/Json.hpp"
 #include "services/KeyMomentMarkers.hpp"
 #include "ui/AgentChatPanel.hpp"
 #include "ui/ExportDialog.hpp"
@@ -73,6 +74,7 @@ MainWindow::MainWindow(app::ApplicationComposition& composition, QWidget* parent
     refreshWindowTitle();
     refreshUndoRedoActions();
     refreshNotices();
+    refreshSelectionActions();
 
     statusRefreshTimer_ = new QTimer(this);
     connect(statusRefreshTimer_, &QTimer::timeout, this, &MainWindow::onStatusRefreshTick);
@@ -106,6 +108,8 @@ void MainWindow::buildDocks() {
     mediaDock_->setMinimumSize(80, 60);
     mediaDock_->setWidget(mediaBrowserPanel_);
     addDockWidget(Qt::LeftDockWidgetArea, mediaDock_);
+    connect(mediaBrowserPanel_, &MediaBrowserPanel::librarySelectionChanged, this,
+            &MainWindow::onPlacementContextChanged);
 
     // Timeline (bottom).
     timelinePanel_ = new TimelinePanel(composition_.timeline(), composition_.playbackEngine(),
@@ -115,6 +119,12 @@ void MainWindow::buildDocks() {
     timelineDock_->setMinimumSize(80, 60);
     timelineDock_->setWidget(timelinePanel_);
     addDockWidget(Qt::BottomDockWidgetArea, timelineDock_);
+    connect(timelinePanel_, &TimelinePanel::clipSelected, this,
+            &MainWindow::onTimelineClipSelected);
+    connect(timelinePanel_, &TimelinePanel::selectionCleared, this,
+            &MainWindow::onTimelineSelectionCleared);
+    connect(timelinePanel_, &TimelinePanel::placementTrackChanged, this,
+            &MainWindow::onPlacementContextChanged);
 
     // Preview (central) — binds to the composition's SHARED PreviewController,
     // not a second independently-constructed one (Requirement 1.1).
@@ -186,12 +196,34 @@ void MainWindow::buildMenus() {
     connect(redoAction_, &QAction::triggered, this, &MainWindow::onRedo);
 
     editMenu->addSeparator();
-    QAction* deleteClipAction = editMenu->addAction(QStringLiteral("Delete &Clip"));
-    deleteClipAction->setShortcut(QKeySequence::Delete);
-    connect(deleteClipAction, &QAction::triggered, this, &MainWindow::onDeleteClip);
+    deleteClipAction_ = editMenu->addAction(QStringLiteral("Delete &Clip"));
+    deleteClipAction_->setShortcut(QKeySequence::Delete);
+    deleteClipAction_->setEnabled(false);  // no clip is selected at startup
+    connect(deleteClipAction_, &QAction::triggered, this, &MainWindow::onDeleteClip);
 
-    QAction* splitAction = editMenu->addAction(QStringLiteral("&Split at Playhead"));
-    connect(splitAction, &QAction::triggered, this, &MainWindow::onSplitAtPlayhead);
+    splitAction_ = editMenu->addAction(QStringLiteral("&Split at Playhead"));
+    splitAction_->setEnabled(false);  // no clip is selected at startup
+    connect(splitAction_, &QAction::triggered, this, &MainWindow::onSplitAtPlayhead);
+
+    editMenu->addSeparator();
+    addVideoTrackAction_ = editMenu->addAction(QStringLiteral("Add &Video Track"));
+    connect(addVideoTrackAction_, &QAction::triggered, this, [this]() {
+        if (timelinePanel_ != nullptr) {
+            (void)timelinePanel_->model().addTrack(QStringLiteral("video"));
+        }
+    });
+
+    addAudioTrackAction_ = editMenu->addAction(QStringLiteral("Add &Audio Track"));
+    connect(addAudioTrackAction_, &QAction::triggered, this, [this]() {
+        if (timelinePanel_ != nullptr) {
+            (void)timelinePanel_->model().addTrack(QStringLiteral("audio"));
+        }
+    });
+
+    editMenu->addSeparator();
+    placeAtPlayheadAction_ = editMenu->addAction(QStringLiteral("&Place at Playhead"));
+    placeAtPlayheadAction_->setEnabled(false);  // no asset/track selected at startup
+    connect(placeAtPlayheadAction_, &QAction::triggered, this, &MainWindow::onPlaceAtPlayhead);
 
     QMenu* playbackMenu = menuBar()->addMenu(QStringLiteral("&Playback"));
     QAction* playPauseAction = playbackMenu->addAction(QStringLiteral("&Play/Pause"));
@@ -368,19 +400,109 @@ void MainWindow::onRedo() {
 
 void MainWindow::onDeleteClip() {
     if (!inspectorViewModel_.hasSelection()) {
-        statusBar()->showMessage(QStringLiteral("No clip is selected"), 3000);
-        return;
+        return;  // disabled per refreshSelectionActions(); a shortcut race is a no-op
     }
     (void)gateway_.deleteClip(*inspectorViewModel_.selectedClipId());
 }
 
 void MainWindow::onSplitAtPlayhead() {
     if (!inspectorViewModel_.hasSelection() || previewView_ == nullptr) {
-        statusBar()->showMessage(QStringLiteral("No clip is selected"), 3000);
-        return;
+        return;  // disabled per refreshSelectionActions(); a shortcut race is a no-op
     }
     const Duration playhead = previewView_->controller().playhead();
     (void)gateway_.splitClip(*inspectorViewModel_.selectedClipId(), playhead);
+}
+
+// ---------------------------------------------------------------------------
+// Selection (usable-editor Requirement 1): the Timeline panel reports which
+// row is selected; this is where "what does a clip selection mean to the rest
+// of the shell" is decided — driving the Inspector and the two selection-gated
+// Edit actions. TimelinePanel itself has no InspectorViewModel dependency.
+// ---------------------------------------------------------------------------
+
+void MainWindow::onTimelineClipSelected(const QString& clipId) {
+    if (const std::optional<Uuid> id = Uuid::parse(clipId.toStdString())) {
+        inspectorViewModel_.selectClip(*id);
+    }
+    refreshSelectionActions();
+}
+
+void MainWindow::onTimelineSelectionCleared() {
+    inspectorViewModel_.clearSelection();
+    refreshSelectionActions();
+}
+
+void MainWindow::refreshSelectionActions() {
+    const bool hasSelection = inspectorViewModel_.hasSelection();
+    if (deleteClipAction_ != nullptr) {
+        deleteClipAction_->setEnabled(hasSelection);
+    }
+    if (splitAction_ != nullptr) {
+        splitAction_->setEnabled(hasSelection);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Placement (usable-editor Requirement 3): before this, GuiToolGateway::addClip
+// and TimelineViewModel::addClip already existed and were tested at the
+// gateway/view-model level, but no widget ever called either — there was no
+// route from "an asset is in the library" to "a clip exists on the timeline"
+// through the GUI at all. This is that route: take the Media Browser's
+// selected library asset and the Timeline panel's selected track, and place a
+// clip spanning that asset's full probed duration at the current playhead.
+// ---------------------------------------------------------------------------
+
+void MainWindow::onPlacementContextChanged() { refreshPlacementAction(); }
+
+void MainWindow::refreshPlacementAction() {
+    if (placeAtPlayheadAction_ == nullptr) {
+        return;
+    }
+    const bool hasAsset =
+        mediaBrowserPanel_ != nullptr &&
+        mediaBrowserPanel_->viewModel().selectedLibraryAsset().has_value();
+    const bool hasTrack =
+        timelinePanel_ != nullptr && timelinePanel_->selectedTrackId().has_value();
+    placeAtPlayheadAction_->setEnabled(hasAsset && hasTrack);
+}
+
+void MainWindow::onPlaceAtPlayhead() {
+    if (mediaBrowserPanel_ == nullptr || timelinePanel_ == nullptr || previewView_ == nullptr) {
+        return;
+    }
+    const std::optional<Uuid> assetId = mediaBrowserPanel_->viewModel().selectedLibraryAsset();
+    const std::optional<Uuid> trackId = timelinePanel_->selectedTrackId();
+    if (!assetId.has_value() || !trackId.has_value()) {
+        return;  // disabled per refreshPlacementAction(); a shortcut race is a no-op
+    }
+
+    const std::optional<MediaAssetRef> asset = composition_.mediaLibrary().asset(*assetId);
+    if (!asset.has_value()) {
+        statusBar()->showMessage(QStringLiteral("Selected asset is no longer in the library"),
+                                 5000);
+        return;
+    }
+
+    // Size the placed clip to the asset's full probed duration when known
+    // (assets imported through the gateway's media.import call always have
+    // one cached); otherwise fall back to a nominal 1-second placeholder range
+    // rather than refusing the gesture outright, since sourceOutNs > sourceInNs
+    // is a hard requirement of the add_clip tool and there is no other source
+    // of truth for an untracked duration at this layer.
+    const Duration duration = mediaBrowserPanel_->viewModel()
+                                  .assetDuration(*assetId)
+                                  .value_or(Duration::fromSeconds(1.0));
+
+    const Duration playhead = previewView_->controller().playhead();
+    const Result<services::Json> result =
+        gateway_.addClip(*trackId, *assetId, asset->sourcePath, std::nullopt, playhead,
+                         Duration::zero(), duration, /*opacity=*/1.0, /*gain=*/1.0);
+    if (result.isError()) {
+        statusBar()->showMessage(
+            QStringLiteral("Could not place clip: %1")
+                .arg(QString::fromStdString(result.error().message())),
+            8000);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -462,6 +584,13 @@ void MainWindow::onStatusRefreshTick() {
     }
     refreshUndoRedoActions();
     refreshNotices();
+    refreshSelectionActions();
+    if (addVideoTrackAction_ != nullptr && addAudioTrackAction_ != nullptr &&
+        timelinePanel_ != nullptr) {
+        const bool canAddTrack = timelinePanel_->model().canAddTrack();
+        addVideoTrackAction_->setEnabled(canAddTrack);
+        addAudioTrackAction_->setEnabled(canAddTrack);
+    }
 }
 
 } // namespace palmier::ui

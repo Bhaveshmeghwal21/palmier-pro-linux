@@ -43,7 +43,14 @@
 # and captures a screenshot of it. This covers what no assertion in the suite
 # can — the real executable going through main.cpp's launch sequence and a live
 # Qt event loop — and makes "the editor launches and renders" a visible artifact
-# rather than an inference from widget-level unit tests.
+# rather than an inference from widget-level unit tests. It then drives Edit >
+# Add Video Track through the keyboard against the SAME running process and
+# captures a second screenshot, so the artifact also shows a real GUI-driven
+# edit rather than only an empty, uneditable window (usable-editor spec, Phase
+# 1). This second step is evidentiary, not a hard gate: the pass/fail assertions
+# for GUI editing live in the GTest suite above (tests/ui/shell_unit_test.cpp's
+# ShellSelectionTest/ShellPlacementTest/ShellPlayheadTest and the two
+# AddTrackAction tests), which is where a real failure should be caught.
 #
 # The third job, `l4-validation`, is the Requirement 8.5 hardware-encode lane. It
 # needs an NVIDIA L4, which no hosted runner has, so it runs only on a manual
@@ -433,12 +440,47 @@ jobs:
           fi
 
           echo "OK: palmier-pro launched, mapped its main window and painted ${colours} distinct colours"
+
+          # -------------------------------------------------------------------
+          # GUI-driven edit (usable-editor spec, Phase 1 checkpoint). Everything
+          # above proves the shell launches and renders; this proves a real
+          # keyboard/mouse-level gesture against the SHIPPED BINARY actually
+          # changes project state, which is the gap the usable-editor spec
+          # exists to close (before Phase 1, no widget in this window could
+          # create a track or place a clip at all).
+          #
+          # Alt+E opens the Edit menu (its title is "&Edit"); Qt menus jump
+          # straight to an action when its underlined mnemonic letter is typed,
+          # so "v" activates "Add &Video Track" without depending on the menu's
+          # item order (unlike counting arrow-key presses, which breaks the
+          # moment an item is added or reordered). Activating it, then reopening
+          # the same menu, is a return trip through the exact widget/gateway/
+          # engine/model path Task 2 wired end to end.
+          xdotool windowactivate "$window"
+          sleep 1
+          xdotool key --window "$window" alt+e
+          sleep 1
+          xdotool key --window "$window" v
+          sleep 1
+          xdotool key --window "$window" Escape
+
+          sleep 1
+          import -display "$DISPLAY" -window root smoke/palmier-pro-after-add-track.png
+          echo "OK: drove Edit > Add Video Track via the keyboard; see smoke/app.log for any reported error"
+
+          if ! kill -0 "$app_pid" 2>/dev/null; then
+            echo "::error::palmier-pro died after the GUI-driven edit"
+            cat smoke/app.log || true
+            exit 1
+          fi
+
           {
             echo "### Launch smoke test"
             echo
             echo "\`palmier-pro\` launched under Xvfb, mapped its main window and painted"
             echo "${colours} distinct colours. The screenshot and the editor's own stderr are"
-            echo "published as the \`launch-smoke-test\` artifact."
+            echo "published as the \`launch-smoke-test\` artifact, alongside a second"
+            echo "screenshot taken after driving Edit > Add Video Track through the keyboard."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the launch screenshot and the editor's own output
@@ -448,6 +490,7 @@ jobs:
           name: launch-smoke-test
           path: |
             smoke/palmier-pro-launch.png
+            smoke/palmier-pro-after-add-track.png
             smoke/app.log
             smoke/xvfb.log
           if-no-files-found: warn

@@ -60,6 +60,16 @@ public:
     /// validator-injected `importMedia()`.
     void setGateway(GuiToolGateway* gateway) noexcept { viewModel_.setGateway(gateway); }
 
+    /// The underlying view model, for MainWindow to read the current library
+    /// asset selection when building a placement gesture (usable-editor
+    /// Requirement 3).
+    [[nodiscard]] MediaBrowserViewModel& viewModel() noexcept { return viewModel_; }
+
+signals:
+    /// The library asset selection changed (a row was picked, or the selection
+    /// was cleared because the list lost its current row).
+    void librarySelectionChanged();
+
 public slots:
     /// Prompt for a media file and import it through the view model, surfacing a
     /// "could not import" message (which names the format / unreadable file) on
@@ -71,6 +81,7 @@ private:
     void refreshLibrary();
     void refreshVersions();
     void refreshKeyMoments();
+    void onLibraryRowChanged(int row);
 
     MediaBrowserViewModel viewModel_;
 

@@ -10,12 +10,24 @@
 
 #ifdef PALMIER_HAVE_QT
 
+#include <algorithm>
+#include <cstdint>
+
 #include <QHBoxLayout>
+#include <QItemSelectionModel>
 #include <QLabel>
+#include <QLineEdit>
+#include <QSignalBlocker>
+#include <QSlider>
 #include <QString>
+#include <QStringList>
 #include <QToolButton>
 #include <QTreeView>
 #include <QVBoxLayout>
+
+#include "core/Duration.hpp"
+#include "core/FrameRate.hpp"
+#include "core/Uuid.hpp"
 
 namespace palmier::ui {
 
@@ -26,6 +38,10 @@ TimelinePanel::TimelinePanel(TimelineEngine& engine, PreviewController& transpor
 
     connect(&model_, &TimelineModel::modelRefreshed, this,
             &TimelinePanel::refreshTransportState);
+    connect(&model_, &TimelineModel::modelRefreshed, this,
+            &TimelinePanel::onModelRefreshed);
+    connect(tree_->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+            &TimelinePanel::onTreeSelectionChanged);
 
     refreshTransportState();
 }
@@ -71,6 +87,42 @@ void TimelinePanel::buildLayout() {
     transportLayout->addStretch(1);
     transportLayout->addWidget(playheadLabel_);
 
+    // Playhead bar (usable-editor Requirement 4): a scrub slider spanning the
+    // timeline, frame-step buttons, and an editable timecode field. All four
+    // gestures funnel through movePlayheadToMs() so every one snaps to the
+    // nearest frame and clamps to [0, timeline duration] identically.
+    auto* playheadBar = new QWidget(this);
+    auto* playheadLayout = new QHBoxLayout(playheadBar);
+    playheadLayout->setContentsMargins(0, 0, 0, 0);
+
+    stepBackButton_ = new QToolButton(playheadBar);
+    stepBackButton_->setText(QStringLiteral("|◄"));
+    stepBackButton_->setToolTip(QStringLiteral("Step back one frame"));
+    connect(stepBackButton_, &QToolButton::clicked, this, &TimelinePanel::onStepBackClicked);
+
+    scrubSlider_ = new QSlider(Qt::Horizontal, playheadBar);
+    scrubSlider_->setMinimum(0);
+    scrubSlider_->setMaximum(0);  // updated by refreshTransportState() as the project changes
+    scrubSlider_->setTracking(true);
+    connect(scrubSlider_, &QSlider::valueChanged, this, &TimelinePanel::onScrubSliderMoved);
+
+    stepForwardButton_ = new QToolButton(playheadBar);
+    stepForwardButton_->setText(QStringLiteral("►|"));
+    stepForwardButton_->setToolTip(QStringLiteral("Step forward one frame"));
+    connect(stepForwardButton_, &QToolButton::clicked, this,
+            &TimelinePanel::onStepForwardClicked);
+
+    timecodeEdit_ = new QLineEdit(playheadBar);
+    timecodeEdit_->setText(QStringLiteral("00:00:00.000"));
+    timecodeEdit_->setFixedWidth(96);
+    timecodeEdit_->setToolTip(QStringLiteral("HH:MM:SS.mmm — press Enter to seek"));
+    connect(timecodeEdit_, &QLineEdit::returnPressed, this, &TimelinePanel::onTimecodeEdited);
+
+    playheadLayout->addWidget(stepBackButton_);
+    playheadLayout->addWidget(scrubSlider_, /*stretch=*/1);
+    playheadLayout->addWidget(stepForwardButton_);
+    playheadLayout->addWidget(timecodeEdit_);
+
     tree_ = new QTreeView(this);
     tree_->setModel(&model_);
     tree_->setAlternatingRowColors(true);
@@ -78,7 +130,23 @@ void TimelinePanel::buildLayout() {
     tree_->setSelectionMode(QAbstractItemView::SingleSelection);
 
     rootLayout->addWidget(transportBar);
+    rootLayout->addWidget(playheadBar);
     rootLayout->addWidget(tree_, /*stretch=*/1);
+}
+
+QString TimelinePanel::formatPlayheadTimecode() const {
+    const double seconds = transport_.playhead().seconds();
+    const int totalMs = static_cast<int>(seconds * 1000.0 + 0.5);
+    const int ms = totalMs % 1000;
+    const int totalSeconds = totalMs / 1000;
+    const int s = totalSeconds % 60;
+    const int m = (totalSeconds / 60) % 60;
+    const int h = totalSeconds / 3600;
+    return QStringLiteral("%1:%2:%3.%4")
+        .arg(h, 2, 10, QChar('0'))
+        .arg(m, 2, 10, QChar('0'))
+        .arg(s, 2, 10, QChar('0'))
+        .arg(ms, 3, 10, QChar('0'));
 }
 
 void TimelinePanel::refreshTransportState() {
@@ -89,18 +157,26 @@ void TimelinePanel::refreshTransportState() {
         redoButton_->setEnabled(model_.canRedo());
     }
     if (playheadLabel_ != nullptr) {
-        const double seconds = transport_.playhead().seconds();
-        const int totalMs = static_cast<int>(seconds * 1000.0 + 0.5);
-        const int ms = totalMs % 1000;
-        const int totalSeconds = totalMs / 1000;
-        const int s = totalSeconds % 60;
-        const int m = (totalSeconds / 60) % 60;
-        const int h = totalSeconds / 3600;
-        playheadLabel_->setText(QStringLiteral("%1:%2:%3.%4")
-                                    .arg(h, 2, 10, QChar('0'))
-                                    .arg(m, 2, 10, QChar('0'))
-                                    .arg(s, 2, 10, QChar('0'))
-                                    .arg(ms, 3, 10, QChar('0')));
+        playheadLabel_->setText(formatPlayheadTimecode());
+    }
+    const qint64 playheadMs = transport_.playhead().milliseconds();
+    if (scrubSlider_ != nullptr) {
+        const qint64 durationMs = std::max<qint64>(model_.timelineDurationMs(), playheadMs);
+        // QSignalBlocker: setting the slider's range/value from engine state
+        // must not itself fire valueChanged() and re-issue a seek — this refresh
+        // reflects the current playhead, it does not move it.
+        QSignalBlocker blocker(scrubSlider_);
+        if (scrubSlider_->maximum() != durationMs) {
+            scrubSlider_->setMaximum(static_cast<int>(durationMs));
+        }
+        if (scrubSlider_->value() != static_cast<int>(playheadMs)) {
+            scrubSlider_->setValue(static_cast<int>(playheadMs));
+        }
+    }
+    if (timecodeEdit_ != nullptr && !timecodeEdit_->hasFocus()) {
+        // Only overwrite the field when the user is not actively editing it, so
+        // a periodic refresh cannot clobber an in-progress timecode entry.
+        timecodeEdit_->setText(formatPlayheadTimecode());
     }
 }
 
@@ -125,6 +201,147 @@ void TimelinePanel::onUndoClicked() {
 
 void TimelinePanel::onRedoClicked() {
     model_.redo();
+}
+
+void TimelinePanel::movePlayheadToMs(qint64 requestedMs) {
+    // Requirement 4.5: clamp out-of-range requests to the nearer bound.
+    const qint64 durationMs = model_.timelineDurationMs();
+    const qint64 clampedMs = std::clamp<qint64>(requestedMs, 0, std::max<qint64>(durationMs, 0));
+
+    // Requirement 4.2: snap to the nearest frame boundary at the PROJECT's edit
+    // frame rate (not PreviewController::previewFrameRate(), which is clamped
+    // to >= 24 fps for display smoothness and would snap a lower-fps project's
+    // edits to the wrong grid).
+    const FrameRate fps = model_.timelineFps();
+    Duration snapped = Duration::fromMilliseconds(clampedMs);
+    if (fps.isValid()) {
+        const Duration frameDuration = fps.frameDuration();
+        if (frameDuration.nanoseconds() > 0) {
+            const std::int64_t frameIndex =
+                (Duration::fromMilliseconds(clampedMs).nanoseconds() +
+                 frameDuration.nanoseconds() / 2) /
+                frameDuration.nanoseconds();
+            snapped = fps.durationForFrames(frameIndex);
+        }
+    }
+    transport_.seek(snapped);
+    refreshTransportState();
+}
+
+void TimelinePanel::onScrubSliderMoved(int valueMs) { movePlayheadToMs(valueMs); }
+
+void TimelinePanel::onTimecodeEdited() {
+    if (timecodeEdit_ == nullptr) {
+        return;
+    }
+    const QString text = timecodeEdit_->text().trimmed();
+    // Parse HH:MM:SS.mmm (also accepting bare seconds/M:SS forms leniently, by
+    // splitting on ':' and treating the last part as SS[.mmm]).
+    const QStringList parts = text.split(QChar(':'));
+    double hours = 0.0;
+    double minutes = 0.0;
+    double seconds = 0.0;
+    bool ok = true;
+    if (parts.size() == 3) {
+        hours = parts[0].toDouble(&ok);
+        if (ok) minutes = parts[1].toDouble(&ok);
+        if (ok) seconds = parts[2].toDouble(&ok);
+    } else if (parts.size() == 2) {
+        minutes = parts[0].toDouble(&ok);
+        if (ok) seconds = parts[1].toDouble(&ok);
+    } else if (parts.size() == 1) {
+        seconds = parts[0].toDouble(&ok);
+    } else {
+        ok = false;
+    }
+    if (!ok) {
+        // An unparseable entry restores the current playhead's display rather
+        // than silently doing nothing (so the field never shows stale text the
+        // user typed but that had no effect).
+        refreshTransportState();
+        return;
+    }
+    const double totalSeconds = hours * 3600.0 + minutes * 60.0 + seconds;
+    movePlayheadToMs(static_cast<qint64>(totalSeconds * 1000.0 + (totalSeconds < 0 ? -0.5 : 0.5)));
+    // The field still has focus after Enter (pressing Enter does not blur a
+    // QLineEdit), so refreshTransportState()'s hasFocus() guard — which exists
+    // to avoid clobbering an IN-PROGRESS edit — would otherwise leave whatever
+    // the user literally typed on screen instead of the frame-snapped canonical
+    // form movePlayheadToMs() actually seeked to (Requirement 4.4: the
+    // displayed timecode must agree with the playhead to the frame). This
+    // completed edit is exactly the case that guard is not meant to cover.
+    timecodeEdit_->setText(formatPlayheadTimecode());
+}
+
+void TimelinePanel::onStepBackClicked() {
+    const FrameRate fps = model_.timelineFps();
+    const Duration interval = fps.isValid() ? fps.frameDuration() : Duration::fromMilliseconds(1);
+    movePlayheadToMs((transport_.playhead() - interval).milliseconds());
+}
+
+void TimelinePanel::onStepForwardClicked() {
+    const FrameRate fps = model_.timelineFps();
+    const Duration interval = fps.isValid() ? fps.frameDuration() : Duration::fromMilliseconds(1);
+    movePlayheadToMs((transport_.playhead() + interval).milliseconds());
+}
+
+std::optional<ClipId> TimelinePanel::selectedClipId() const {
+    if (tree_ == nullptr) {
+        return std::nullopt;
+    }
+    const QModelIndexList selected = tree_->selectionModel()->selectedIndexes();
+    if (selected.isEmpty()) {
+        return std::nullopt;
+    }
+    const QModelIndex& index = selected.first();
+    if (model_.data(index, TimelineModel::IsTrackRole).toBool()) {
+        return std::nullopt;  // a track row is selected, not a clip
+    }
+    const QString clipIdText = model_.data(index, TimelineModel::ClipIdRole).toString();
+    return Uuid::parse(clipIdText.toStdString());
+}
+
+std::optional<Uuid> TimelinePanel::selectedTrackId() const {
+    if (tree_ == nullptr) {
+        return std::nullopt;
+    }
+    const QModelIndexList selected = tree_->selectionModel()->selectedIndexes();
+    if (selected.isEmpty()) {
+        return std::nullopt;
+    }
+    const QModelIndex& index = selected.first();
+    // A track row names itself; a clip row names its parent track — either way,
+    // this reports "which lane would a placement land in".
+    const QModelIndex trackIndex =
+        model_.data(index, TimelineModel::IsTrackRole).toBool() ? index : model_.parent(index);
+    if (!trackIndex.isValid()) {
+        return std::nullopt;
+    }
+    const QString trackIdText = model_.data(trackIndex, TimelineModel::TrackIdRole).toString();
+    return Uuid::parse(trackIdText.toStdString());
+}
+
+void TimelinePanel::onTreeSelectionChanged() {
+    reconcileSelection();
+    emit placementTrackChanged();
+}
+
+void TimelinePanel::onModelRefreshed() {
+    reconcileSelection();
+    emit placementTrackChanged();
+}
+
+void TimelinePanel::reconcileSelection() {
+    const std::optional<ClipId> current = selectedClipId();
+    if (current == lastReportedClipId_) {
+        return;  // nothing to (re-)report
+    }
+    lastReportedClipId_ = current;
+    if (current.has_value()) {
+        emit clipSelected(QString::fromStdString(current->toString()));
+    } else {
+        emit selectionCleared();
+    }
 }
 
 }  // namespace palmier::ui
