@@ -31,8 +31,10 @@ namespace palmier::services {
 GenerativeMediaCoordinator::GenerativeMediaCoordinator(IGenerationGate& gate,
                                                        IGenerationRunner& runner,
                                                        MediaManager& library,
-                                                       ITimelinePlacement& placement)
-    : gate_(gate), runner_(runner), library_(library), placement_(placement) {}
+                                                       ITimelinePlacement& placement,
+                                                       const GenerationModelCatalog* catalog)
+    : gate_(gate), runner_(runner), library_(library), placement_(placement),
+      catalog_(catalog) {}
 
 Result<void> GenerativeMediaCoordinator::validatePrompt(std::string_view prompt) {
     const std::size_t length = prompt.size();
@@ -40,6 +42,74 @@ Result<void> GenerativeMediaCoordinator::validatePrompt(std::string_view prompt)
         return err(invalidArgument(
             "prompt must be between 1 and 2000 characters"));
     }
+    return ok();
+}
+
+Result<void> GenerativeMediaCoordinator::checkAgainstCatalog(
+    const GenerationRequest& request) const {
+    // No catalog installed: every request is validated exactly as it was before
+    // PR 406/396/395 existed. A plain prompt-to-video/image request that never
+    // sets `mode`/`mediaType` beyond their defaults is unaffected either way,
+    // catalog or not — this early return only matters for a request that DOES
+    // ask for upscale or audio without a catalog able to authorize it, which is
+    // refused below by the same "model not found" message a caller would see
+    // from a catalog that genuinely lacks the model.
+    if (catalog_ == nullptr) {
+        if (request.mode == GenerationMode::Upscale) {
+            return err(invalidArgument(
+                "generation mode 'upscale' requires a model catalog naming an "
+                "upscale-capable model, and none is configured"));
+        }
+        if (request.mediaType == GenerationMediaType::Audio) {
+            return err(invalidArgument(
+                "audio generation requires a model catalog declaring the "
+                "requesting model's permitted duration range, and none is "
+                "configured"));
+        }
+        return ok();
+    }
+
+    // PR 406: an id absent from the catalog is refused BY NAME, whether or not
+    // the request asks for upscale or audio — a plain generate request naming
+    // an unknown model is exactly as invalid once a catalog exists to check
+    // against, matching PR 406's own check ("refuses an id absent from the
+    // catalog with an error naming the rejected id").
+    const CatalogModel* model = catalog_->findModel(request.model);
+    if (model == nullptr) {
+        return err(invalidArgument(
+            "generation model '" + request.model + "' is not in the model catalog"));
+    }
+
+    // PR 396: upscale is refused by name when the named model does not declare
+    // it, not merely when the model is unknown (that case was handled above).
+    if (request.mode == GenerationMode::Upscale && !model->servesUpscale) {
+        return err(invalidArgument(
+            "generation model '" + request.model +
+            "' does not support mode 'upscale'"));
+    }
+
+    // PR 395: an audio request against a model with no declared range, or a
+    // requested duration outside that range, is refused naming the permitted
+    // range (the check's own wording: "refused with an error naming the
+    // permitted range").
+    if (request.mediaType == GenerationMediaType::Audio) {
+        if (!model->audioDurationRange.has_value()) {
+            return err(invalidArgument(
+                "generation model '" + request.model +
+                "' does not serve audio generation"));
+        }
+        const auto& [minDuration, maxDuration] = *model->audioDurationRange;
+        if (request.requestedDuration < minDuration ||
+            request.requestedDuration > maxDuration) {
+            return err(invalidArgument(
+                "requested audio duration " +
+                std::to_string(request.requestedDuration.seconds()) +
+                "s is outside model '" + request.model +
+                "'s permitted range of " + std::to_string(minDuration.seconds()) +
+                "s to " + std::to_string(maxDuration.seconds()) + "s"));
+        }
+    }
+
     return ok();
 }
 
@@ -67,6 +137,32 @@ Result<GeneratedMediaPlacement> GenerativeMediaCoordinator::generateAndPlace(
     // closes.
     if (!placement_.trackExists(where.trackId)) {
         return err<GeneratedMediaPlacement>(notFound("target track does not exist"));
+    }
+
+    // PR 406/396/395 — the catalog-driven checks: an unknown model, a mode the
+    // named model does not serve, or an out-of-range audio duration are all
+    // caller errors, refused before the entitlement gate for the same reason the
+    // track check runs first — nothing downstream should run for a request that
+    // could never have succeeded.
+    if (Result<void> catalog = checkAgainstCatalog(request); catalog.isError()) {
+        return err<GeneratedMediaPlacement>(std::move(catalog).error());
+    }
+
+    // PR 396 — an upscale request names the clip being upscaled; it must be a
+    // real asset already in this project's media library (upstream's own "an
+    // EXISTING clip can be upscaled" framing), not merely a syntactically valid
+    // UUID. Checked here, alongside the other pre-generation refusals, so an
+    // upscale request naming an absent source never reaches the provider.
+    if (request.mode == GenerationMode::Upscale) {
+        if (request.sourceAssetId.isNil()) {
+            return err<GeneratedMediaPlacement>(invalidArgument(
+                "generation mode 'upscale' requires a sourceAssetId naming the "
+                "clip to upscale"));
+        }
+        if (!library_.hasAsset(request.sourceAssetId)) {
+            return err<GeneratedMediaPlacement>(
+                notFound("upscale source asset does not exist in the media library"));
+        }
     }
 
     // 6.5 / 9.7 — entitlement gate. An unauthorized request never contacts the

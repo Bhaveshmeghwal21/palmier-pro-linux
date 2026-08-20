@@ -246,7 +246,19 @@ Result<GenerativeHttpRequest> HttpGenerativeJobProtocol::submitRequest(
     Json body = Json::object();
     body.set("model", request.model);
     body.set("mediaType", std::string(toStringView(request.mediaType)));
+    body.set("mode", std::string(toStringView(request.mode)));
     body.set("prompt", request.prompt);
+    if (!request.sourceAssetId.isNil()) {
+        body.set("sourceAssetId", request.sourceAssetId.toString());
+    }
+    if (request.targetResolution.isValid()) {
+        body.set("targetWidth", static_cast<std::int64_t>(request.targetResolution.width));
+        body.set("targetHeight", static_cast<std::int64_t>(request.targetResolution.height));
+    }
+    if (request.requestedDuration.isPositive()) {
+        body.set("requestedDurationTicks",
+                 static_cast<std::int64_t>(request.requestedDuration.ticks()));
+    }
     Json params = Json::object();
     for (const auto& [key, value] : request.params) params.set(key, value);
     body.set("params", std::move(params));
@@ -400,7 +412,13 @@ Result<MediaAsset> HttpGenerativeJobProtocol::fetchResult(const JobId& id,
     MediaAsset asset{MediaAssetRef{parsedId.value_or(Uuid::generateV4()), sourcePath},
                      GenerationMediaType::Video};
     const std::string kind = body.value().stringOr("mediaType", "video");
-    asset.mediaType = (kind == "image") ? GenerationMediaType::Image : GenerationMediaType::Video;
+    if (kind == "image") {
+        asset.mediaType = GenerationMediaType::Image;
+    } else if (kind == "audio") {
+        asset.mediaType = GenerationMediaType::Audio;
+    } else {
+        asset.mediaType = GenerationMediaType::Video;
+    }
     return Result<MediaAsset>(std::move(asset));
 }
 

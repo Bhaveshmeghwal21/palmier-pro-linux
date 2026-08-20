@@ -49,6 +49,7 @@
 #include "core/MediaAssetRef.hpp"
 #include "core/Result.hpp"
 #include "core/Uuid.hpp"
+#include "services/GenerationModelCatalog.hpp"
 #include "services/GenerativeClient.hpp"
 
 namespace palmier {
@@ -158,10 +159,21 @@ public:
 /// one across threads must provide external synchronization.
 class GenerativeMediaCoordinator {
 public:
+    /// `catalog` is optional: null means every request is validated exactly as
+    /// it was before PR 406/396/395 (a plain prompt-to-video/image request needs
+    /// no catalog lookup at all, and this coordinator predates the catalog's
+    /// existence). A non-null catalog enables the two additional checks Requests
+    /// 14's backlog entries ask for: `mode: "upscale"` requires the selected
+    /// model to declare `servesUpscale`, and `mediaType: "audio"` requires the
+    /// selected model to declare an `audioDurationRange` that
+    /// `request.requestedDuration` falls within. `catalog`, when non-null, must
+    /// outlive the coordinator, matching every other reference this constructor
+    /// takes.
     GenerativeMediaCoordinator(IGenerationGate& gate,
                                IGenerationRunner& runner,
                                MediaManager& library,
-                               ITimelinePlacement& placement);
+                               ITimelinePlacement& placement,
+                               const GenerationModelCatalog* catalog = nullptr);
 
     /// Validate the prompt, gate on entitlement, generate the media, add it to
     /// the library, and place it on the timeline at `where`.
@@ -171,6 +183,20 @@ public:
     ///   * sourceOut <= sourceIn               -> InvalidArgument;
     ///   * unknown target track                -> NotFound (Req 12.9), checked
     ///                                            before generation ever runs;
+    ///   * `mode: "upscale"` naming a model absent from the catalog, or one that
+    ///     does not declare `servesUpscale`    -> InvalidArgument naming the
+    ///                                            rejected model id (PR 396),
+    ///                                            checked only when a catalog is
+    ///                                            installed;
+    ///   * `mode: "upscale"` with a nil or unknown `sourceAssetId`
+    ///                                          -> InvalidArgument / NotFound
+    ///                                            (PR 396);
+    ///   * `mediaType: "audio"` naming a model absent from the catalog, one with
+    ///     no declared audio duration range, or a `requestedDuration` outside
+    ///     that range                          -> InvalidArgument naming the
+    ///                                            permitted range (PR 395),
+    ///                                            checked only when a catalog is
+    ///                                            installed;
     ///   * no active subscription and no BYOK  -> Unauthenticated (Req 6.5/9.7);
     ///   * generation fails / times out        -> forwarded error (Req 6.6/6.8);
     ///   * placement rejected (bounds/overlap) -> forwarded error, timeline
@@ -186,10 +212,16 @@ public:
     [[nodiscard]] static Result<void> validatePrompt(std::string_view prompt);
 
 private:
-    IGenerationGate&    gate_;
-    IGenerationRunner&  runner_;
-    MediaManager&       library_;
-    ITimelinePlacement& placement_;
+    /// The catalog-driven checks (PR 396's upscale gate, PR 395's duration-range
+    /// gate). A no-op returning ok() when no catalog is installed, so a plain
+    /// prompt-to-video/image request is unaffected either way.
+    [[nodiscard]] Result<void> checkAgainstCatalog(const GenerationRequest& request) const;
+
+    IGenerationGate&              gate_;
+    IGenerationRunner&            runner_;
+    MediaManager&                 library_;
+    ITimelinePlacement&           placement_;
+    const GenerationModelCatalog* catalog_ = nullptr;
 };
 
 // ---------------------------------------------------------------------------

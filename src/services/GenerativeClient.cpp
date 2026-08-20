@@ -18,8 +18,23 @@ std::string_view toStringView(GenerationMediaType type) noexcept {
     switch (type) {
         case GenerationMediaType::Video: return "video";
         case GenerationMediaType::Image: return "image";
+        case GenerationMediaType::Audio: return "audio";
     }
     return "video";
+}
+
+std::string_view toStringView(GenerationMode mode) noexcept {
+    switch (mode) {
+        case GenerationMode::Generate: return "generate";
+        case GenerationMode::Upscale:  return "upscale";
+    }
+    return "generate";
+}
+
+std::optional<GenerationMode> generationModeFromStringView(std::string_view text) noexcept {
+    if (text == "generate") return GenerationMode::Generate;
+    if (text == "upscale") return GenerationMode::Upscale;
+    return std::nullopt;
 }
 
 std::string_view toStringView(GenerationPhase phase) noexcept {

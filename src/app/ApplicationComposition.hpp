@@ -120,6 +120,7 @@ class ExportCoordinator;
 class MediaImportService;
 class ByokCredentialManager;
 class GenerativeClient;
+class GenerationModelCatalog;
 class GenerativeMediaCoordinator;
 class ToolRegistry;
 class McpToolExecutor;
@@ -613,6 +614,7 @@ private:
     std::unique_ptr<services::IGenerationGate>             genGate_;
     std::unique_ptr<services::IGenerationRunner>           genRunner_;
     std::unique_ptr<services::ITimelinePlacement>          placer_;
+    std::unique_ptr<services::GenerationModelCatalog>      genCatalog_;
     std::unique_ptr<services::GenerativeMediaCoordinator>  genCoordinator_;
 
     // --- Shared tool surface + MCP + agent --------------------------------

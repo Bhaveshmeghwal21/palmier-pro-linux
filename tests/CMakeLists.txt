@@ -470,6 +470,7 @@ palmier_register_test(palmier_core_edit_commands_tests)
 add_executable(palmier_services_generative_coordinator_tests
     GenerativeMediaCoordinator_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerationModelCatalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
@@ -735,6 +736,7 @@ palmier_register_test(palmier_gpu_parity_property_tests)
 add_executable(palmier_services_generation_validation_tests
     GenerationValidationAndAuthGating_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerationModelCatalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
@@ -779,6 +781,7 @@ palmier_register_test(palmier_services_generation_validation_tests)
 add_executable(palmier_services_generative_atomicity_property_tests
     services/generative_atomicity_property_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerationModelCatalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
@@ -1428,6 +1431,7 @@ add_executable(palmier_app_composition_tests
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerationModelCatalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
@@ -2561,6 +2565,7 @@ add_executable(palmier_services_generative_lifecycle_tests
     "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerationModelCatalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
@@ -3030,6 +3035,7 @@ add_executable(palmier_services_offline_mode_tests
     "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerationModelCatalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
@@ -3156,6 +3162,7 @@ add_executable(palmier_e2e_tests
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerationModelCatalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"

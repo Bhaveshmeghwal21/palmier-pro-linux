@@ -44,12 +44,15 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 
 #include "core/Duration.hpp"
 #include "core/MediaAssetRef.hpp"
+#include "core/Resolution.hpp"
 #include "core/Result.hpp"
+#include "core/Uuid.hpp"
 
 namespace palmier::services {
 
@@ -58,24 +61,62 @@ namespace palmier::services {
 // ---------------------------------------------------------------------------
 
 /// The kind of media a generation request targets. A request selects exactly
-/// one; the returned MediaAsset must match it (Requirements 6.1, 6.3, 6.4).
+/// one; the returned MediaAsset must match it (Requirements 6.1, 6.3, 6.4, 12).
 enum class GenerationMediaType {
     Video, ///< A supported video SOTA model (Requirement 6.3).
     Image, ///< A supported image SOTA model (Requirement 6.4).
+    Audio, ///< A supported audio SOTA model (PR 395; Requirement 14).
 };
 
-/// Stable lowercase name for a GenerationMediaType ("video"/"image").
+/// The generation mode a request selects (PR 396; Requirement 14). Every
+/// existing request is `Generate` (the default), so this is purely additive:
+/// nothing that predates PR 396 sets it, and the coordinator treats an absent
+/// mode identically to `Generate`.
+enum class GenerationMode {
+    Generate, ///< Produce media from `prompt` (and optionally `sourceAssetId`).
+    Upscale,  ///< Upscale `sourceAssetId` to `targetResolution` (PR 396).
+};
+
+/// Stable lowercase name for a GenerationMode ("generate"/"upscale").
+[[nodiscard]] std::string_view toStringView(GenerationMode mode) noexcept;
+
+/// Parse a lowercase mode name; std::nullopt for anything else, including case
+/// variants (the tool schema's declared enum values are the only accepted
+/// spellings, matching every other enum this project parses at the boundary).
+[[nodiscard]] std::optional<GenerationMode> generationModeFromStringView(
+    std::string_view text) noexcept;
+
+/// Stable lowercase name for a GenerationMediaType.
 [[nodiscard]] std::string_view toStringView(GenerationMediaType type) noexcept;
 
 /// A generation request: the selected SOTA model, the media type it produces,
 /// the user's prompt, and any model-specific parameters (e.g. resolution,
 /// duration, seed). Prompt-length/emptiness validation is intentionally NOT
 /// performed here — that is task 14.2 / 14.4.
+///
+/// `mode`, `sourceAssetId`, `targetResolution` and `requestedDuration` are all
+/// additive (PR 396, PR 395): a plain prompt-to-video/image request leaves every
+/// one of them at its default and behaves exactly as before their addition.
 struct GenerationRequest {
     std::string                        model;     ///< SOTA model id (e.g. "veo", "gpt-image").
     GenerationMediaType                mediaType = GenerationMediaType::Video;
+    GenerationMode                     mode = GenerationMode::Generate;
     std::string                        prompt;    ///< The user's generation prompt.
     std::map<std::string, std::string> params;    ///< Model-specific parameters.
+
+    /// The source clip being upscaled (`mode == Upscale`) or, for audio, the
+    /// clip audio is being generated FROM rather than from `prompt` alone (PR
+    /// 395's "either a source clip or a text prompt"). Nil when the request has
+    /// no source, which is every request that predates PR 395/396.
+    Uuid sourceAssetId;
+
+    /// The requested output resolution for `mode == Upscale`. Invalid (zero) for
+    /// every other request.
+    Resolution targetResolution;
+
+    /// The requested audio duration for `mediaType == Audio`. Zero for every
+    /// non-audio request.
+    Duration requestedDuration = Duration::zero();
 };
 
 /// Opaque identifier for a submitted generation job, assigned by the backend.

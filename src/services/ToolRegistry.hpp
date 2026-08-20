@@ -125,6 +125,12 @@ struct ToolRegistryHooks {
     /// + place. Typically an adapter over GenerativeMediaCoordinator (task 14.2).
     Tool::Handler generate;
 
+    /// Handles `generation.list_models` (usable-editor Phase 2 task 7; PR 406):
+    /// list the generation model catalog, grouped by provider. Typically an
+    /// adapter over `services::GenerationModelCatalog::listModels()`. Empty ⇒
+    /// the tool reports Unsupported ("no model catalog is configured").
+    Tool::Handler listModels;
+
     /// Handles `timeline.export` (Requirement 11): render the timeline to a file.
     /// Typically an adapter over the Export Engine (task 10.x).
     Tool::Handler exportTimeline;

@@ -66,6 +66,7 @@ constexpr const char* kReorderClips   = "timeline.reorder_clips";
 constexpr const char* kAddEffect      = "timeline.add_effect";
 constexpr const char* kAddTransition  = "timeline.add_transition";
 constexpr const char* kGenerate       = "generation.generate";
+constexpr const char* kListModels     = "generation.list_models";
 constexpr const char* kExport         = "timeline.export";
 
 // Session, media-library and track tools (tasks 4.3-4.5; Requirement 3.1).
@@ -944,6 +945,12 @@ Tool makeGenerateTool(ProjectSession* session, Tool::Handler hook) {
     // NOT expressible: `sourceOutTicks > sourceInTicks` (a cross-field relation) and
     // "the model id is one the configured backend serves" (an open, backend-defined
     // set) remain with the coordinator.
+    //
+    // `mode`, `sourceAssetId`, `targetWidth`/`targetHeight` and
+    // `requestedDurationTicks` are all additive (usable-editor Phase 2 task 7;
+    // PR 406/396/395): every argument that predates them is unchanged, and a
+    // request that sets none of them behaves exactly as it did before their
+    // addition. `mediaType`'s enum widens to admit `audio` for the same reason.
     t.schema
         .arg(ArgSpec{.name = "prompt",
                      .kind = JsonKind::String,
@@ -954,8 +961,22 @@ Tool makeGenerateTool(ProjectSession* session, Tool::Handler hook) {
         .arg(stringArg("model", true, "Selected SOTA model id (e.g. 'veo', 'gpt-image')."))
         .arg(ArgSpec{.name = "mediaType",
                      .kind = JsonKind::String,
-                     .description = "Requested media type: 'video' or 'image'.",
-                     .enumValues = {"video", "image"}})
+                     .description = "Requested media type: 'video', 'image' or 'audio'.",
+                     .enumValues = {"video", "image", "audio"}})
+        .arg(ArgSpec{.name = "mode",
+                     .kind = JsonKind::String,
+                     .description = "Generation mode: 'generate' (default) or 'upscale'.",
+                     .enumValues = {"generate", "upscale"}})
+        .arg(uuidArg("sourceAssetId", false,
+                    "Source clip asset id for 'upscale' mode, or for audio "
+                    "generated FROM a clip rather than a prompt alone."))
+        .arg(intArg("targetWidth", false,
+                   "Requested output width in pixels for 'upscale' mode.", 1))
+        .arg(intArg("targetHeight", false,
+                   "Requested output height in pixels for 'upscale' mode.", 1))
+        .arg(intArg("requestedDurationTicks", false,
+                   "Requested audio duration in nanoseconds for mediaType 'audio'.",
+                   1))
         .arg(ArgSpec{.name = "params",
                      .kind = JsonKind::Object,
                      .description = "Model-specific string parameters."})
@@ -971,6 +992,19 @@ Tool makeGenerateTool(ProjectSession* session, Tool::Handler hook) {
     t.handler = guardedHookHandler(
         session, kGenerate, std::move(hook),
         "generation.generate is not available: no generative backend is configured");
+    return t;
+}
+
+Tool makeListModelsTool(ProjectSession* session, Tool::Handler hook) {
+    Tool t;
+    t.name = kListModels;
+    t.description = "List every model in the generation model catalog, grouped by "
+                    "provider (usable-editor Phase 2 task 7; PR 406).";
+    // No arguments: the catalog is fixed, in-tree data (see
+    // services/GenerationModelCatalog.hpp), not a per-request query.
+    t.handler = guardedHookHandler(
+        session, kListModels, std::move(hook),
+        "generation.list_models is not available: no model catalog is configured");
     return t;
 }
 
@@ -1688,6 +1722,7 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(makeUndoTool(session));
     registry.add(makeRedoTool(session));
     registry.add(makeGenerateTool(session, std::move(hooks.generate)));
+    registry.add(makeListModelsTool(session, std::move(hooks.listModels)));
     registry.add(makeExportTool(session, std::move(hooks.exportTimeline)));
     return registry;
 }

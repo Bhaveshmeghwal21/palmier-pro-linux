@@ -28,6 +28,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -36,6 +37,7 @@
 #include "core/MediaAssetRef.hpp"
 #include "core/MediaManager.hpp"
 #include "core/Project.hpp"
+#include "core/Resolution.hpp"
 #include "core/Result.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Uuid.hpp"
@@ -58,6 +60,7 @@
 #include "services/ByokCredentials.hpp"
 #include "services/ExportCoordinator.hpp"
 #include "services/GenerativeClient.hpp"
+#include "services/GenerationModelCatalog.hpp"
 #include "services/GenerativeMediaCoordinator.hpp"
 #include "services/OpenSslGenerativeHttpTransport.hpp"
 #include "services/Json.hpp"
@@ -162,9 +165,29 @@ public:
         GenerationRequest request;
         request.model = input.stringOr("model");
         request.prompt = input.stringOr("prompt");
-        request.mediaType = (input.stringOr("mediaType", "video") == "image")
-                                ? GenerationMediaType::Image
-                                : GenerationMediaType::Video;
+        const std::string mediaTypeText = input.stringOr("mediaType", "video");
+        if (mediaTypeText == "image") {
+            request.mediaType = GenerationMediaType::Image;
+        } else if (mediaTypeText == "audio") {
+            request.mediaType = GenerationMediaType::Audio;
+        } else {
+            request.mediaType = GenerationMediaType::Video;
+        }
+        request.mode = generationModeFromStringView(input.stringOr("mode", "generate"))
+                          .value_or(GenerationMode::Generate);
+        if (const std::optional<Uuid> sourceAssetId =
+                Uuid::parse(input.stringOr("sourceAssetId"));
+            sourceAssetId.has_value()) {
+            request.sourceAssetId = *sourceAssetId;
+        }
+        const std::int64_t targetWidth = input.intOr("targetWidth", 0);
+        const std::int64_t targetHeight = input.intOr("targetHeight", 0);
+        if (targetWidth > 0 && targetHeight > 0) {
+            request.targetResolution = Resolution{static_cast<std::uint32_t>(targetWidth),
+                                                  static_cast<std::uint32_t>(targetHeight)};
+        }
+        request.requestedDuration =
+            Duration::fromNanoseconds(input.intOr("requestedDurationTicks", 0));
         if (const Json* params = input.find("params"); params != nullptr && params->isObject()) {
             for (const auto& [key, value] : params->asObject()) {
                 if (value.isString()) request.params.emplace(key, value.asString());
@@ -195,6 +218,56 @@ public:
         out.set("clipId", result.clipId.toString());
         out.set("timelineStartTicks",
                 static_cast<std::int64_t>(result.timelineStart.ticks()));
+        return out;
+    };
+}
+
+/// The `generation.list_models` hook (usable-editor Phase 2 task 7; PR 406):
+/// render the catalog's models grouped by provider. Pure and network-free — the
+/// catalog is fixed, in-tree data — so this hook needs no precondition check the
+/// way `makeGenerateHook` needs the backend's `unmetPrecondition()`: listing what
+/// models EXIST is independent of whether the currently selected backend can
+/// currently reach one of them.
+[[nodiscard]] services::Tool::Handler makeListModelsHook(
+    const services::GenerationModelCatalog& catalog) {
+    return [&catalog](const services::Json&) -> Result<services::Json> {
+        using namespace palmier::services;
+
+        // Group by provider while preserving each provider's first-seen order,
+        // so the response is deterministic for a fixed catalog without depending
+        // on any particular sort. Grouped in a plain map first (Json::find has no
+        // mutable overload) and converted to the response's Json shape once.
+        std::vector<std::pair<std::string, Json::Array>> byProvider;
+        for (const CatalogModel& model : catalog.listModels()) {
+            Json entry = Json::object();
+            entry.set("id", model.id);
+            entry.set("mediaType", std::string(toStringView(model.mediaType)));
+            entry.set("servesUpscale", model.servesUpscale);
+            if (model.audioDurationRange.has_value()) {
+                const auto& [minDuration, maxDuration] = *model.audioDurationRange;
+                entry.set("minDurationTicks",
+                         static_cast<std::int64_t>(minDuration.ticks()));
+                entry.set("maxDurationTicks",
+                         static_cast<std::int64_t>(maxDuration.ticks()));
+            }
+
+            const auto existing =
+                std::find_if(byProvider.begin(), byProvider.end(),
+                            [&model](const auto& p) { return p.first == model.provider; });
+            if (existing != byProvider.end()) {
+                existing->second.push_back(std::move(entry));
+            } else {
+                byProvider.emplace_back(model.provider, Json::Array{std::move(entry)});
+            }
+        }
+
+        Json providers = Json::object();
+        for (auto& [provider, models] : byProvider) {
+            providers.set(provider, Json::array(std::move(models)));
+        }
+
+        Json out = Json::object();
+        out.set("providers", std::move(providers));
         return out;
     };
 }
@@ -456,8 +529,9 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     genGate_ = std::make_unique<services::AuthServiceGenerationGate>(*auth_);
     genRunner_ = std::make_unique<services::GenerativeClientRunner>(*genClient_);
     placer_ = std::make_unique<services::TimelineEnginePlacer>(session_->engine());
+    genCatalog_ = std::make_unique<services::GenerationModelCatalog>();
     genCoordinator_ = std::make_unique<services::GenerativeMediaCoordinator>(
-        *genGate_, *genRunner_, session_->mediaLibrary(), *placer_);
+        *genGate_, *genRunner_, session_->mediaLibrary(), *placer_, genCatalog_.get());
 
     // --- Shared tool surface (UI == MCP == agent path; Property P4) --------
     // Three hooks, all bound to the single instances constructed above: the
@@ -473,6 +547,7 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     // result lives beside the coordinator and is the same for every caller.
     services::ToolRegistryHooks hooks;
     hooks.generate = makeGenerateHook(*genCoordinator_, selectedGenerativeBackend_);
+    hooks.listModels = makeListModelsHook(*genCatalog_);
     hooks.exportTimeline = services::makeExportToolHandler(*exportCoordinator_, *session_,
                                                            config.exportToolOptions);
     hooks.importMedia = [service = mediaImportService_.get()](const std::filesystem::path& path) {
