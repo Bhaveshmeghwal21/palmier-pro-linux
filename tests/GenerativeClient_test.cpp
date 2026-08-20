@@ -102,7 +102,11 @@ MockBackend makeBackendAcceptingJob(const std::string& jobId) {
 }
 
 GenerationRequest videoRequest() {
-    return GenerationRequest{"veo", GenerationMediaType::Video, "a cat surfing", {}};
+    GenerationRequest request;
+    request.model = "veo";
+    request.mediaType = GenerationMediaType::Video;
+    request.prompt = "a cat surfing";
+    return request;
 }
 
 constexpr const char* kToken = "bearer-abc123";
@@ -208,7 +212,10 @@ TEST(GenerativeClientTest, ImageModelProducesImageAsset) {
                           GenerationMediaType::Image};
     };
     GenerativeClient client(backend);
-    GenerationRequest req{"gpt-image", GenerationMediaType::Image, "a red door", {}};
+    GenerationRequest req;
+    req.model = "gpt-image";
+    req.mediaType = GenerationMediaType::Image;
+    req.prompt = "a red door";
     JobId id = client.submit(req, kToken).value().id;
 
     ASSERT_TRUE(client.poll(id).isOk());

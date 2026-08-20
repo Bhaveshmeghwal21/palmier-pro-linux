@@ -184,7 +184,11 @@ public:
 // ---------------------------------------------------------------------------
 
 GenerationRequest videoRequest(std::string prompt = "a cat surfing a wave") {
-    return GenerationRequest{"veo", GenerationMediaType::Video, std::move(prompt), {}};
+    GenerationRequest request;
+    request.model = "veo";
+    request.mediaType = GenerationMediaType::Video;
+    request.prompt = std::move(prompt);
+    return request;
 }
 
 MediaAsset videoAsset(const std::string& path = "/tmp/generated.mp4") {
