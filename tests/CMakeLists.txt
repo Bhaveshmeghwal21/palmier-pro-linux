@@ -1446,6 +1446,13 @@ add_executable(palmier_app_composition_tests
     # and the transport seam join the compiled-in list (Requirements 12.1, 12.2).
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeBackendRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeHttpTransport.cpp"
+    # usable-editor spec Phase 2, task 6: ApplicationComposition.cpp now calls
+    # services::openSslGenerativeHttpTransportAvailable() and
+    # makeOpenSslGenerativeHttpTransport() unconditionally (the #if guard lives
+    # inside this .cpp, not at its call sites), so wherever ApplicationComposition
+    # .cpp is compiled as a standalone source — as it is in this target — this
+    # file must join it or the link fails with two undefined references.
+    "${PROJECT_SOURCE_DIR}/src/services/OpenSslGenerativeHttpTransport.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
     # Task 9.7: the composition root now constructs the one Export_Coordinator and
@@ -3162,6 +3169,10 @@ add_executable(palmier_e2e_tests
     "${PROJECT_SOURCE_DIR}/src/services/OfflineIntentInterpreter.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeBackendRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeHttpTransport.cpp"
+    # usable-editor spec Phase 2, task 6 — see the identical comment on
+    # palmier_app_composition_tests above: ApplicationComposition.cpp calls
+    # these two functions unconditionally, so this file must join it here too.
+    "${PROJECT_SOURCE_DIR}/src/services/OpenSslGenerativeHttpTransport.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ExportCoordinator.cpp"
