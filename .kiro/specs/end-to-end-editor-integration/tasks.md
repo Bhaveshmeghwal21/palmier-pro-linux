@@ -2689,3 +2689,34 @@ no real GPU — unrelated to either fix. `EditorEndToEndTest.ChainThroughTheHost
 in 0.39 s. No other test regressed. This is the first fully green CI run in this document's history
 for the `feat/end-to-end-editor-integration` branch: Stage 11 is complete, and both of the defects
 that were surfaced only once a real toolchain could compile and run this tree are now closed.
+
+### ✅ The GUI is now visually verified, not only assertion-verified (`ci.yml` launch smoke test)
+
+Every claim above about stage 11 rested on assertions over widget state: `ShellUnitTest` constructs a
+real `MainWindow` under `xvfb` and checks its structure, but nothing ran the shipped **executable**
+through `main.cpp`'s launch sequence — `AppSettings` resolution, the platform gate,
+`ApplicationComposition` construction, the MCP server start, `window.show()`, a live Qt event loop —
+and no human or agent had ever seen the running editor. A binary can pass every widget test and still
+fail to start on a missing runtime plugin or block on a modal raised before the window is shown.
+
+`ci.yml`'s `build-and-test` job now closes that gap with a **launch smoke test** (three steps at the
+end of the job, so it reuses the already-built binary rather than costing a second full build). It
+starts `palmier-pro` on a private `Xvfb` display with a clean `HOME` and a non-default MCP port (so an
+occupied 19789 cannot raise the blocking "MCP server unavailable" warning before the window is shown),
+then asserts three things rather than merely capturing: the process survives startup, a window titled
+`Palmier Pro` maps within 30 s, and the captured frame is not a nearly-flat colour (the signature of a
+window that mapped but painted nothing). The screenshot and the editor's own stderr are published as a
+`launch-smoke-test` artifact. All three steps carry `if: always()` so a failing `ctest` cannot hide the
+launch verdict.
+
+**First run (`32361381399`) passed and the screenshot was inspected.** The editor mapped window id
+`2097158` and painted **4696 distinct colours**, and the capture shows the whole of stage 11 working:
+the five menus in their documented order (File, Edit, Playback, Export, Help); the Media Browser dock
+with its Import Media button, Library and Clip Versions lists; the Preview canvas (black, correct for
+an empty timeline); the Inspector reading "No clip selected" with **Agent Chat tabbed beside it**, which
+is exactly the designed arrangement; the Timeline dock with Play/Pause/Stop, `00:00:00.000`, one track
+row, and **Undo/Redo correctly greyed out on an empty history**; and **all three status notices**
+present at once — the no-GPU/CPU-processing fallback, audio-output-unavailable, and the PipeWire/ALSA
+detail. Every one of those was previously only an assertion in `shell_unit_test.cpp`; they are now
+observable. The editor's own stderr contained nothing but two benign PipeWire "can't load config
+client.conf" lines, consistent with a runner that has no sound card.
