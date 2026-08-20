@@ -426,10 +426,12 @@ at the end of Phase 1).**
 
 ## Phase 2, Task 7 (landing the deferred generative backlog entries) — complete
 
-**Task 7 is CI-verified green on `main` at commit `6784ec5` (run `32404256042`, completed success):
-CTest reports `100% tests passed, 0 tests failed out of 1275`, with a total test time of 22.70 seconds.
+**Task 7 is CI-verified green on `main` at commit `0e831fe` (run `32406836062`, completed success):
+CTest reports `100% tests passed, 0 tests failed out of 1275`, with a total test time of 24.49 seconds.
 The build completed, the headless launch smoke test mapped the editor and painted 5031 distinct colours,
-and the keyboard-driven Add Video Track smoke action also passed.**
+and the keyboard-driven Add Video Track smoke action also passed. The implementation itself first went
+green at `6784ec5` (run `32404256042`, also 1275/1275); the two commits after it fixed test-side
+bookkeeping that the implementation had invalidated, recorded as incidents 5 and 6 below.**
 
 ### What was actually built
 
@@ -452,5 +454,37 @@ The final CI log shows all model-catalog tests 1082–1085, upscale tests 1086�
 passing, followed by the explicit CTest summary above. The completed backlog entries are PRs 406, 396 and
 395; their acceptance checks were exercised by the corresponding generation property suites. The final
 run also completed the editor launch smoke test successfully.
+
+### CI incidents 5 and 6 — documentation edits invalidating test-side bookkeeping
+
+Re-scoring the parity report and adding a tool are both structural changes that some tests encode
+positionally. Two runs failed after the implementation was already green, and neither was a defect in
+the shipped behaviour; both were stale test-side accounting that the change had invalidated.
+
+- **Incident 5 — stale build-order position anchors (run `32405386000`, commit `51822a4`, 2 failures).**
+  `ParityCheckFalsifiability.DetectsAnEntryMissingFromTheBuildOrderList` and
+  `...DetectsABuildOrderPriorityThatDisagreesWithItsTable` mutate the **real, checked-in**
+  `docs/UPSTREAM_PARITY.md` through literal anchors — `"21. denoise (tool category) — later"` and
+  `"30. auto-update (capability area) — later"`. Moving `generation and upscaling` out of the build-order
+  projection shifted every entry below it up by one, so both anchors no longer matched and the mutations
+  became no-ops that produced no defect to detect. Fixed at `1cb492f` by re-anchoring to `20.` and `29.`
+  and correcting the file header's stale "31 build-order items" to 29. The sibling assertion
+  `EXPECT_EQ(report.buildOrder.size(), needingPriority)` needed no change because it counts the parsed
+  `absent`/`partial` entries rather than hard-coding a total.
+- **Incident 6 — a new hook-backed tool absent from the test's accounting (run `32406052275`, commit
+  `1cb492f`, 1 failure).** `McpProtocolProperties.ToolsCallSuccessShape` draws a tool uniformly from the
+  whole registry (`registry.tools()[drawIndex(registry.size())]`) and requires `isError` false unless the
+  tool is hook-backed, where it instead requires `isError` true naming the tool. `generation.list_models`
+  is built with `guardedHookHandler`, so in a test binary — where the composition root wires no catalog —
+  it correctly answers `Unsupported` with "no model catalog is configured". The test's `isHookBacked()`
+  still named only the original trio, so the property demanded success from a tool that cannot have it.
+  This was **seed-dependent, not introduced by the documentation commit**: the failing run reported
+  `seed=15603858946716445787`, falsifiable after 95 tests, and the same test had passed at `6784ec5`
+  only because no earlier seed drew that tool. Fixed at `0e831fe` by adding `generation.list_models` to
+  `isHookBacked()`. The production error path was left untouched — it already reports the tool by name,
+  which is what the hook-backed branch asserts.
+
+The lesson recorded for later phases: after adding a tool, check every test that enumerates the registry,
+and after re-scoring the parity report, check every test that anchors into it by position.
 
 Phase 3 Tasks 8–11, Phase 4 Tasks 12–15 and Phase 5 Tasks 16–17 remain unstarted.
