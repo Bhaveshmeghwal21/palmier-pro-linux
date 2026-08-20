@@ -125,13 +125,14 @@ Requirement 14.2 asks, and left at `status: not-started` because none of the wor
 identifier: PR 397
 summary: Keep grouped multicam angles synchronised when one of them is ripple-trimmed, so a trim propagates across the group.
 disposition: port
-linux-component: core::ClipGroup, core::EditCommands (a future RippleTrimCommand), services::ToolRegistry (a future timeline.ripple_trim)
-rationale: The behaviour is domain logic with no platform content, so it ports rather than adapts. This feature lands only the persistence half: `core::ClipGroup` and the project-level `clipGroups` array reserved by schema 1.1 in task 1.5, which nothing reads, so a document carrying groups round-trips without losing them. The edit itself needs a new `RippleTrimCommand` in core::EditCommands and a `timeline.ripple_trim` tool, and multicam is a `should`-priority parity gap rather than a blocker for import to export.
+linux-component: core::ClipGroup, core::EditCommands::RippleTrimCommand, services::ToolRegistry timeline.ripple_trim
+rationale: The behaviour is domain logic with no platform content, so it ports rather than adapts. `core::ClipGroup` and the project-level `clipGroups` array were reserved by schema 1.1 in task 1.5; `RippleTrimCommand` is the first command that reads it. For the named clip's edge, it computes the source-time delta the trim represents, applies that identical delta to every other member of any `clipGroups` entry naming the clip (on that member's own track), and refuses the whole edit — leaving the project unchanged — if any member cannot absorb the delta within its own source range.
 check:
   given: a project with two clips on different tracks that are members of one clipGroup, and a third ungrouped clip
   when:  timeline.ripple_trim extends the in-point of one grouped clip by a known duration
   then:  both grouped clips move by exactly that duration and stay aligned with each other, the ungrouped clip does not move, and the whole change undoes as one history entry
-status: not-started
+status: complete
+note: The acceptance check is covered by RippleTrimCommand.KeepsGroupedMulticamAnglesSynchronised and RippleTrimCommand.AGroupedAngleThatCannotAbsorbTheTrimRefusesTheWholeEdit in tests/core/edit_commands_test.cpp.
 
 ### PR 406 — catalog-driven source-video preparation and provider-grouped model selection
 
