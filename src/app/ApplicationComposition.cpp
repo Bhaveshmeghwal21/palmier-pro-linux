@@ -528,8 +528,10 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     genClient_ = std::make_unique<services::GenerativeClient>(*generativeBackend_);
     genGate_ = std::make_unique<services::AuthServiceGenerationGate>(*auth_);
     genRunner_ = std::make_unique<services::GenerativeClientRunner>(*genClient_);
-    placer_ = std::make_unique<services::TimelineEnginePlacer>(session_->engine());
-    placer_->setMediaLibrary(session_->mediaLibrary());
+    auto concretePlacer =
+        std::make_unique<services::TimelineEnginePlacer>(session_->engine());
+    concretePlacer->setMediaLibrary(session_->mediaLibrary());
+    placer_ = std::move(concretePlacer);
     genCatalog_ = std::make_unique<services::GenerationModelCatalog>();
     genCoordinator_ = std::make_unique<services::GenerativeMediaCoordinator>(
         *genGate_, *genRunner_, session_->mediaLibrary(), *placer_, genCatalog_.get());
