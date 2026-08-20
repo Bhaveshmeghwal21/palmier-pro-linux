@@ -37,6 +37,14 @@
 # complete test log and a generated summary that lists every test's outcome with
 # the reason each skipped test recorded (Requirements 15.2, 15.5, 15.7).
 #
+# The same job then runs a LAUNCH SMOKE TEST and publishes a `launch-smoke-test`
+# artifact: it starts the shipped `palmier-pro` binary on a virtual display,
+# asserts the process survives startup and maps a window titled "Palmier Pro",
+# and captures a screenshot of it. This covers what no assertion in the suite
+# can — the real executable going through main.cpp's launch sequence and a live
+# Qt event loop — and makes "the editor launches and renders" a visible artifact
+# rather than an inference from widget-level unit tests.
+#
 # The third job, `l4-validation`, is the Requirement 8.5 hardware-encode lane. It
 # needs an NVIDIA L4, which no hosted runner has, so it runs only on a manual
 # dispatch that ticks its input AND on a self-hosted runner labelled `nvidia-l4`.
@@ -303,6 +311,145 @@ jobs:
             build/ctest-results.xml
             build/ctest-summary.md
             build/Testing/**
+          if-no-files-found: warn
+
+      # -----------------------------------------------------------------------
+      # Launch smoke test — the one check no assertion in the suite above makes.
+      #
+      # The Qt widget tests DO construct a real MainWindow under xvfb and assert
+      # its structure (five docks, five menus, the status notices), but nothing
+      # there runs the shipped EXECUTABLE through main.cpp's actual launch
+      # sequence: AppSettings resolution, the platform compatibility gate,
+      # ApplicationComposition construction, the MCP server start, window.show()
+      # and a live Qt event loop. A binary can pass every widget test and still
+      # fail to start — a missing runtime plugin, a modal dialog raised before
+      # the window is shown, a crash in composition. This step runs the real
+      # thing and publishes a screenshot, so "the editor launches and renders"
+      # becomes an artifact a human can look at rather than an inference.
+      #
+      # It is a real assertion, not just a capture. The run fails if the process
+      # dies during startup, if no window titled "Palmier Pro" ever maps, or if
+      # the captured frame is a nearly-flat colour — which is what a window that
+      # mapped but painted nothing looks like.
+      #
+      # These tools are only needed for this step, so they are installed here
+      # rather than mixed into the build-dependency list above.
+      - name: Install the launch smoke-test tools
+        if: always()
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            imagemagick \
+            xdotool \
+            x11-utils
+
+      - name: Launch the editor headlessly and capture a screenshot
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p smoke
+          export DISPLAY=:99
+
+          # Own the X server for the whole step rather than wrapping one command
+          # in `xvfb-run`, so the editor and the screenshot tools share one
+          # display for the entire launch-capture-verify sequence.
+          Xvfb "$DISPLAY" -screen 0 1600x1000x24 -nolisten tcp >smoke/xvfb.log 2>&1 &
+          xvfb_pid=$!
+          cleanup() {
+            if [ -n "${app_pid:-}" ]; then kill "$app_pid" 2>/dev/null || true; fi
+            kill "$xvfb_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 40); do
+            xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break
+            sleep 0.25
+          done
+          if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+            echo "::error::Xvfb never accepted connections on $DISPLAY"
+            cat smoke/xvfb.log || true
+            exit 1
+          fi
+
+          # A private HOME so no configuration or state from the runner image can
+          # leak in, and a non-default MCP port so an occupied 19789 cannot raise
+          # the modal "MCP server unavailable" warning — which is itself blocking
+          # and would stall startup before window.show() is ever reached.
+          export HOME="$PWD/smoke/home"
+          mkdir -p "$HOME"
+
+          ./build/bin/palmier-pro --mcp-port=19899 >smoke/app.log 2>&1 &
+          app_pid=$!
+
+          # Wait for the shell to map. MainWindow's title always begins with
+          # "Palmier Pro" (refreshWindowTitle appends the document name and a
+          # modified marker), so the search is anchored on that prefix only.
+          window=""
+          for _ in $(seq 1 60); do
+            kill -0 "$app_pid" 2>/dev/null || break
+            window=$(xdotool search --name '^Palmier Pro' 2>/dev/null | head -n1 || true)
+            [ -n "$window" ] && break
+            sleep 0.5
+          done
+
+          if ! kill -0 "$app_pid" 2>/dev/null; then
+            app_status=0
+            wait "$app_pid" || app_status=$?
+            echo "::error::palmier-pro exited during startup with status ${app_status}"
+            echo "--- the editor's own output ---"
+            cat smoke/app.log || true
+            exit 1
+          fi
+          if [ -z "$window" ]; then
+            echo "::error::no window titled 'Palmier Pro' mapped within 30 seconds"
+            echo "--- the editor's own output ---"
+            cat smoke/app.log || true
+            echo "--- windows present on the display ---"
+            xdotool search --name '.' 2>/dev/null || true
+            exit 1
+          fi
+          echo "mapped window id: ${window}"
+
+          # Let Qt finish its first paint, then capture the whole screen (the
+          # root window), which is what a user in front of it would see.
+          sleep 3
+          import -display "$DISPLAY" -window root smoke/palmier-pro-launch.png
+
+          # A window that mapped but painted nothing yields a single flat colour.
+          # ImageMagick's %k is the unique-colour count, which makes this the
+          # cheapest honest "something was actually drawn" assertion available.
+          colours=$(identify -format '%k' smoke/palmier-pro-launch.png)
+          echo "unique colours in the capture: ${colours}"
+          if [ "${colours}" -lt 16 ]; then
+            echo "::error::the capture holds only ${colours} unique colour(s); the window mapped but appears to have painted nothing"
+            cat smoke/app.log || true
+            exit 1
+          fi
+
+          # Still alive after the capture: the event loop did not fall over.
+          if ! kill -0 "$app_pid" 2>/dev/null; then
+            echo "::error::palmier-pro died before the smoke test finished"
+            cat smoke/app.log || true
+            exit 1
+          fi
+
+          echo "OK: palmier-pro launched, mapped its main window and painted ${colours} distinct colours"
+          {
+            echo "### Launch smoke test"
+            echo
+            echo "\`palmier-pro\` launched under Xvfb, mapped its main window and painted"
+            echo "${colours} distinct colours. The screenshot and the editor's own stderr are"
+            echo "published as the \`launch-smoke-test\` artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the launch screenshot and the editor's own output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-smoke-test
+          path: |
+            smoke/palmier-pro-launch.png
+            smoke/app.log
+            smoke/xvfb.log
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
