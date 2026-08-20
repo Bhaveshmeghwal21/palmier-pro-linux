@@ -117,10 +117,10 @@ dependency and the repository already contains TLS code for the MCP server to mo
   - [x] 6.8 Re-score the `generate` row in `docs/UPSTREAM_PARITY.md`, which currently reads `absent`
         solely because of this missing class.
 
-- [ ] 7. Land the generative backlog entries (Requirement 12) — **M**
-  - [ ] 7.1 Upscale, audio generation and catalogue-driven model selection, each against the acceptance
+- [x] 7. Land the generative backlog entries (Requirement 12) — **M**
+  - [x] 7.1 Upscale, audio generation and catalogue-driven model selection, each against the acceptance
         check its `docs/PORT_BACKLOG.md` entry already declares.
-  - [ ] 7.2 Move each landed entry to `complete` in the same change, keeping the backlog-consistency
+  - [x] 7.2 Move each landed entry to `complete` in the same change, keeping the backlog-consistency
         test green.
 
 ---
@@ -424,5 +424,33 @@ at the end of Phase 1).**
 
 ---
 
-## Phase 2, Task 7 (landing the deferred generative backlog entries) and Phases 3-5 have not been
-started.
+## Phase 2, Task 7 (landing the deferred generative backlog entries) — complete
+
+**Task 7 is CI-verified green on `main` at commit `6784ec5` (run `32404256042`, completed success):
+CTest reports `100% tests passed, 0 tests failed out of 1275`, with a total test time of 22.70 seconds.
+The build completed, the headless launch smoke test mapped the editor and painted 5031 distinct colours,
+and the keyboard-driven Add Video Track smoke action also passed.**
+
+### What was actually built
+
+- **Catalog-driven model selection (PR 406).** `GenerationModelCatalog` now publishes a provider-grouped
+  catalog with multiple providers and model capabilities; `generation.list_models` returns the catalog,
+  `generation.generate` accepts only catalog model ids, and unknown ids are refused by name.
+- **Upscale generation (PR 396).** `generation.generate` accepts the declared upscale mode only for models
+  that serve it, validates the source clip and target resolution, and places the generated asset as one
+  undoable edit.
+- **Audio generation (PR 395).** The generation schema accepts audio media, source-or-prompt requests and
+  model-declared duration bounds; generated audio is registered and placed through the same undoable
+  media-library path as video and image generation.
+- **Undo ownership and consistency.** Generated asset imports are attached to the session media library,
+  removed on undo when imported by the placement command, and generated/request media types must agree.
+  Documentation now presents the exact no-argument marker as its own blank-line-delimited paragraph.
+
+### Verification evidence
+
+The final CI log shows all model-catalog tests 1082–1085, upscale tests 1086–1087 and audio tests 1088–1089
+passing, followed by the explicit CTest summary above. The completed backlog entries are PRs 406, 396 and
+395; their acceptance checks were exercised by the corresponding generation property suites. The final
+run also completed the editor launch smoke test successfully.
+
+Phase 3 Tasks 8–11, Phase 4 Tasks 12–15 and Phase 5 Tasks 16–17 remain unstarted.

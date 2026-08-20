@@ -138,39 +138,42 @@ status: not-started
 identifier: PR 406
 summary: Drive source-video preparation and model choice from a provider-grouped catalog instead of hard-coded model identifiers.
 disposition: adapt
-linux-component: a future services::GenerationModelCatalog, services::GenerativeBackendRegistry, services::ToolRegistry generation.generate
-rationale: It is adapted rather than ported because upstream's catalog is tied to its closed hosted service, while the Linux port must express the same choice across a hosted backend, a BYOK backend and the offline default. The registry seam that makes a catalog possible is in scope for this feature; the catalog itself is generative-feature surface that Requirement 12 does not ask for beyond backend pluggability, so it is deferred.
+linux-component: services::GenerationModelCatalog, services::GenerativeBackendRegistry, services::ToolRegistry generation.list_models/generation.generate
+rationale: It is adapted rather than ported because upstream's catalog is tied to its closed hosted service, while the Linux port expresses the same choice across hosted, BYOK and offline backends. The catalog is now the shared source of provider/model capabilities used by the tool surface.
 check:
   given: a running editor with a generative backend configured and a catalog listing at least two providers with at least one model each
   when:  the catalog is requested through the tool surface and a model is selected from a named provider
   then:  the returned listing groups every model under its provider, and generation.generate accepts the selected model id and refuses an id absent from the catalog with an error naming the rejected id
-status: not-started
+status: complete
+note: The acceptance check is covered by the GenerationModelCatalogTools tests in the generative lifecycle suite and passed in CI run 32404256042.
 
 ### PR 396 — catalog-driven upscale generation mode
 
 identifier: PR 396
 summary: Add an upscale generation mode selected from the model catalog, so an existing clip can be upscaled rather than generated from a prompt.
 disposition: adapt
-linux-component: services::ToolRegistry generation.generate (a future mode argument and its ToolSchema entry), a future services::GenerationModelCatalog
-rationale: Adapted because the Linux tool surface expresses the mode as a declared `ToolSchema` argument on `generation.generate` rather than as upstream's SwiftUI mode picker, so the same choice is reachable from the GUI, the MCP endpoint and the agent through one declaration. It depends on PR 406's catalog for the set of models that serve an upscale mode, so it is deferred behind it.
+linux-component: services::ToolRegistry generation.generate, services::GenerationModelCatalog, services::GenerativeMediaCoordinator, core::MediaManager
+rationale: Adapted because the Linux tool surface expresses the mode as a declared `ToolSchema` argument on `generation.generate` rather than as upstream's SwiftUI mode picker, so the same choice is reachable from the GUI, the MCP endpoint and the agent through one declaration. The catalog now identifies models that serve upscale, and the coordinator imports the resulting asset through the undoable placement path.
 check:
   given: a project with one clip in the media library and a generative backend that serves an upscale-capable model
   when:  generation.generate is invoked for that clip with mode upscale and a target resolution larger than the source
   then:  the published tool schema lists mode with upscale among its permitted values, the request is accepted, and a successful job registers exactly one new asset at the requested resolution as one undoable edit
-status: not-started
+status: complete
+note: The GenerationUpscaleProperties acceptance tests passed in CI run 32404256042, including one-undo completion and refusal of a model that does not serve upscale.
 
 ### PR 395 — source-or-prompt audio generation with duration ranges
 
 identifier: PR 395
 summary: Generate audio from either a source clip or a text prompt, with a permitted duration range declared per model.
 disposition: adapt
-linux-component: services::ToolRegistry generation.generate (future source and durationRange arguments), services::GenerativeMediaCoordinator, core::MediaManager
-rationale: Adapted because the Linux side must register generated audio into the media library and place it on an audio-bearing track through the same path as video, which is `GenerativeMediaCoordinator` plus `core::MediaManager`, and because the duration range becomes declared `ToolSchema` bounds rather than upstream's UI control. It depends on the audio pipeline of stage 8, which this feature landed, so the dependency is satisfied and only the generation surface is outstanding. The tool's `mediaType` enum today admits only video and image.
+linux-component: services::ToolRegistry generation.generate, services::GenerativeMediaCoordinator, core::MediaManager
+rationale: Adapted because the Linux side registers generated audio into the media library and places it on an audio-bearing track through the same path as video, which is `GenerativeMediaCoordinator` plus `core::MediaManager`, and because duration bounds are declared `ToolSchema` constraints rather than upstream's UI control. The generation schema now admits audio, source-or-prompt requests and model-specific duration ranges.
 check:
   given: a project with one audio track and a generative backend that serves an audio model with a declared duration range
   when:  generation.generate is invoked twice for audio, once with a source clip and once with a prompt only, each requesting a duration inside the declared range
   then:  both requests are accepted and each registers exactly one audio asset of the requested duration as one undoable edit, and a request for a duration outside the declared range is refused with an error naming the permitted range
-status: not-started
+status: complete
+note: The GenerationAudioProperties acceptance tests passed in CI run 32404256042, covering source and prompt generation within model bounds and naming the permitted range for an out-of-range duration.
 
 ---
 

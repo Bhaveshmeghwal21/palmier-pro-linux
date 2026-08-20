@@ -16,7 +16,7 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: e1f196d01440c4e927fbc13d3bef8c28a5e335df (branch `main`)
+- linux-ref: 6784ec51214b6cf47da8213fa41d770b39c9647a (branch `main`)
 - comparison-date: 2026-08-20
 
 ## Status definitions (Requirement 13.7)
@@ -96,7 +96,7 @@ every `N. ` line as a build-order item.
 | text and graphics | absent | none | should | No text, title or shape layer exists in the domain core or the renderer, so on-screen graphics cannot be authored at all. | - | - |
 | color and effects | partial | gpu::EffectKernels, gpu::Compositor, core::EffectType, services::ToolRegistry timeline.add_effect | should | Six effects including the ported invert_colors render on both paths; nothing removes, reorders or edits an effect and there is no LUT, scope or denoise. | - | - |
 | audio scrub and metering | absent | none | should | The audio pipeline mixes and outputs, but no level meter, waveform or scrub-audio component exists, so levels cannot be monitored while editing. | SwiftUI | Qt 6 Widgets |
-| generation and upscaling | partial | services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::OpenSslGenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator | should | Task 6 landed a real HTTPS transport, so generate now completes; no model catalog (PR 406), upscale mode (PR 396) or audio generation (PR 395), all still deferred in PORT_BACKLOG.md. | - | - |
+| generation and upscaling | present | services::GenerationModelCatalog, services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::OpenSslGenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator, services::ToolRegistry generation.list_models/generation.generate | - | - | - | - |
 | project browser and search | partial | ui::MediaBrowserViewModel, ui::MediaBrowserPanel | later | The media browser panel is mounted and lists the library as a flat list; no bin, folder or tag structure and no search index exist, so assets cannot be organised or searched. | SwiftUI | Qt 6 Widgets |
 | MCP and agent chat | partial | services::McpServer, services::McpProtocolHandler, services::McpSessionRegistry, services::RemoteAccessGate, services::AgentOrchestrator, services::OfflineIntentInterpreter, ui::AgentChatPanel | must | initialize, tools/list and tools/call work over JSON-RPC 2.0, the offline interpreter maps utterances, and the agent chat panel is mounted; no SSE stream or tools/list_changed. | SwiftUI | Qt 6 Widgets |
 | settings | partial | app::AppSettings, app::AppConfig | should | Defaults, config file, environment and flags are honoured at startup only; nothing changes a setting at runtime and there is no preferences surface. | SwiftUI | Qt 6 Widgets |
@@ -105,11 +105,12 @@ every `N. ` line as a build-order item.
 
 ## Build order (Requirement 13.9)
 
-Exactly the `absent` and `partial` entries of both tables — 30 of the 34 — sorted `must` before
+Exactly the `absent` and `partial` entries of both tables — 29 of the 34 — sorted `must` before
 `should` before `later`. This list is a **projection** of the two tables and carries no
 independent facts: an entry appears here if and only if its status above is `absent` or `partial`,
-with the priority recorded above. The four omitted entries are the four `present` ones — `import`,
-`export`, `projects` (all table 1, unchanged) and `generate` (table 1, as of task 6).
+with the priority recorded above. The five omitted entries are the five `present` ones — `import`,
+`export`, `projects` and `generate` (all table 1), plus `generation and upscaling` (capability area,
+as of task 7).
 
 Each item is written `<name> (<table>) — <priority>` because `multicam` appears in both tables.
 
@@ -131,23 +132,21 @@ Each item is written `<name> (<table>) — <priority>` because `multicam` appear
 16. text and graphics (capability area) — should
 17. color and effects (capability area) — should
 18. audio scrub and metering (capability area) — should
-19. generation and upscaling (capability area) — should
-20. settings (capability area) — should
-21. denoise (tool category) — later
-22. organize (tool category) — later
-23. layout (tool category) — later
-24. search (tool category) — later
-25. sync (tool category) — later
-26. beats (tool category) — later
-27. words (tool category) — later
-28. project browser and search (capability area) — later
-29. telemetry (capability area) — later
-30. auto-update (capability area) — later
+19. settings (capability area) — should
+20. denoise (tool category) — later
+21. organize (tool category) — later
+22. layout (tool category) — later
+23. search (tool category) — later
+24. sync (tool category) — later
+25. beats (tool category) — later
+26. words (tool category) — later
+27. project browser and search (capability area) — later
+28. telemetry (capability area) — later
+29. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 4 `present`,
-13 `partial`, 17 `absent`; 30 in this list, of which 2 `must`, 18 `should` and 10 `later`. Per table:
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 5 `present`, 12 `partial`, 17 `absent`; 29 in this list, of which 2 `must`, 17 `should` and 10 `later`. Per table:
 table 1 holds 22 entries (4 `present`, 7 `partial`, 11 `absent`, so 18 appear below) and table 2
-holds 12 (0 `present`, 6 `partial`, 6 `absent`, so all 12 appear below).
+holds 12 (1 `present`, 5 `partial`, 6 `absent`, so 11 appear below).
 
 ## Known limits of this comparison
 
@@ -181,30 +180,17 @@ those claims rest on weaker evidence than the rest.
    full export path is reachable through `timeline.export`; hardware encode on it remains
    unverified, because no host in this environment has a hardware or software H.264 encoder — see
    the task 9.8 note in `tasks.md`. Reachability and verification are tracked separately by design.
-- **The two generation rows have been re-scored, and they did not move.** The previous revision of
-  this report predicted that when task 10.5 landed, `generate` (tool category) and `generation and
-  upscaling` (capability area) would move from `absent` to `partial`. 10.5 has landed (`f0a7925`),
-  and this revision re-read both rows against it at the new `linux-ref`. What landed is real:
-  `services::GenerativeBackendRegistry` compiles all three backends in, `selectGenerativeBackend()`
-  is called by `ApplicationComposition`, `--generative-backend hosted|byok` is honoured from the
-  shipped binary now that `main.cpp` wires `AppSettings`, and the `generation.generate` hook asks
-  the selected backend for `unmetPrecondition()` before anything downstream runs. **But the
-  prediction rested on a premise that is false in this tree**: it assumed that only the *offline
-  default* completes no generation. In fact **no** configuration completes one, because the tree
-  implements no HTTPS transport — `services::GenerativeHttpTransport` is a declared seam whose only
-  implementation in product code is `makeUnavailableGenerativeHttpTransport()`, there is no
-  build option or `#ifdef` that supplies another, and `hosted` and `byok` therefore fail at
-  `submit` with `Unsupported` having sent no bytes. So the answer to the question this report
-  measures — can any operation of the entry actually be performed at the product surface? — is
-  still no, for every entry operation: prompt-to-video, prompt-to-image, catalog-driven model
-  choice (PR 406), upscale (PR 396) and audio generation (PR 395). `partial` requires **at least
-  one** reachable operation, and every row scored `partial` above cites a user operation that
-  *completes*; a request path that is always refused is not one, which is precisely what the
-  `absent` definition means by "a component may exist and still score `absent`". Both rows keep
-  `absent` with `should`, so the build-order projection and the status counts are unchanged; only
-  their `linux-components` and `rationale` moved, because the *reason* changed — the blocker is no
-  longer "the only installed backend refuses" but "no transport is implemented". Implementing that
-  one interface is what would make these rows `partial`.
+- **2026-08-20 re-check (`.kiro/specs/usable-editor` Phase 2, tasks 6–7).** The generation rows now reflect
+  the complete reachable generative surface. `services::OpenSslGenerativeHttpTransport` provides the
+  real HTTPS path verified against a local TLS server, while `GenerationModelCatalog` supplies
+  provider-grouped models and capability flags to `generation.list_models` and `generation.generate`.
+  The same generation tool accepts catalog-validated upscale requests and source-or-prompt audio
+  requests with model-specific duration bounds. `generate` remains `present`, and `generation and
+  upscaling` moves from `partial` to `present`: prompt video/image, catalog model selection, upscale
+  and audio generation all complete through `GenerativeMediaCoordinator`, with generated assets
+  registered and placed as one undoable edit. The acceptance checks for PRs 406, 396 and 395 are
+  recorded `complete` in `docs/PORT_BACKLOG.md` and passed in CI run `32404256042`, whose explicit
+  CTest result was 1275/1275 tests passed. No other parity row changed in this re-check.
 - **`linux-ref` is a moving target.** It records the commit this comparison was read from. Work on
    this feature is ongoing, so a later revision of this report should update `linux-ref` and
    re-check every row whose components have changed. At the current `linux-ref` that re-check was
