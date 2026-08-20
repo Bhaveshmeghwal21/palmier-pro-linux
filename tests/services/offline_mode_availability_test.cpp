@@ -699,6 +699,7 @@ public:
         EXPECT_TRUE(seeded.changed()) << seeded.message();
 
         placer_ = std::make_unique<TimelineEnginePlacer>(session_.engine());
+        placer_->setMediaLibrary(session_.mediaLibrary());
         coordinator_ = std::make_unique<GenerativeMediaCoordinator>(
             gate_, *runner_, session_.mediaLibrary(), *placer_);
 

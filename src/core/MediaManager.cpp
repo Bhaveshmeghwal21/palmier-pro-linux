@@ -153,4 +153,30 @@ Result<void> MediaManager::selectVersion(ClipId clipId, std::size_t index) {
     return ok();
 }
 
+Result<void> MediaManager::removeAsset(const Uuid& assetId) {
+    const auto it = assetIndex_.find(assetId);
+    if (it == assetIndex_.end()) {
+        return err(notFound("media asset " + assetId.toString() +
+                            " is not in the library"));
+    }
+
+    for (const auto& [clipId, history] : histories_) {
+        const bool referenced = std::any_of(
+            history.versions.begin(), history.versions.end(),
+            [&assetId](const ClipVersion& version) { return version.assetRef.assetId == assetId; });
+        if (referenced) {
+            return err(failedPrecondition(
+                "media asset " + assetId.toString() +
+                " is still referenced by tracked clip " + clipId.toString()));
+        }
+    }
+
+    library_.erase(library_.begin() + static_cast<std::ptrdiff_t>(it->second));
+    assetIndex_.clear();
+    for (std::size_t index = 0; index < library_.size(); ++index) {
+        assetIndex_.emplace(library_[index].assetId, index);
+    }
+    return ok();
+}
+
 } // namespace palmier

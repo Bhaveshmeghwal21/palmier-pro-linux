@@ -529,6 +529,7 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     genGate_ = std::make_unique<services::AuthServiceGenerationGate>(*auth_);
     genRunner_ = std::make_unique<services::GenerativeClientRunner>(*genClient_);
     placer_ = std::make_unique<services::TimelineEnginePlacer>(session_->engine());
+    placer_->setMediaLibrary(session_->mediaLibrary());
     genCatalog_ = std::make_unique<services::GenerationModelCatalog>();
     genCoordinator_ = std::make_unique<services::GenerativeMediaCoordinator>(
         *genGate_, *genRunner_, session_->mediaLibrary(), *placer_, genCatalog_.get());

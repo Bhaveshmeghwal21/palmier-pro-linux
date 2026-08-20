@@ -180,6 +180,14 @@ Result<GeneratedMediaPlacement> GenerativeMediaCoordinator::generateAndPlace(
     }
     const MediaAsset asset = std::move(generated).value();
 
+    if (asset.mediaType != request.mediaType) {
+        return err<GeneratedMediaPlacement>(makeError(
+            ErrorCode::Internal,
+            "the generative backend returned " +
+                std::string(toStringView(asset.mediaType)) + " media for a " +
+                std::string(toStringView(request.mediaType)) + " generation request"));
+    }
+
     // A provider that answered with an unusable asset reference has failed the
     // generation; refuse it here, while nothing has been catalogued or placed, so
     // the library import below cannot fail for a reason the caller could not have
@@ -309,13 +317,15 @@ namespace {
 class PlaceGeneratedClipCommand final : public EditCommand {
 public:
     PlaceGeneratedClipCommand(ClipId clipId, Uuid trackId, MediaAssetRef asset,
-                              Duration timelineStart, Duration sourceIn, Duration sourceOut)
+                              Duration timelineStart, Duration sourceIn, Duration sourceOut,
+                              MediaManager* library)
         : clipId_(clipId),
           trackId_(trackId),
           asset_(std::move(asset)),
           timelineStart_(timelineStart),
           sourceIn_(sourceIn),
-          sourceOut_(sourceOut) {}
+          sourceOut_(sourceOut),
+          library_(library) {}
 
     [[nodiscard]] std::string_view name() const noexcept override {
         return "PlaceGeneratedClip";
@@ -326,6 +336,16 @@ public:
                                     [this](const Track& t) { return t.id == trackId_; });
         if (trackIt == project.tracks.end()) {
             return err(notFound("target track for generated clip does not exist"));
+        }
+
+        if (library_ != nullptr && !library_->hasAsset(asset_.assetId)) {
+            Result<void> imported = library_->importAsset(asset_);
+            if (imported.isError()) {
+                return imported;
+            }
+            assetImported_ = true;
+        } else {
+            assetImported_ = false;
         }
 
         // Register the generated asset in the project asset table if absent, so
@@ -372,22 +392,35 @@ public:
                          assets.end());
             assetAdded_ = false;
         }
+        if (assetImported_) {
+            Result<void> removed = library_->removeAsset(asset_.assetId);
+            if (removed.isError()) {
+                return removed;
+            }
+            assetImported_ = false;
+        }
         return ok();
     }
 
 private:
-    ClipId        clipId_;
-    Uuid          trackId_;
-    MediaAssetRef asset_;
-    Duration      timelineStart_;
-    Duration      sourceIn_;
-    Duration      sourceOut_;
-    bool          assetAdded_ = false;
+    ClipId         clipId_;
+    Uuid           trackId_;
+    MediaAssetRef  asset_;
+    Duration       timelineStart_;
+    Duration       sourceIn_;
+    Duration       sourceOut_;
+    MediaManager*  library_ = nullptr;
+    bool           assetAdded_ = false;
+    bool           assetImported_ = false;
 };
 
 } // namespace
 
 TimelineEnginePlacer::TimelineEnginePlacer(TimelineEngine& engine) : engine_(engine) {}
+
+void TimelineEnginePlacer::setMediaLibrary(MediaManager& library) noexcept {
+    library_ = &library;
+}
 
 bool TimelineEnginePlacer::trackExists(const Uuid& trackId) const {
     const Project project = engine_.snapshot();
@@ -429,7 +462,7 @@ Result<GeneratedMediaPlacement> TimelineEnginePlacer::place(
     const ClipId clipId = Uuid::generateV4();
     auto command = std::make_unique<PlaceGeneratedClipCommand>(
         clipId, request.trackId, request.asset, timelineStart, request.sourceIn,
-        request.sourceOut);
+        request.sourceOut, library_);
 
     CommandResult result = engine_.apply(std::move(command));
     if (result.isError()) {

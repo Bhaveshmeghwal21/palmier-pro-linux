@@ -405,12 +405,11 @@ Result: `assetId` (string), `sourcePath` (string), `clipId` (string), `timelineS
 ## `generation.list_models`
 
 List every model in the generation model catalog, grouped by provider (usable-editor Phase 2 task 7;
-PR 406). No arguments: the catalog is fixed, in-tree data.
+PR 406). No arguments.
 
 Result: `providers` (object) — each member key is a provider name and its value is an array of that
-provider's models, each carrying `id` (string), `mediaType` (string), `servesUpscale` (boolean) and,
-only for a model that serves audio generation, `minDurationTicks` (integer) and `maxDurationTicks`
-(integer).
+provider's models. Each model entry carries the fields id, mediaType and servesUpscale and, only for an
+audio-generation model, minDurationTicks and maxDurationTicks (integer nanosecond values).
 
 ## `timeline.export`
 

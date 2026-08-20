@@ -279,6 +279,12 @@ class TimelineEnginePlacer : public ITimelinePlacement {
 public:
     explicit TimelineEnginePlacer(TimelineEngine& engine);
 
+    /// Attach the session media library so generated placement imports and
+    /// undo/redo of that import are one atomic edit with the timeline change.
+    /// Existing callers that do not attach a library retain the legacy placement
+    /// seam; the coordinator's post-placement import remains their fallback.
+    void setMediaLibrary(MediaManager& library) noexcept;
+
     [[nodiscard]] Result<GeneratedMediaPlacement> place(
         const TimelinePlacementRequest& request) override;
 
@@ -286,6 +292,7 @@ public:
 
 private:
     TimelineEngine& engine_;
+    MediaManager*   library_ = nullptr;
 };
 
 } // namespace palmier::services

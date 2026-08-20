@@ -522,6 +522,7 @@ public:
         EXPECT_TRUE(seeded.changed()) << seeded.message();
 
         placer_ = std::make_unique<TimelineEnginePlacer>(session_.engine());
+        placer_->setMediaLibrary(session_.mediaLibrary());
         coordinator_ = std::make_unique<GenerativeMediaCoordinator>(
             gate_, *runner_, session_.mediaLibrary(), *placer_, catalog);
 
@@ -622,7 +623,8 @@ Json without(const Json& args, std::string_view field) {
 /// produced media (Requirement 12.3's queued/running/succeeded progression).
 void scriptSuccessfulGeneration(ScriptedTransport& transport, const std::string& jobId,
                                 const Uuid& assetId, const std::string& sourcePath,
-                                bool isVideo, int nonTerminalPolls) {
+                                bool isVideo, int nonTerminalPolls,
+                                std::string_view mediaTypeOverride = {}) {
     transport.responses.push_back({201, std::string(R"({"id":")") + jobId + R"("})"});
     for (int i = 0; i < nonTerminalPolls; ++i) {
         const char* phase = (i % 2 == 0) ? "queued" : "running";
@@ -631,9 +633,12 @@ void scriptSuccessfulGeneration(ScriptedTransport& transport, const std::string&
                       std::to_string(10 * (i + 1)) + "}"});
     }
     transport.responses.push_back({200, R"({"status":"succeeded","progress":100})"});
+    const std::string responseMediaType = mediaTypeOverride.empty()
+                                              ? (isVideo ? "video" : "image")
+                                              : std::string(mediaTypeOverride);
     transport.responses.push_back(
         {200, std::string(R"({"assetId":")") + assetId.toString() + R"(","sourcePath":")" +
-                  sourcePath + R"(","mediaType":")" + (isVideo ? "video" : "image") +
+                  sourcePath + R"(","mediaType":")" + responseMediaType +
                   R"("})"});
 }
 
@@ -822,8 +827,8 @@ struct InvalidCase {
 
 // Feature: end-to-end-editor-integration, Property 66: Invalid generation
 // requests never reach the network — a request that omits the prompt, carries a
-// prompt outside 1..2000 characters, names a media kind other than video or
-// image, or carries an out-of-range position/duration is rejected before
+// prompt outside 1..2000 characters, names a media kind other than video, image,
+// or audio, or carries an out-of-range position/duration is rejected before
 // submission, issues no network request, and leaves the project and media library
 // unchanged.
 // Validates: Requirements 12.9
@@ -838,7 +843,7 @@ RC_GTEST_PROP(GenerativeLifecycleProperties, InvalidGenerationRequestsNeverReach
     // invalid region rather than one representative value per kind.
     const int overLongPrompt = *rc::gen::inRange(2001, 2600);
     const std::string unknownMediaKind =
-        *rc::gen::element<std::string>("audio", "text", "model3d", "VIDEO", "Image", "");
+        *rc::gen::element<std::string>("text", "model3d", "VIDEO", "Image", "");
     const std::int64_t negativePosition = -*rc::gen::inRange<std::int64_t>(1, 100000);
     const std::int64_t nonPositiveDuration = -*rc::gen::inRange<std::int64_t>(0, 100000);
     const std::int64_t collapsedIn = *rc::gen::inRange<std::int64_t>(1, 1000000000);
@@ -1201,16 +1206,10 @@ TEST(GenerationAudioProperties, AudioGenerationFromASourceAndFromAPromptBothComp
     ASSERT_TRUE(rig.library().importAsset(sourceAsset).isOk());
 
     const Uuid firstAssetId = Uuid::generateV4();
-    // scriptSuccessfulGeneration's `isVideo` parameter only distinguishes
-    // "video" from "image" in the SCRIPTED response body (it predates audio);
-    // passing false here scripts "image", not "audio". That mismatch does not
-    // affect this test's assertions (library/undo counts, not the returned
-    // mediaType, which the coordinator does not cross-check against the
-    // request's mediaType for any media kind — a pre-existing property, not one
-    // this task changes), so the shared script helper is reused rather than
-    // widened for one caller.
+    // Script the response as audio as well: the coordinator enforces the
+    // contract that a completed provider asset matches the requested media kind.
     scriptSuccessfulGeneration(transport, "job-audio-source", firstAssetId,
-                               "/var/tmp/generated-audio-1.wav", false, 0);
+                               "/var/tmp/generated-audio-1.wav", false, 0, "audio");
 
     const std::size_t undoAfterSeed = rig.engine().undoDepth();
     const std::size_t libraryAfterSeed = rig.library().assetCount();
@@ -1235,7 +1234,7 @@ TEST(GenerationAudioProperties, AudioGenerationFromASourceAndFromAPromptBothComp
     // actual state after it, not merely "some large frame number").
     const Uuid secondAssetId = Uuid::generateV4();
     scriptSuccessfulGeneration(transport, "job-audio-prompt", secondAssetId,
-                               "/var/tmp/generated-audio-2.wav", false, 0);
+                               "/var/tmp/generated-audio-2.wav", false, 0, "audio");
 
     const std::size_t undoAfterFirst = rig.engine().undoDepth();
     const std::size_t libraryAfterFirst = rig.library().assetCount();

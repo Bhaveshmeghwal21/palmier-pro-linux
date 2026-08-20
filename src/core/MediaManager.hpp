@@ -110,6 +110,11 @@ public:
     /// Number of assets in the library.
     [[nodiscard]] std::size_t assetCount() const noexcept { return library_.size(); }
 
+    /// Remove an asset that is no longer referenced by any tracked clip history.
+    /// This is used by undoable generated-placement commands to reverse an asset
+    /// import that the same command performed.
+    [[nodiscard]] Result<void> removeAsset(const Uuid& assetId);
+
     // --- Per-clip version history (Requirement 3.4) -------------------------
 
     /// Begin tracking `clipId`, establishing its initial (base) version from a
