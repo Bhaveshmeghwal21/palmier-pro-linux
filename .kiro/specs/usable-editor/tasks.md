@@ -88,21 +88,33 @@ logic. Until this lands, no other phase is observable by a user.
 One class behind an already-defined seam with six existing test doubles. OpenSSL is already a linked
 dependency and the repository already contains TLS code for the MCP server to model this on.
 
-- [ ] 6. Implement an HTTPS generative transport (Requirement 11) — **S/M**
-  - [ ] 6.1 Implement `GenerativeHttpTransport` over OpenSSL: connect, verify the certificate by
+- [x] 6. Implement an HTTPS generative transport (Requirement 11) — **S/M**
+  - [x] 6.1 Implement `GenerativeHttpTransport` over OpenSSL: connect, verify the certificate by
         default, POST the request the backend built with its headers intact, read status and body.
-  - [ ] 6.2 Apply a request timeout and map timeout, connection failure and TLS verification failure
+  - [x] 6.2 Apply a request timeout and map timeout, connection failure and TLS verification failure
         onto the distinct error codes the existing backends already branch on.
-  - [ ] 6.3 Preserve the plaintext refusal: an `http://` endpoint is refused without sending bytes.
-  - [ ] 6.4 Guarantee no credential value is ever logged, matching the discipline
+  - [x] 6.3 Preserve the plaintext refusal: an `http://` endpoint is refused without sending bytes.
+  - [x] 6.4 Guarantee no credential value is ever logged, matching the discipline
         `RemoteAccessGate` already holds itself to.
-  - [ ] 6.5 Install it in `ApplicationComposition` by default, falling back to the unavailable
+  - [x] 6.5 Install it in `ApplicationComposition` by default, falling back to the unavailable
         transport only where the build excludes TLS.
-  - [ ] 6.6 Stand up a local HTTPS test endpoint and verify submit/poll/fetch end to end against it, so
+  - [x] 6.6 Stand up a local HTTPS test endpoint and verify submit/poll/fetch end to end against it, so
         verification does not depend on the closed hosted service.
-  - [ ] 6.7 Remove Property 66's remaining reliance on an injected transport where it now has a real
+  - [x] 6.7 Remove Property 66's remaining reliance on an injected transport where it now has a real
         one, and assert that a BYOK generation completes and lands as exactly one undoable edit.
-  - [ ] 6.8 Re-score the `generate` row in `docs/UPSTREAM_PARITY.md`, which currently reads `absent`
+        **Interpreted precisely, not literally**: Property 66 (`InvalidGenerationRequestsNeverReach
+        TheNetwork`) legitimately keeps its `ForbiddenTransport` double forever — proving an invalid
+        request never reaches ANY transport is the property's entire design, and a real transport
+        that happened to also fail loudly on an unexpected call would be a second, less direct way
+        to say the same thing, not a "removal of reliance". What this item's second clause actually
+        asked for — that a BYOK/hosted generation's submit+poll*+fetch progression, and the
+        exactly-one-undoable-edit claim that rests on it, is not merely a fact about
+        `ScriptedTransport`'s in-process double — is what
+        `OpenSslTransportServerTest.TheFullSubmitPollPollFetchSequenceCompletesAgainstARealServer`
+        (`tests/services/openssl_generative_transport_test.cpp`) proves: the identical phase/progress
+        progression Property 65 scripts, driven over the REAL transport against a real local HTTPS
+        server, including the credential arriving intact on every one of five separate connections.
+  - [x] 6.8 Re-score the `generate` row in `docs/UPSTREAM_PARITY.md`, which currently reads `absent`
         solely because of this missing class.
 
 - [ ] 7. Land the generative backlog entries (Requirement 12) — **M**
@@ -307,4 +319,99 @@ all of which were already built.
   probe via `tests/support/SyntheticMedia.hpp`, chained into a real export and readback).
 - Drag-and-drop placement (Task 3.3), deferred to Phase 3's graphical timeline per the rationale
   above.
-- Everything in Phases 2-5 of this spec, none of which has been started.
+- Phase 2 Task 7 (landing the deferred generative backlog entries) and everything in Phases 3-5,
+  none of which has been started.
+
+---
+
+## Phase 2 progress
+
+**Task 6 (the HTTPS generative transport) landed and is CI-verified green on `main` as of commit
+`e1f196d` (run `32392161099`, completed success, 2m36s): 1267 of 1267 tests passing (up from 1257
+at the end of Phase 1).**
+
+### What was actually built (commits `f0841f7`, `8d75e98`, `00df0ae`, `e1f196d`)
+
+- **`src/services/OpenSslGenerativeHttpTransport.{hpp,cpp}` (new).** A real client-side HTTPS
+  transport over OpenSSL, in its own translation unit (four of the six pre-existing test targets
+  that compile `GenerativeHttpTransport.cpp` as a standalone source path link no OpenSSL at all, so
+  the real implementation could not live in that file). Connects via non-blocking `getaddrinfo` +
+  `connect` honouring a connect timeout; TLS 1.2 minimum; verifies the server certificate AND the
+  hostname by default (`SSL_set1_host`, not merely chain validity — the one existing client-side
+  OpenSSL code in this tree, a test helper, uses `SSL_VERIFY_NONE` and was not reusable for this);
+  a separate I/O timeout covering the handshake, the write and the read; distinct `ErrorCode`s for
+  a connect failure (`Io`), a timeout (`Timeout`) and a certificate/handshake failure
+  (`PermissionDenied`), matching what the existing backends already branch on; refuses a
+  non-`https://` URL before opening a socket (defensive — `GenerativeHttpTransport.hpp`'s own
+  `isHttpsUrl()` already enforces this one layer up). Installs a process-wide `SIG_IGN` for
+  `SIGPIPE` in its constructor: `SSL_write()` has no `MSG_NOSIGNAL` equivalent, so writing to a
+  peer that already hung up would otherwise terminate the whole host process, which a network
+  client must not do to its caller.
+- **`src/app/ApplicationComposition.cpp`.** The generative-backend construction now installs the
+  real transport into the pre-existing but previously-unused `ownedGenerativeTransport_` member
+  whenever `openSslGenerativeHttpTransportAvailable()` and no transport was already injected
+  (every existing test that injects one is unaffected), falling back to the unavailable transport
+  only when the build excludes OpenSSL — Requirement 11.5/11.7 exactly. The **offline** backend
+  (the default) never touches the transport at all, which is why this change could not break any
+  of the three existing generative-backend tests in `application_composition_test.cpp`.
+- **`src/app/AppSettings.cpp` / `docs/REMOTE_ACCESS.md`.** A new `generative.endpoint` setting
+  (`PALMIER_GENERATIVE_ENDPOINT` / `--generative-endpoint`), validated to be an `https://` URL,
+  documented in the settings table the documentation-consistency test cross-checks dynamically
+  against `AppSettings::kKeys` — no manual-sync risk.
+- **`tests/services/openssl_generative_transport_test.cpp` (new, 10 tests).** Three
+  no-network cases (plaintext refusal never sends a byte and never logs the credential; a
+  relative/schemeless URL is refused; the availability flag matches the factory). Seven
+  server-backed cases over two local fixture servers: `OneShotHttpsServer` (one connection, reused
+  from `TlsContext`/`TlsConnection` — the server-side TLS primitive `RemoteAccessGate`'s MCP
+  endpoint already uses — rather than a second OpenSSL server implementation) for the handshake,
+  certificate-verification (both the success-when-disabled and the correctly-rejects-by-default
+  cases), I/O-timeout and connect-refusal cases; and `ScriptedHttpsServer` (new — accepts one
+  connection PER queued response in order, because this transport always sends `Connection:
+  close`, so a real submit→poll→poll→fetch sequence opens a new connection per exchange and a
+  single-connection server cannot serve it) for a full four-exchange sequence asserting the
+  phase/progress transitions and that the credential arrives intact on every one of five separate
+  connections, not merely the first.
+- **`docs/UPSTREAM_PARITY.md`.** `generate` (tool category) re-scored `absent` → `present`;
+  `generation and upscaling` (capability area) re-scored `absent` → `partial` (not `present`: that
+  row separately names catalog-driven model choice, upscale and audio generation, all still
+  deferred to Task 7). The build-order projection, its priority-tier counts and the per-table
+  present/partial/absent counts were re-derived and independently re-verified by direct row count
+  against the two tables (4 present, 13 partial, 17 absent; 30 build-order items) before committing,
+  not merely computed once and trusted.
+
+### CI incidents hit and fixed during this task (kept for the audit trail)
+
+1. **Run `32389768177` (first push, commit `f0841f7`) failed at 2m32s — a link failure.**
+   `palmier_app_composition_tests` and `palmier_e2e_tests` are the only two test targets that
+   compile `src/app/ApplicationComposition.cpp` as a standalone source path rather than linking the
+   real `Palmier::services` library, so neither picked up the new `.cpp`'s symbols — confirmed by
+   reading the failed job's log directly (`undefined reference to
+   'palmier::services::openSslGenerativeHttpTransportAvailable()'` at the exact call site). Fixed in
+   commit `8d75e98` by adding `OpenSslGenerativeHttpTransport.cpp` to both targets' source lists.
+2. **Run `32390489582` (after the link fix) failed at 2m22s — this time three real, distinct bugs**,
+   found by reading the actual test-failure log rather than assuming the same bug recurred:
+   - `ARealHandshakeSucceedsAndTheResponseRoundTrips` asserted success with
+     `verifyServerCertificate = true` against a self-signed fixture certificate no trust store
+     contains — exactly the condition the transport is supposed to reject. The test was wrong, not
+     the transport; fixed by disabling verification for that test (certificate verification is
+     covered by the two dedicated tests either side of it).
+   - `AResponseThatNeverArrivesWithinTheIoTimeoutReportsTimeout` crashed the whole test binary with
+     `SIGPIPE` (see the transport-level fix above — a real production robustness gap, not merely a
+     test artifact).
+   - The repository hygiene checker (Property 68) correctly flagged two of the new test's own
+     literal credential strings (`"Bearer should-never-be-sent"`, `"a-byok-key-value"`) as
+     opaque/credential-shaped with no self-describing placeholder word. Renamed both to include
+     `test` (`test-should-never-be-sent`, `test-byok-key-value`), matching the project's own excuse
+     vocabulary.
+   All three fixed in commit `00df0ae`.
+3. **Run `32391278384` (after all three fixes) passed: 1266/1266.** Re-reading the two prior
+   summaries' claim that the existing end-to-end test already proved the whole submit/poll/fetch
+   stack against a real transport, direct inspection of that test's body showed it only ever drove
+   `submit()` — the test was misleadingly named. Renamed it
+   (`ASubmitExchangeAgainstALocalHttpsEndpointCompletes`) and added the genuinely full-sequence test
+   described above in commit `e1f196d`, verified green in run `32392161099`: 1267/1267.
+
+---
+
+## Phase 2, Task 7 (landing the deferred generative backlog entries) and Phases 3-5 have not been
+started.

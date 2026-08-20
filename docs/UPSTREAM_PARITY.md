@@ -16,7 +16,7 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: 65fb3d9e524a9c1defe0ea08da5fd8623fd4e28d (branch `main`)
+- linux-ref: e1f196d01440c4e927fbc13d3bef8c28a5e335df (branch `main`)
 - comparison-date: 2026-08-20
 
 ## Status definitions (Requirement 13.7)
@@ -77,7 +77,7 @@ every `N. ` line as a build-order item.
 | media | partial | services::MediaImportService, core::MediaManager, services::ToolRegistry media.import/media.list, ui::MediaBrowserPanel | should | Import and list are reachable and the media browser panel is mounted, showing the library and a selected clip's retained versions and key moments; no tool removes, relinks or re-probes an asset. | - | - |
 | import | present | services::MediaImportService, media::MediaProbe, media::ImportValidation, services::ToolRegistry media.import | - | - | - | - |
 | export | present | services::ExportCoordinator, media::ExportEngine, media::MediaEncoder, media::EncoderSelector, services::ToolRegistry timeline.export | - | - | - | - |
-| generate | absent | services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::GenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator, services::ToolRegistry generation.generate | should | 10.5 landed the backend registry and the hosted and BYOK clients, but no HTTPS transport is implemented in tree, so every configured backend fails at submit and no generation completes. | - | - |
+| generate | present | services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::OpenSslGenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator, services::ToolRegistry generation.generate | - | - | - | - |
 | projects | present | services::ProjectSession, services::ProjectStore, services::ProjectSaveService, services::ToolRegistry project.create/project.open/project.save/project.info | - | - | - | - |
 | project settings | partial | core::Project, services::ToolRegistry project.create/project.info | should | Frame rate, canvas and colour space are settable only at project.create and readable by project.info; no tool changes them later and no settings panel exists. | - | - |
 | search | absent | none | later | No search index, search tool or search field exists; assets and clips can only be listed in full, so a project cannot be searched. | - | - |
@@ -96,7 +96,7 @@ every `N. ` line as a build-order item.
 | text and graphics | absent | none | should | No text, title or shape layer exists in the domain core or the renderer, so on-screen graphics cannot be authored at all. | - | - |
 | color and effects | partial | gpu::EffectKernels, gpu::Compositor, core::EffectType, services::ToolRegistry timeline.add_effect | should | Six effects including the ported invert_colors render on both paths; nothing removes, reorders or edits an effect and there is no LUT, scope or denoise. | - | - |
 | audio scrub and metering | absent | none | should | The audio pipeline mixes and outputs, but no level meter, waveform or scrub-audio component exists, so levels cannot be monitored while editing. | SwiftUI | Qt 6 Widgets |
-| generation and upscaling | absent | services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::GenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator | should | Backend selection is reachable, but the sole in-tree transport reports Unsupported, so nothing generates; no model catalog (PR 406), upscale mode (PR 396) or audio generation (PR 395). | - | - |
+| generation and upscaling | partial | services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::OpenSslGenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator | should | Task 6 landed a real HTTPS transport, so generate now completes; no model catalog (PR 406), upscale mode (PR 396) or audio generation (PR 395), all still deferred in PORT_BACKLOG.md. | - | - |
 | project browser and search | partial | ui::MediaBrowserViewModel, ui::MediaBrowserPanel | later | The media browser panel is mounted and lists the library as a flat list; no bin, folder or tag structure and no search index exist, so assets cannot be organised or searched. | SwiftUI | Qt 6 Widgets |
 | MCP and agent chat | partial | services::McpServer, services::McpProtocolHandler, services::McpSessionRegistry, services::RemoteAccessGate, services::AgentOrchestrator, services::OfflineIntentInterpreter, ui::AgentChatPanel | must | initialize, tools/list and tools/call work over JSON-RPC 2.0, the offline interpreter maps utterances, and the agent chat panel is mounted; no SSE stream or tools/list_changed. | SwiftUI | Qt 6 Widgets |
 | settings | partial | app::AppSettings, app::AppConfig | should | Defaults, config file, environment and flags are honoured at startup only; nothing changes a setting at runtime and there is no preferences surface. | SwiftUI | Qt 6 Widgets |
@@ -105,11 +105,11 @@ every `N. ` line as a build-order item.
 
 ## Build order (Requirement 13.9)
 
-Exactly the `absent` and `partial` entries of both tables — 31 of the 34 — sorted `must` before
+Exactly the `absent` and `partial` entries of both tables — 30 of the 34 — sorted `must` before
 `should` before `later`. This list is a **projection** of the two tables and carries no
 independent facts: an entry appears here if and only if its status above is `absent` or `partial`,
-with the priority recorded above. The three omitted entries are the three `present` ones:
-`import`, `export` and `projects`, all in table 1.
+with the priority recorded above. The four omitted entries are the four `present` ones — `import`,
+`export`, `projects` (all table 1, unchanged) and `generate` (table 1, as of task 6).
 
 Each item is written `<name> (<table>) — <priority>` because `multicam` appears in both tables.
 
@@ -124,31 +124,30 @@ Each item is written `<name> (<table>) — <priority>` because `multicam` appear
 9. effects (tool category) — should
 10. multicam (tool category) — should
 11. media (tool category) — should
-12. generate (tool category) — should
-13. project settings (tool category) — should
-14. capture frame (tool category) — should
-15. multicam (capability area) — should
-16. transcription and captions (capability area) — should
-17. text and graphics (capability area) — should
-18. color and effects (capability area) — should
-19. audio scrub and metering (capability area) — should
-20. generation and upscaling (capability area) — should
-21. settings (capability area) — should
-22. denoise (tool category) — later
-23. organize (tool category) — later
-24. layout (tool category) — later
-25. search (tool category) — later
-26. sync (tool category) — later
-27. beats (tool category) — later
-28. words (tool category) — later
-29. project browser and search (capability area) — later
-30. telemetry (capability area) — later
-31. auto-update (capability area) — later
+12. project settings (tool category) — should
+13. capture frame (tool category) — should
+14. multicam (capability area) — should
+15. transcription and captions (capability area) — should
+16. text and graphics (capability area) — should
+17. color and effects (capability area) — should
+18. audio scrub and metering (capability area) — should
+19. generation and upscaling (capability area) — should
+20. settings (capability area) — should
+21. denoise (tool category) — later
+22. organize (tool category) — later
+23. layout (tool category) — later
+24. search (tool category) — later
+25. sync (tool category) — later
+26. beats (tool category) — later
+27. words (tool category) — later
+28. project browser and search (capability area) — later
+29. telemetry (capability area) — later
+30. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 3 `present`,
-11 `partial`, 20 `absent`; 31 in this list, of which 2 `must`, 19 `should` and 10 `later`. Per table:
-table 1 holds 22 entries (3 `present`, 7 `partial`, 12 `absent`, so 19 appear below) and table 2
-holds 12 (0 `present`, 4 `partial`, 8 `absent`, so all 12 appear below).
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 4 `present`,
+13 `partial`, 17 `absent`; 30 in this list, of which 2 `must`, 18 `should` and 10 `later`. Per table:
+table 1 holds 22 entries (4 `present`, 7 `partial`, 11 `absent`, so 18 appear below) and table 2
+holds 12 (0 `present`, 6 `partial`, 6 `absent`, so all 12 appear below).
 
 ## Known limits of this comparison
 
@@ -232,6 +231,25 @@ those claims rest on weaker evidence than the rest.
   editable timecode field, all snapping to the project's edit frame rate. This re-scored the
   `timeline`, `timeline editing`, `effects`, `layout`, `media`, `project browser and search` and
   `MCP and agent chat` rows above, each citing exactly what changed. It did **not** touch the
-  `generate` row (`services::GenerativeHttpTransport` still has no real implementation) or add a
-  graphical (non-tree) timeline view, ripple editing, effect removal/reorder, or any of the
-  `absent` rows below `timeline editing` in the build order; those remain open exactly as scored.
+  `generate` row (`services::GenerativeHttpTransport` still had no real implementation at that
+  ref) or add a graphical (non-tree) timeline view, ripple editing, effect removal/reorder, or any
+  of the `absent` rows below `timeline editing` in the build order; those remained open exactly as
+  scored, at that ref.
+- **2026-08-20 re-check (`.kiro/specs/usable-editor` Phase 2, task 6).** The premise the prior
+  entry's `generate`/`generation and upscaling` rows rested on — no transport is implemented, so
+  every backend fails at `submit` — is now false. `services::OpenSslGenerativeHttpTransport` is a
+  real client-side TLS 1.2+ HTTPS implementation over OpenSSL: it verifies the server certificate
+  by default (including hostname, via `SSL_set1_host`), applies a connect timeout and a separate
+  I/O timeout, maps connection failure/timeout/certificate failure onto distinct `ErrorCode`s
+  (`Io`/`Timeout`/`PermissionDenied`), and refuses a plaintext `http://` endpoint before sending a
+  byte. `ApplicationComposition` installs it by default whenever OpenSSL is linked, falling back to
+  the pre-existing unavailable transport only when it is not. It is verified against a real local
+  HTTPS server (not the closed hosted service, per Requirement 11.6): `submit`, two non-terminal
+  polls, a terminal poll and `fetchResult` all round-trip correctly over it in
+  `tests/services/openssl_generative_transport_test.cpp`, including the credential arriving intact
+  on every one of five separate TLS connections. `generate` (tool category) moves from `absent` to
+  `present`: `generation.generate` is now reachable and completes. `generation and upscaling`
+  (capability area) moves from `absent` to `partial`, not `present`, because that row names three
+  further upstream operations task 6 does not touch — catalog-driven model choice (PR 406), upscale
+  (PR 396) and audio generation (PR 395) — all still deferred to task 7. Nothing else changed: no
+  other row's Linux-side facts moved at this ref.
