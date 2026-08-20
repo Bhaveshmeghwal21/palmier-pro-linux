@@ -143,6 +143,9 @@ constexpr std::string_view kMoveClip      = "timeline.move_clip";
 constexpr std::string_view kTrimClip      = "timeline.trim_clip";
 constexpr std::string_view kSplitClip     = "timeline.split_clip";
 constexpr std::string_view kReorderClips  = "timeline.reorder_clips";
+constexpr std::string_view kRippleDelete  = "timeline.ripple_delete";
+constexpr std::string_view kRippleTrim    = "timeline.ripple_trim";
+constexpr std::string_view kCloseGap      = "timeline.close_gap";
 constexpr std::string_view kAddEffect     = "timeline.add_effect";
 constexpr std::string_view kAddTransition = "timeline.add_transition";
 constexpr std::string_view kGenerate      = "generation.generate";
@@ -715,6 +718,46 @@ struct Invocation {
     }
     if (name == kDeleteClip) {
         args.set("clipId", Json(anyClip.id.toString()));
+        return Invocation{name, std::move(args)};
+    }
+    // Task 8.2 — ripple editing. Every seed clip is a full second long and is
+    // separated from its neighbour by a gap, which is what makes these applicable.
+    if (name == kRippleDelete) {
+        // Closing a one-second hole only ever moves later clips EARLIER by one
+        // second, and each already begins a gap after its predecessor's end, so no
+        // choice of clip can overlap or cross zero.
+        args.set("clipId", Json(anyClip.id.toString()));
+        return Invocation{name, std::move(args)};
+    }
+    if (name == kRippleTrim) {
+        // Applicable for either edge and any boundary, because the command clamps:
+        // `sourceDurationNs` defaults to the clip's out-point, so an end-edge trim
+        // can only SHORTEN the clip (its followers move earlier by the same amount,
+        // preserving every gap) and a start-edge trim leaves the trailing edge fixed
+        // (so no follower moves at all). The seed project declares no clip groups,
+        // so no cross-track propagation is in play here.
+        args.set("clipId", Json(anyClip.id.toString()));
+        args.set("edge", Json(drawEnumValue(registry, kRippleTrim, "edge")));
+        args.set("boundaryNs",
+                 Json(Duration::fromMilliseconds(*rc::gen::inRange<std::int64_t>(
+                          -kClipLengthMs, 3 * kClipLengthMs))
+                          .nanoseconds()));
+        return Invocation{name, std::move(args)};
+    }
+    if (name == kCloseGap) {
+        // A gap can only be closed after a clip that HAS a successor, so this
+        // deliberately targets the first track, which the seed project always fills
+        // with at least two clips, and never its last clip.
+        const Track* twoOrMore = nullptr;
+        for (const Track& candidate : project.tracks) {
+            if (candidate.clips.size() >= 2) {
+                twoOrMore = &candidate;
+                break;
+            }
+        }
+        RC_ASSERT(twoOrMore != nullptr);
+        const Clip& withSuccessor = twoOrMore->clips[drawIndex(twoOrMore->clips.size() - 1)];
+        args.set("clipId", Json(withSuccessor.id.toString()));
         return Invocation{name, std::move(args)};
     }
     if (name == kMoveClip) {

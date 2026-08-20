@@ -182,6 +182,17 @@ std::vector<ToolExpectation> expectedSurface() {
          {{"clipId", "string", true}, {"playheadNs", "integer", true}}},
         {"timeline.reorder_clips",
          {{"trackId", "string", true}, {"order", "array", true}}},
+        // Task 8.2 — ripple editing and gap management (Requirement 5).
+        // `timeline.ripple_trim` mirrors `timeline.trim_clip`'s declaration because
+        // the two commands share their clamping rules; the other two take only the
+        // subject clip, because how far the track closes up is project state.
+        {"timeline.ripple_delete", {{"clipId", "string", true}}},
+        {"timeline.ripple_trim",
+         {{"clipId", "string", true},
+          {"edge", "string", true},
+          {"boundaryNs", "integer", true},
+          {"sourceDurationNs", "integer", false}}},
+        {"timeline.close_gap", {{"clipId", "string", true}}},
         {"timeline.add_effect",
          {{"clipId", "string", true},
           {"type", "string", true},
@@ -366,6 +377,8 @@ TEST(ToolRegistrySchema, IdentifierArgumentsPublishAndEnforceTheUuidFormat) {
         {"timeline.move_clip", "clipId"},      {"timeline.trim_clip", "clipId"},
         {"timeline.split_clip", "clipId"},     {"timeline.reorder_clips", "trackId"},
         {"timeline.add_effect", "clipId"},     {"timeline.add_transition", "clipId"},
+        {"timeline.ripple_delete", "clipId"},  {"timeline.ripple_trim", "clipId"},
+        {"timeline.close_gap", "clipId"},
         {"generation.generate", "trackId"},    {"generation.generate", "sourceAssetId"},
     };
 

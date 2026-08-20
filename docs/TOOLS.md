@@ -21,7 +21,7 @@ For how to reach the endpoint at all, see [`MCP_CLIENTS.md`](MCP_CLIENTS.md).
 handler runs. So the schema in `tools/list` accepts exactly the argument objects the tool accepts.
 
 **`additionalProperties` is `false` everywhere.** An undeclared member is rejected with
-`unknown field '<name>' is not accepted by this tool` — including on the five tools that take no
+`unknown field '<name>' is not accepted by this tool` — including on the six tools that take no
 arguments at all, whose schema is an empty object schema.
 
 **An optional argument may be omitted, never sent as `null`.** Absence is accepted; a `null` fails
@@ -41,10 +41,11 @@ comes back.
 that was legal but changed nothing. The two are mutually exclusive and only one of them appears.
 Tools carrying this pair are marked *(command result)* below.
 
-**Three tools have no built-in implementation** and depend on a collaborator the composition root
+**Four tools have no built-in implementation** and depend on a collaborator the composition root
 installs. Absent it they return `Unsupported`, after the no-project check:
 `media.import is not available: no media import service is configured`,
 `generation.generate is not available: no generative backend is configured`,
+`generation.list_models is not available: no model catalog is configured`,
 `timeline.export is not available: no export engine is configured`. The session and media-listing
 tools do have built-in implementations, which the GUI may override (for example to interpose a save
 destination prompt) without changing their arguments or results.
@@ -322,6 +323,59 @@ The schema constrains `order` to an array; that every entry is a UUID string is 
 handler and that the entries are a permutation of the track's clips by the command.
 
 Result: `trackId` (string), *(command result)*.
+
+## `timeline.ripple_delete`
+
+Delete a clip and shift every later clip on the same track earlier by the removed clip's duration,
+closing the gap it leaves (usable-editor Phase 3 task 8; Requirement 5.1).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | |
+
+How far the track closes up is not a caller's choice: it is exactly the removed clip's own duration.
+Clips on other tracks keep their absolute positions.
+
+Result: `clipId` (string), *(command result)*.
+
+## `timeline.ripple_trim`
+
+Trim a clip's edge and shift every later clip on the same track by the change in duration, so the
+trim leaves neither a gap nor an overlap (usable-editor Phase 3 task 8; Requirement 5.2).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | |
+| `edge` | string | **yes** | `start`, `end` |
+| `boundaryNs` | integer | **yes** | any; the command *clamps* it into the legal range rather than rejecting it |
+| `sourceDurationNs` | integer | no | ≥ 0; defaults to the clip's current out-point |
+
+`end` moves the out-point and leaves the clip's leading edge fixed, so later clips move by the
+change in duration. `start` moves the in-point and shifts the clip's leading edge by the same
+amount, leaving the trailing edge — and therefore every later clip — where it was.
+
+When the trimmed clip belongs to a `clipGroups` entry, the identical source-time trim is applied to
+every other member of that group and each member's own track is rippled the same way, so grouped
+multicam angles that started aligned stay aligned (upstream PR 397). A grouped clip that cannot
+absorb the same trim while keeping one frame inside its source refuses the whole operation, leaving
+the project unchanged.
+
+Result: `clipId` (string), *(command result)*.
+
+## `timeline.close_gap`
+
+Close the gap immediately following a clip by shifting later clips on the same track earlier,
+leaving every clip's duration unchanged (usable-editor Phase 3 task 8; Requirement 5.5).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | |
+
+Only positions change; no duration or source range is touched. The operation is refused, with the
+project unchanged, when the clip is the last on its track or when its successor already begins at or
+before the clip's end — in both cases there is no gap to close.
+
+Result: `clipId` (string), *(command result)*.
 
 ## `timeline.add_effect`
 
