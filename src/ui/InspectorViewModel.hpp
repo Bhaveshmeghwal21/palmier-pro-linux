@@ -21,6 +21,19 @@
 // surface, so the model never caches stale project state. The model also observes
 // the engine, so an edit issued from any other surface (undo/redo, MCP, agent)
 // refreshes the panel through the same onChanged callback.
+//
+// Gateway routing (task 11.4; Requirements 1.7, 9.4, 11.5): addEffect() (and its
+// addBrightnessEffect/addContrastEffect/addBlurEffect convenience wrappers) and
+// trimStart()/trimEnd() are routed through an optional `ui::GuiToolGateway` when
+// one is installed, because `timeline.add_effect` and `timeline.trim_clip` are
+// published tools that the MCP endpoint and the in-app agent already call
+// through the identical EditCommand path. setOpacity(), setGain() and
+// setEffectParameter() have NO tool-surface equivalent — SetClipPropertyCommand
+// and SetEffectParameterCommand are Inspector-only commands not exposed as MCP
+// tools — so they always call TimelineEngine::apply directly; routing them
+// through a nonexistent tool is not an option this task adds. With no gateway
+// installed (the default), every mutation calls the engine directly, exactly as
+// before.
 
 #ifndef PALMIER_UI_INSPECTORVIEWMODEL_HPP
 #define PALMIER_UI_INSPECTORVIEWMODEL_HPP
@@ -43,6 +56,8 @@
 namespace palmier {
 
 class TimelineEngine;
+
+namespace ui { class GuiToolGateway; }  // ui/GuiToolGateway.hpp
 
 namespace ui {
 
@@ -140,7 +155,10 @@ class InspectorViewModel {
 public:
     /// Binds the model to an engine. The engine must outlive the model. The model
     /// observes the engine so external edits refresh the panel via onChanged.
-    explicit InspectorViewModel(TimelineEngine& engine);
+    /// When `gateway` is non-null (it must then outlive this model), addEffect()
+    /// and trimStart()/trimEnd() route through it instead of calling
+    /// `TimelineEngine::apply` directly (task 11.4).
+    explicit InspectorViewModel(TimelineEngine& engine, ui::GuiToolGateway* gateway = nullptr);
 
     ~InspectorViewModel();
 
@@ -201,10 +219,19 @@ public:
     /// edits or edits from undo/redo, MCP, or the agent).
     void setOnChanged(std::function<void()> callback);
 
+    /// Install (or clear, with nullptr) the gateway addEffect()/trimStart()/
+    /// trimEnd() route through.
+    void setGateway(ui::GuiToolGateway* gateway) noexcept { gateway_ = gateway; }
+
+    /// The currently installed gateway, or nullptr when those mutations call
+    /// the engine directly.
+    [[nodiscard]] ui::GuiToolGateway* gateway() const noexcept { return gateway_; }
+
 private:
     void notifyChanged() const;
 
     TimelineEngine&        engine_;
+    ui::GuiToolGateway*     gateway_ = nullptr;
     std::optional<ClipId>  selected_;
     std::function<void()>  onChanged_;
     Subscription           subscription_;

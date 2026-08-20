@@ -12,17 +12,43 @@
 # Notes on build options (see cmake/PalmierOptions.cmake):
 #   * PALMIER_BUILD_TESTS  = ON   -> compile + register the CTest suite
 #   * PALMIER_BUILD_UI     = ON   -> build the Qt 6 presentation layer
-#   * PALMIER_ENABLE_VAAPI = ON   -> libva HW path (libva-dev is installed)
-#   * PALMIER_ENABLE_NVENC = OFF  -> would need ffnvcodec (nv-codec-headers)
-#   * PALMIER_ENABLE_QSV   = OFF  -> would need oneVPL/libvpl (libvpl-dev)
-# NVENC/QSV are disabled here so configuration succeeds with the packages that
-# ship in the Ubuntu archive; the FFmpeg software codec path still covers tests.
+#   * PALMIER_ENABLE_VAAPI = ON   -> libva HW path        (libva-dev)
+#   * PALMIER_ENABLE_NVENC = ON   -> ffnvcodec HW path    (nv-codec-headers)
+#   * PALMIER_ENABLE_QSV   = ON   -> oneVPL/QSV HW path   (libvpl-dev)
+#   * PALMIER_ENABLE_OPENSSL = ON -> TLS transport for the remote MCP endpoint
+#                                   (libssl-dev; openssl-devel on Fedora/RHEL)
+# All three vendor SDK development packages ship in the Ubuntu archive, so they
+# are installed here and every vendor path is configured ON: that is what makes
+# PALMIER_HAVE_VAAPI / PALMIER_HAVE_NVENC / PALMIER_HAVE_QSV actually defined in
+# CI, so the hardware code paths are compiled and type-checked (Requirement
+# 8.1). Hardware *execution* still skips on runners without a device.
+#
+# The companion `configure-without-vendor-sdks` job configures the same options
+# ON with none of the vendor SDKs visible, proving configuration still succeeds
+# and each path is reported disabled (Requirement 8.9).
 #
 # Runs on ubuntu-24.04 to satisfy the app's platform check (glibc >= 2.31).
 # RapidCheck reads RC_PARAMS from the environment; the tests already set a
 # >=100 max_success floor via gtest_discover_tests ENVIRONMENT, so no extra
 # RC_PARAMS is needed. CTest is wrapped in `xvfb-run -a` to give any Qt widget
 # test a virtual display.
+#
+# Every run — passing or failing — publishes a `ctest-results` artifact holding the
+# complete test log and a generated summary that lists every test's outcome with
+# the reason each skipped test recorded (Requirements 15.2, 15.5, 15.7).
+#
+# The same job then runs a LAUNCH SMOKE TEST and publishes a `launch-smoke-test`
+# artifact: it starts the shipped `palmier-pro` binary on a virtual display,
+# asserts the process survives startup and maps a window titled "Palmier Pro",
+# and captures a screenshot of it. This covers what no assertion in the suite
+# can — the real executable going through main.cpp's launch sequence and a live
+# Qt event loop — and makes "the editor launches and renders" a visible artifact
+# rather than an inference from widget-level unit tests.
+#
+# The third job, `l4-validation`, is the Requirement 8.5 hardware-encode lane. It
+# needs an NVIDIA L4, which no hosted runner has, so it runs only on a manual
+# dispatch that ticks its input AND on a self-hosted runner labelled `nvidia-l4`.
+# Ordinary pushes and pull requests never reach it.
 # -----------------------------------------------------------------------------
 
 name: CI
@@ -34,10 +60,24 @@ on:
   pull_request:
     branches:
       - main
+  # Manual dispatch exists for the `l4-validation` job at the bottom of this file,
+  # which needs an NVIDIA L4 no hosted runner has. Dispatching without ticking the
+  # box just re-runs the ordinary jobs.
+  workflow_dispatch:
+    inputs:
+      run_l4_validation:
+        description: >-
+          Run the NVIDIA L4 hardware-encode validation job. Requires a self-hosted
+          runner labelled `nvidia-l4` with the NVIDIA driver and the ffnvcodec
+          headers installed; leave unticked on every other dispatch.
+        type: boolean
+        default: false
 
-# Cancel superseded runs on the same ref to save CI minutes.
+# Cancel superseded runs on the same ref to save CI minutes. The event name is part
+# of the group so a long manual `l4-validation` dispatch is not cancelled by an
+# ordinary push to the same ref.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -56,6 +96,16 @@ jobs:
 
       - name: Install native build dependencies
         run: |
+          # Work around a known GitHub-hosted-runner defect where a stale/corrupt
+          # cached apt package index (particularly the base "noble" archive, which
+          # carries the universe component nv-codec-headers ships in) causes
+          # `apt-get update` to report success while leaving some packages
+          # unresolvable ("Unable to locate package"). Clearing the cached lists
+          # before updating is the documented workaround (see e.g.
+          # https://github.com/actions/runner-images/discussions/10406) and is
+          # purely additive: it does not change which packages are installed or
+          # their versions, only forces a clean re-fetch of the index.
+          sudo rm -rf /var/lib/apt/lists/*
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
@@ -87,14 +137,46 @@ jobs:
             spirv-tools \
             libshaderc-dev \
             libva-dev \
+            libvpl-dev \
             liblcms2-dev \
-            libsecret-1-dev
+            libsecret-1-dev \
+            libssl-dev \
+            libpipewire-0.3-dev \
+            libasound2-dev
+
+      # The nv-codec-headers apt package is intermittently unresolvable on the
+      # GitHub-hosted ubuntu-24.04 runner image ("Unable to locate package"),
+      # even right after a clean `apt-get update` -- i.e. it is missing from
+      # whatever archive snapshot the runner currently resolves against, not a
+      # stale-cache problem. The package itself only installs a handful of
+      # headers plus an ffnvcodec.pc file (no library to compile), so building
+      # it from its upstream source -- the same repository the apt package is
+      # generated from -- is a reliable, low-risk substitute that keeps the
+      # NVENC path (Requirement 8.1) actually compiling and type-checked in CI.
+      - name: Install ffnvcodec (nv-codec-headers) from upstream source
+        run: |
+          git clone --depth 1 --branch n13.0.19.0 \
+            https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers
+          sudo make -C /tmp/nv-codec-headers install
+          rm -rf /tmp/nv-codec-headers
+          pkg-config --modversion ffnvcodec
 
       - name: Verify toolchain versions
         run: |
           cmake --version
           ninja --version
           pkg-config --modversion libavcodec || true
+
+      # Both report generators this workflow uses are scripts with their own
+      # tests, and they run here rather than in CTest because they are CI tooling,
+      # not part of the product's verification suite. The l4 one also checks that
+      # the measurement keys it parses are the keys
+      # export_hardware_software_comparison_test.cpp actually prints — the only
+      # guard against those two drifting apart on a lane that cannot run here.
+      - name: Self-test the CI report generators
+        run: |
+          python3 scripts/test_ctest_summary.py
+          python3 scripts/test_l4_validation_report.py
 
       - name: Cache ccache
         uses: actions/cache@v4
@@ -106,24 +188,563 @@ jobs:
 
       - name: Configure (CMake + Ninja)
         run: |
+          set -o pipefail
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DPALMIER_BUILD_TESTS=ON \
             -DPALMIER_BUILD_UI=ON \
             -DPALMIER_ENABLE_VAAPI=ON \
-            -DPALMIER_ENABLE_NVENC=OFF \
-            -DPALMIER_ENABLE_QSV=OFF
+            -DPALMIER_ENABLE_NVENC=ON \
+            -DPALMIER_ENABLE_QSV=ON \
+            2>&1 | tee configure.log
+
+      # Requirement 8.1: with the option ON and the vendor SDK present, the
+      # configuration summary must report the path as enabled with the SDK found.
+      - name: Assert vendor hardware paths are enabled in the configuration summary
+        run: |
+          status=0
+          for path in VAAPI NVENC QSV; do
+            if grep -Eq "${path}[^:]*:[[:space:]]*enabled \(SDK found\)" configure.log; then
+              echo "OK: ${path} reported as 'enabled (SDK found)'"
+            else
+              echo "::error::configuration summary does not report ${path} as 'enabled (SDK found)'"
+              status=1
+            fi
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "--- hardware codec summary lines ---"
+            grep -E "VAAPI|NVENC|QSV" configure.log || true
+            exit 1
+          fi
+
+      # Requirement 10.6: with the option ON and OpenSSL 3.x present, the summary
+      # must report the TLS transport as enabled, so PALMIER_HAVE_OPENSSL really is
+      # defined and the HTTPS path is compiled and type-checked here.
+      - name: Assert the TLS transport is enabled in the configuration summary
+        run: |
+          if grep -Eq "TLS \(OpenSSL\)[^:]*:[[:space:]]*enabled \(OpenSSL found\)" configure.log; then
+            echo "OK: TLS transport reported as 'enabled (OpenSSL found)'"
+          else
+            echo "::error::configuration summary does not report the TLS transport as 'enabled (OpenSSL found)'"
+            grep -E "TLS \(OpenSSL\)" configure.log || true
+            exit 1
+          fi
+
+      # Requirements 6.2 / 6.7: with the options ON and both libraries present, the
+      # summary must report each audio sink as enabled with the SDK found, so
+      # PALMIER_HAVE_PIPEWIRE and PALMIER_HAVE_ALSA really are defined and both
+      # backends are compiled and type-checked here. The runners have no sound card,
+      # so at RUN time selection still falls through to NullAudioSink — which is the
+      # point of Requirement 6.7 and is what the audio tests assert.
+      - name: Assert both audio sinks are enabled in the configuration summary
+        run: |
+          status=0
+          for sink in PipeWire ALSA; do
+            if grep -Eq "Audio sink: ${sink}[^:]*:[[:space:]]*enabled \(SDK found\)" configure.log; then
+              echo "OK: ${sink} audio sink reported as 'enabled (SDK found)'"
+            else
+              echo "::error::configuration summary does not report the ${sink} audio sink as 'enabled (SDK found)'"
+              status=1
+            fi
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "--- audio sink summary lines ---"
+            grep -E "Audio sink" configure.log || true
+            exit 1
+          fi
 
       - name: Build
         run: cmake --build build
 
+      # Requirements 15.2, 15.5 and 15.7. One run of the whole suite that produces
+      # three things: the complete console log, CTest's own logs under
+      # build/Testing, and the JUnit XML the summary below is generated from.
+      #
+      # `set -o pipefail` is load-bearing: without it `tee` returns 0 and a failing
+      # suite would pass the job. Requirement 15.7 wants BOTH halves — the run
+      # reported as failed *and* the log plus summary published — so the failure
+      # stays here and the two publishing steps run with `if: always()`.
+      #
+      # A RELATIVE --output-junit path is resolved against the directory named by
+      # --test-dir rather than the working directory (checked against ctest 3.22),
+      # so the results land at build/ctest-results.xml.
       - name: Test (CTest, headless via xvfb)
-        run: xvfb-run -a ctest --test-dir build --output-on-failure
+        run: |
+          set -o pipefail
+          xvfb-run -a ctest --test-dir build \
+            --output-on-failure \
+            --output-junit ctest-results.xml 2>&1 | tee build/ctest.log
 
-      - name: Upload test logs on failure
-        if: failure()
+      # Requirement 15.7's summary half: every test's name and its outcome of
+      # passed, failed or skipped together with its RECORDED skip reason.
+      #
+      # The reason has to be dug out of the JUnit `<system-out>`: CTest fills
+      # `<skipped message="...">` with the constant `SKIP_REGULAR_EXPRESSION_MATCHED`
+      # for every skipped test, while the text a test recorded with `GTEST_SKIP() <<
+      # reason` — which is what Requirement 15.5 is about — is in its captured
+      # output. scripts/ctest_summary.py does that parsing and is self-tested by
+      # scripts/test_ctest_summary.py.
+      #
+      # `if: always()` here and on the upload is task 12.11's "unconditionally":
+      # the artifact is published for green runs too, because Requirement 15.5's
+      # evidence — which hardware tests skipped, and the reason each recorded — is
+      # only observable on runs that passed.
+      - name: Summarise the test results
+        if: always()
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          python3 scripts/ctest_summary.py build/ctest-results.xml \
+            --allow-missing \
+            --title "CTest summary for ${COMMIT_SHA}" \
+            --output build/ctest-summary.md
+          # Also render it on the run's own page, not only inside the artifact.
+          cat build/ctest-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the complete test log and the summary
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ctest-logs
-          path: build/Testing/**
-          if-no-files-found: ignore
+          name: ctest-results
+          path: |
+            build/ctest.log
+            build/ctest-results.xml
+            build/ctest-summary.md
+            build/Testing/**
+          if-no-files-found: warn
+
+      # -----------------------------------------------------------------------
+      # Launch smoke test — the one check no assertion in the suite above makes.
+      #
+      # The Qt widget tests DO construct a real MainWindow under xvfb and assert
+      # its structure (five docks, five menus, the status notices), but nothing
+      # there runs the shipped EXECUTABLE through main.cpp's actual launch
+      # sequence: AppSettings resolution, the platform compatibility gate,
+      # ApplicationComposition construction, the MCP server start, window.show()
+      # and a live Qt event loop. A binary can pass every widget test and still
+      # fail to start — a missing runtime plugin, a modal dialog raised before
+      # the window is shown, a crash in composition. This step runs the real
+      # thing and publishes a screenshot, so "the editor launches and renders"
+      # becomes an artifact a human can look at rather than an inference.
+      #
+      # It is a real assertion, not just a capture. The run fails if the process
+      # dies during startup, if no window titled "Palmier Pro" ever maps, or if
+      # the captured frame is a nearly-flat colour — which is what a window that
+      # mapped but painted nothing looks like.
+      #
+      # These tools are only needed for this step, so they are installed here
+      # rather than mixed into the build-dependency list above.
+      - name: Install the launch smoke-test tools
+        if: always()
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            imagemagick \
+            xdotool \
+            x11-utils
+
+      - name: Launch the editor headlessly and capture a screenshot
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p smoke
+          export DISPLAY=:99
+
+          # Own the X server for the whole step rather than wrapping one command
+          # in `xvfb-run`, so the editor and the screenshot tools share one
+          # display for the entire launch-capture-verify sequence.
+          Xvfb "$DISPLAY" -screen 0 1600x1000x24 -nolisten tcp >smoke/xvfb.log 2>&1 &
+          xvfb_pid=$!
+          cleanup() {
+            if [ -n "${app_pid:-}" ]; then kill "$app_pid" 2>/dev/null || true; fi
+            kill "$xvfb_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 40); do
+            xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break
+            sleep 0.25
+          done
+          if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+            echo "::error::Xvfb never accepted connections on $DISPLAY"
+            cat smoke/xvfb.log || true
+            exit 1
+          fi
+
+          # A private HOME so no configuration or state from the runner image can
+          # leak in, and a non-default MCP port so an occupied 19789 cannot raise
+          # the modal "MCP server unavailable" warning — which is itself blocking
+          # and would stall startup before window.show() is ever reached.
+          export HOME="$PWD/smoke/home"
+          mkdir -p "$HOME"
+
+          ./build/bin/palmier-pro --mcp-port=19899 >smoke/app.log 2>&1 &
+          app_pid=$!
+
+          # Wait for the shell to map. MainWindow's title always begins with
+          # "Palmier Pro" (refreshWindowTitle appends the document name and a
+          # modified marker), so the search is anchored on that prefix only.
+          window=""
+          for _ in $(seq 1 60); do
+            kill -0 "$app_pid" 2>/dev/null || break
+            window=$(xdotool search --name '^Palmier Pro' 2>/dev/null | head -n1 || true)
+            [ -n "$window" ] && break
+            sleep 0.5
+          done
+
+          if ! kill -0 "$app_pid" 2>/dev/null; then
+            app_status=0
+            wait "$app_pid" || app_status=$?
+            echo "::error::palmier-pro exited during startup with status ${app_status}"
+            echo "--- the editor's own output ---"
+            cat smoke/app.log || true
+            exit 1
+          fi
+          if [ -z "$window" ]; then
+            echo "::error::no window titled 'Palmier Pro' mapped within 30 seconds"
+            echo "--- the editor's own output ---"
+            cat smoke/app.log || true
+            echo "--- windows present on the display ---"
+            xdotool search --name '.' 2>/dev/null || true
+            exit 1
+          fi
+          echo "mapped window id: ${window}"
+
+          # Let Qt finish its first paint, then capture the whole screen (the
+          # root window), which is what a user in front of it would see.
+          sleep 3
+          import -display "$DISPLAY" -window root smoke/palmier-pro-launch.png
+
+          # A window that mapped but painted nothing yields a single flat colour.
+          # ImageMagick's %k is the unique-colour count, which makes this the
+          # cheapest honest "something was actually drawn" assertion available.
+          colours=$(identify -format '%k' smoke/palmier-pro-launch.png)
+          echo "unique colours in the capture: ${colours}"
+          if [ "${colours}" -lt 16 ]; then
+            echo "::error::the capture holds only ${colours} unique colour(s); the window mapped but appears to have painted nothing"
+            cat smoke/app.log || true
+            exit 1
+          fi
+
+          # Still alive after the capture: the event loop did not fall over.
+          if ! kill -0 "$app_pid" 2>/dev/null; then
+            echo "::error::palmier-pro died before the smoke test finished"
+            cat smoke/app.log || true
+            exit 1
+          fi
+
+          echo "OK: palmier-pro launched, mapped its main window and painted ${colours} distinct colours"
+          {
+            echo "### Launch smoke test"
+            echo
+            echo "\`palmier-pro\` launched under Xvfb, mapped its main window and painted"
+            echo "${colours} distinct colours. The screenshot and the editor's own stderr are"
+            echo "published as the \`launch-smoke-test\` artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the launch screenshot and the editor's own output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-smoke-test
+          path: |
+            smoke/palmier-pro-launch.png
+            smoke/app.log
+            smoke/xvfb.log
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Requirement 8.9: a vendor path may be enabled at configure time while its
+  # SDK/driver development package is absent. Configuration must still succeed,
+  # the PALMIER_HAVE_* definition must stay undefined, and the configuration
+  # summary must list that path as disabled.
+  #
+  # This job installs only the mandatory dependencies — no libva-dev,
+  # nv-codec-headers or libvpl-dev — and configures with all three vendor
+  # options ON. Tests are switched off because this job checks configuration of
+  # the vendor paths only; the build-and-test job above covers the test tree.
+  # ---------------------------------------------------------------------------
+  configure-without-vendor-sdks:
+    name: Configure without vendor SDKs (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install mandatory build dependencies only
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-declarative-dev \
+            qt6-tools-dev \
+            qt6-tools-dev-tools \
+            libgl1-mesa-dev \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libavfilter-dev \
+            libswscale-dev \
+            libswresample-dev \
+            libavdevice-dev \
+            libvulkan-dev \
+            libshaderc-dev \
+            liblcms2-dev \
+            libsecret-1-dev
+
+      # A vendor .pc file can arrive transitively through another dev package.
+      # Hide any that did so this job really exercises the "SDK not found" path;
+      # renaming the pkg-config file (rather than purging the package) keeps the
+      # mandatory dependencies installed and intact.
+      #
+      # The two OPTIONAL audio backends (libpipewire-0.3, alsa) are hidden here for
+      # the same reason: this job is what proves that a host with neither library
+      # still configures with the options left ON, with each sink reported disabled
+      # and selection degrading to NullAudioSink (Requirements 6.7, 8.9).
+      - name: Hide any vendor codec SDKs and optional audio backends from pkg-config
+        run: |
+          for module in libva libva-drm vpl libmfx ffnvcodec libpipewire-0.3 alsa; do
+            if pkg-config --exists "$module"; then
+              pcdir=$(pkg-config --variable=pcfiledir "$module")
+              echo "Hiding transitively installed ${module}.pc from ${pcdir}"
+              sudo mv "${pcdir}/${module}.pc" "${pcdir}/${module}.pc.ci-hidden"
+            fi
+          done
+          for module in libva libva-drm vpl libmfx ffnvcodec libpipewire-0.3 alsa; do
+            if pkg-config --exists "$module"; then
+              echo "::error::${module} is still visible to pkg-config; this job requires none of them"
+              exit 1
+            fi
+          done
+          echo "No vendor codec SDKs and no optional audio backends are visible to pkg-config."
+
+      - name: Configure with every vendor path and audio sink ON and none present
+        run: |
+          set -o pipefail
+          cmake -S . -B build-no-sdk -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DPALMIER_BUILD_TESTS=OFF \
+            -DPALMIER_BUILD_UI=ON \
+            -DPALMIER_ENABLE_VAAPI=ON \
+            -DPALMIER_ENABLE_NVENC=ON \
+            -DPALMIER_ENABLE_QSV=ON \
+            -DPALMIER_ENABLE_PIPEWIRE=ON \
+            -DPALMIER_ENABLE_ALSA=ON \
+            2>&1 | tee configure-no-sdk.log
+
+      - name: Assert vendor hardware paths are disabled in the configuration summary
+        run: |
+          status=0
+          for path in VAAPI NVENC QSV; do
+            if grep -Eq "${path}[^:]*:[[:space:]]*disabled \(SDK not found\)" configure-no-sdk.log; then
+              echo "OK: ${path} reported as 'disabled (SDK not found)'"
+            else
+              echo "::error::configuration summary does not report ${path} as 'disabled (SDK not found)'"
+              status=1
+            fi
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "--- hardware codec summary lines ---"
+            grep -E "VAAPI|NVENC|QSV" configure-no-sdk.log || true
+            exit 1
+          fi
+
+      # Requirements 6.7 / 8.9 for the audio sinks: both options are ON and neither
+      # library is present, so configuration must still succeed with each sink
+      # reported disabled. The always-compiled NullAudioSink is what the code behind
+      # the absent guards degrades to.
+      - name: Assert both audio sinks are disabled in the configuration summary
+        run: |
+          status=0
+          for sink in PipeWire ALSA; do
+            if grep -Eq "Audio sink: ${sink}[^:]*:[[:space:]]*disabled \(SDK not found\)" configure-no-sdk.log; then
+              echo "OK: ${sink} audio sink reported as 'disabled (SDK not found)'"
+            else
+              echo "::error::configuration summary does not report the ${sink} audio sink as 'disabled (SDK not found)'"
+              status=1
+            fi
+          done
+          if ! grep -Eq "Audio sink: Null[^:]*:[[:space:]]*enabled \(always compiled in\)" configure-no-sdk.log; then
+            echo "::error::configuration summary does not report the null audio sink as always compiled in"
+            status=1
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo "--- audio sink summary lines ---"
+            grep -E "Audio sink" configure-no-sdk.log || true
+            exit 1
+          fi
+
+
+  # ---------------------------------------------------------------------------
+  # Requirements 8.5, 8.10 and 16.5 — the NVIDIA L4 hardware-encode validation.
+  #
+  #   8.5:  "THE L4_Validation_Job SHALL export the fixture timeline of at least
+  #          300 frames at 1920x1080 and 30 frames per second on an NVIDIA L4
+  #          device using `h264_nvenc` and SHALL record, as job output, the
+  #          selected encoder name, the elapsed wall-clock time in milliseconds
+  #          and the output file size in bytes."
+  #   8.10: "IF the L4_Validation_Job records a selected encoder other than
+  #          `h264_nvenc`, a software-fallback flag of true, or an output file size
+  #          of 0 bytes, THEN THE L4_Validation_Job SHALL exit with a failure
+  #          status and SHALL retain the recorded measurements as job output."
+  #
+  # HOW IT IS GATED, and why it has to be. GitHub's hosted runners have no GPU, so
+  # on a hosted runner this job could only ever record a skip. Three independent
+  # gates keep it out of ordinary CI:
+  #
+  #   1. `if:` — the run must be a `workflow_dispatch` whose `run_l4_validation`
+  #      input is ticked. A push or a pull request never satisfies this, and
+  #      neither does a plain dispatch.
+  #   2. `runs-on:` — a self-hosted runner carrying the `nvidia-l4` label. Without
+  #      such a runner the job simply never picks up; it cannot land on a hosted
+  #      one and burn minutes.
+  #   3. No `needs:` — it is an independent lane, so nothing in the normal graph
+  #      waits on it and its absence cannot hold up a merge.
+  #
+  # The runner is expected to be PREPARED, not provisioned from here: the NVIDIA
+  # driver, the `ffnvcodec` headers and an FFmpeg carrying `h264_nvenc` and
+  # `libx264` are host state (see docs/HARDWARE_ENCODE.md). This job therefore
+  # installs nothing — running `apt-get install` against somebody's self-hosted
+  # machine is not this workflow's business — and instead checks the prerequisites
+  # up front and stops with a message naming the missing one.
+  #
+  # The export itself is `palmier_services_export_hw_sw_comparison_tests`: it
+  # already exports exactly Requirement 8.5's fixture (300 frames, 1920x1080,
+  # 30 fps, H.264) through the production encode path, and its hardware run prints
+  # the three measured values in a machine-readable block that
+  # scripts/l4_validation_report.py turns into the job outputs below. A SKIP on
+  # this host is a failed validation, not a pass — the script exits non-zero when
+  # no measurements were recorded at all.
+  # ---------------------------------------------------------------------------
+  l4-validation:
+    name: NVIDIA L4 hardware-encode validation (Requirement 8.5)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_l4_validation
+    runs-on: [self-hosted, linux, x64, nvidia-l4]
+
+    # Requirement 8.5's three recorded values, plus the flags Requirement 8.10
+    # judges them by. Published for failing runs as well as passing ones.
+    outputs:
+      encoder-name: ${{ steps.validate.outputs.encoder-name }}
+      elapsed-ms: ${{ steps.validate.outputs.elapsed-ms }}
+      output-bytes: ${{ steps.validate.outputs.output-bytes }}
+      used-hardware-encode: ${{ steps.validate.outputs.used-hardware-encode }}
+      software-fallback: ${{ steps.validate.outputs.software-fallback }}
+      fallback-reason: ${{ steps.validate.outputs.fallback-reason }}
+      frames-encoded: ${{ steps.validate.outputs.frames-encoded }}
+      validation-status: ${{ steps.validate.outputs.validation-status }}
+      validation-detail: ${{ steps.validate.outputs.validation-detail }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Fail here, with the cause named, rather than three steps later inside a
+      # skip reason. Only the specific tools are queried; nothing dumps the
+      # environment.
+      - name: Verify the L4 prerequisites are present on this runner
+        run: |
+          status=0
+          if command -v nvidia-smi >/dev/null 2>&1; then
+            nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+          else
+            echo "::error::nvidia-smi is not on PATH; this runner has no usable NVIDIA driver"
+            status=1
+          fi
+          if pkg-config --exists ffnvcodec; then
+            echo "ffnvcodec $(pkg-config --modversion ffnvcodec) is visible to pkg-config"
+          else
+            echo "::error::the ffnvcodec headers (nv-codec-headers) are not visible to pkg-config, so PALMIER_HAVE_NVENC cannot be defined"
+            status=1
+          fi
+          # Both halves of the comparison are needed: the hardware encoder under
+          # test and a software H.264 encoder to compare it against.
+          if command -v ffmpeg >/dev/null 2>&1; then
+            ffmpeg -hide_banner -encoders | grep -E 'h264_nvenc|libx264' || true
+          fi
+          exit "$status"
+
+      - name: Configure (NVENC on, UI off)
+        run: |
+          set -o pipefail
+          cmake -S . -B build-l4 -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DPALMIER_BUILD_TESTS=ON \
+            -DPALMIER_BUILD_UI=OFF \
+            -DPALMIER_ENABLE_NVENC=ON \
+            2>&1 | tee configure-l4.log
+
+      # PALMIER_HAVE_NVENC undefined here means the export could only ever fall
+      # back to software, so stop before measuring nothing.
+      - name: Assert the NVENC path is compiled in
+        run: |
+          if grep -Eq "NVENC[^:]*:[[:space:]]*enabled \(SDK found\)" configure-l4.log; then
+            echo "OK: NVENC reported as 'enabled (SDK found)'"
+          else
+            echo "::error::the NVENC path is not compiled in, so h264_nvenc cannot be selected"
+            grep -E "NVENC" configure-l4.log || true
+            exit 1
+          fi
+
+      - name: Build
+        run: cmake --build build-l4
+
+      # The export under measurement. `-V` so the measurement block reaches the
+      # log; the exit status is recorded rather than acted on, because the verdict
+      # belongs to the next step, which must run even when this one fails.
+      - name: Export the 300-frame 1920x1080/30 fps fixture with h264_nvenc
+        id: export
+        run: |
+          set -o pipefail
+          status=0
+          ctest --test-dir build-l4 -R palmier_services_export_hw_sw_comparison_tests -V \
+            2>&1 | tee ctest-l4.log || status=$?
+          echo "ctest-status=${status}" >> "$GITHUB_OUTPUT"
+          echo "ctest exited with status ${status}"
+
+      # Requirement 8.5 records the three values; Requirement 8.10 then judges
+      # them. The script writes the job outputs BEFORE applying the verdict, so a
+      # failing validation still retains its measurements — and the summary is
+      # rendered before the non-zero exit is re-raised, for the same reason.
+      - name: Publish the recorded measurements, then apply the verdict
+        id: validate
+        if: always()
+        run: |
+          status=0
+          python3 scripts/l4_validation_report.py ctest-l4.log \
+            --summary l4-summary.md || status=$?
+          cat l4-summary.md >> "$GITHUB_STEP_SUMMARY"
+          exit "${status}"
+
+      # A test failure that is not one of Requirement 8.10's three conditions —
+      # say the frame counts or durations disagreeing — must still fail the job.
+      - name: Fail if the comparison test itself failed
+        if: always()
+        env:
+          CTEST_STATUS: ${{ steps.export.outputs.ctest-status }}
+        run: |
+          if [ -z "${CTEST_STATUS}" ]; then
+            echo "::error::the export step never ran, so nothing was measured; see the steps above"
+            exit 1
+          fi
+          if [ "${CTEST_STATUS}" != "0" ]; then
+            echo "::error::the hardware/software comparison test exited with status ${CTEST_STATUS}; see the uploaded ctest-l4.log"
+            exit 1
+          fi
+          echo "the comparison test itself passed"
+
+      - name: Upload the L4 log, configure log and measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: l4-validation
+          path: |
+            ctest-l4.log
+            configure-l4.log
+            l4-summary.md
+            build-l4/Testing/**
+          if-no-files-found: warn

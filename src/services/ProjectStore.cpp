@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "core/Clip.hpp"
+#include "core/ClipGroup.hpp"
 #include "core/ColorSpace.hpp"
 #include "core/Duration.hpp"
 #include "core/Effect.hpp"
@@ -443,6 +444,10 @@ std::optional<TrackKind> trackKindFromKey(std::string_view k) {
     return std::nullopt;
 }
 
+// `invert_colors` is the schema-1.1 addition (Requirement 14.4). It is spelled in
+// snake_case because that is the value the tool surface accepts for the same
+// effect kind (see ToolRegistry's effect-type key); the four older keys keep their
+// original camelCase spelling so 1.0 documents keep reading unchanged.
 std::string_view effectTypeKey(EffectType t) {
     switch (t) {
         case EffectType::Brightness:    return "brightness";
@@ -450,6 +455,7 @@ std::string_view effectTypeKey(EffectType t) {
         case EffectType::Blur:          return "blur";
         case EffectType::CropTransform: return "cropTransform";
         case EffectType::ColorGrade:    return "colorGrade";
+        case EffectType::InvertColors:  return "invert_colors";
         case EffectType::Custom:        return "custom";
     }
     return "custom";
@@ -461,6 +467,7 @@ std::optional<EffectType> effectTypeFromKey(std::string_view k) {
     if (k == "blur") return EffectType::Blur;
     if (k == "cropTransform") return EffectType::CropTransform;
     if (k == "colorGrade") return EffectType::ColorGrade;
+    if (k == "invert_colors") return EffectType::InvertColors;
     if (k == "custom") return EffectType::Custom;
     return std::nullopt;
 }
@@ -561,6 +568,9 @@ void writeTrack(JsonWriter& w, const Track& track) {
     writeUuid(w, "id", track.id);
     w.key("kind");
     w.valueString(trackKindKey(track.kind));
+    // Schema 1.1: always written, optional on read (default "").
+    w.key("name");
+    w.valueString(track.name);
     w.key("muted");
     w.valueBool(track.muted);
     w.key("locked");
@@ -568,6 +578,16 @@ void writeTrack(JsonWriter& w, const Track& track) {
     w.key("clips");
     w.beginArray();
     for (const Clip& clip : track.clips) writeClip(w, clip);
+    w.endArray();
+    w.endObject();
+}
+
+void writeClipGroup(JsonWriter& w, const ClipGroup& group) {
+    w.beginObject();
+    writeUuid(w, "id", group.id);
+    w.key("clipIds");
+    w.beginArray();
+    for (const ClipId& clipId : group.clipIds) w.valueString(clipId.toString());
     w.endArray();
     w.endObject();
 }
@@ -600,6 +620,12 @@ void writeProject(JsonWriter& w, const Project& p) {
     w.key("assets");
     w.beginArray();
     for (const MediaAssetRef& asset : p.assets) writeMediaAssetRef(w, asset);
+    w.endArray();
+    // Schema 1.1: always written, optional on read (default []). Persisted
+    // faithfully and interpreted by nothing — see core/ClipGroup.hpp.
+    w.key("clipGroups");
+    w.beginArray();
+    for (const ClipGroup& group : p.clipGroups) writeClipGroup(w, group);
     w.endArray();
     w.endObject();
 }
@@ -679,6 +705,49 @@ Duration readDuration(const JsonValue& obj, std::string_view key) {
     return Duration::fromNanoseconds(requireInt64(obj, key));
 }
 
+// --- Schema 1.1 optional reads ---------------------------------------------
+//
+// Every field schema 1.1 added is read through one of these: absent (or JSON
+// null) yields the documented default, so a 1.0 document loads unchanged; present
+// but ill-typed is still a hard error, so a corrupt 1.1 document is not silently
+// downgraded to defaults.
+
+std::string optionalString(const JsonValue& obj, std::string_view key,
+                           std::string fallback) {
+    const JsonValue* v = obj.find(key);
+    if (v == nullptr || v->isNull()) return fallback;
+    if (!v->isString()) fail("field '" + std::string{key} + "' must be a string");
+    return v->string;
+}
+
+Uuid parseUuidString(const JsonValue& v, std::string_view what) {
+    if (!v.isString()) fail(std::string{what} + " must be a string");
+    const std::optional<Uuid> id = Uuid::parse(v.string);
+    if (!id.has_value()) fail(std::string{what} + " is not a valid UUID");
+    return *id;
+}
+
+ClipGroup readClipGroup(const JsonValue& v) {
+    requireObject(v, "clipGroup");
+    ClipGroup group;
+    group.id = requireUuid(v, "id");
+    const JsonValue& clipIds = requireArray(requireMember(v, "clipIds"), "clipGroup.clipIds");
+    for (const JsonValue& c : clipIds.array) {
+        group.clipIds.push_back(parseUuidString(c, "clipGroup.clipIds entry"));
+    }
+    return group;
+}
+
+std::vector<ClipGroup> readClipGroups(const JsonValue& projectObj) {
+    const JsonValue* v = projectObj.find("clipGroups");
+    if (v == nullptr || v->isNull()) return {}; // 1.0 default
+    requireArray(*v, "clipGroups");
+    std::vector<ClipGroup> groups;
+    groups.reserve(v->array.size());
+    for (const JsonValue& g : v->array) groups.push_back(readClipGroup(g));
+    return groups;
+}
+
 MediaAssetRef readMediaAssetRef(const JsonValue& v) {
     requireObject(v, "assetRef");
     MediaAssetRef ref;
@@ -739,6 +808,7 @@ Track readTrack(const JsonValue& v) {
     const std::optional<TrackKind> kind = trackKindFromKey(requireString(v, "kind"));
     if (!kind.has_value()) fail("unknown track kind");
     track.kind = *kind;
+    track.name = optionalString(v, "name", ""); // schema 1.1; default ""
     track.muted = requireBool(v, "muted");
     track.locked = requireBool(v, "locked");
     const JsonValue& clips = requireArray(requireMember(v, "clips"), "track.clips");
@@ -771,6 +841,8 @@ Project readProject(const JsonValue& v) {
 
     const JsonValue& assets = requireArray(requireMember(v, "assets"), "assets");
     for (const JsonValue& a : assets.array) p.assets.push_back(readMediaAssetRef(a));
+
+    p.clipGroups = readClipGroups(v); // schema 1.1; default []
 
     return p;
 }

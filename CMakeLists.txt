@@ -85,3 +85,15 @@ endif()
 # Configuration summary.
 # ---------------------------------------------------------------------------
 include(PalmierSummary)
+
+# ---------------------------------------------------------------------------
+# The `PALMIER_*` cache manifest read by the documentation consistency checker
+# (task 12.7; Requirements 16.7, 16.8).
+#
+# Deliberately the LAST thing this file does: `tests/` contributes
+# PALMIER_PBT_MIN_SUCCESS and PalmierDependencies contributes the six
+# PALMIER_*_AVAILABLE internals, so any earlier call would emit an incomplete set
+# and the checker would report perfectly well-documented options as undefined.
+# ---------------------------------------------------------------------------
+include(PalmierOptionsManifest)
+palmier_write_options_manifest("${PROJECT_BINARY_DIR}/palmier_options.txt")

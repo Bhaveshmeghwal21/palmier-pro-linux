@@ -35,6 +35,7 @@ QString effectTypeName(EffectType type) {
         case EffectType::Blur:          return QStringLiteral("Blur");
         case EffectType::CropTransform: return QStringLiteral("Crop / Transform");
         case EffectType::ColorGrade:    return QStringLiteral("Color Grade");
+        case EffectType::InvertColors:  return QStringLiteral("Invert Colors");
         case EffectType::Custom:        return QStringLiteral("Custom");
     }
     return QStringLiteral("Effect");

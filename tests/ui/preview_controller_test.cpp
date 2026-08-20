@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "core/Duration.hpp"
@@ -336,6 +337,162 @@ TEST(PreviewControllerTransport, AutoStopsAtEndOfBoundedTimeline) {
 
     EXPECT_EQ(controller.state(), PlaybackState::Stopped);
     EXPECT_EQ(controller.playhead(), length); // clamped to the timeline end
+}
+
+// --- The optional audio master clock (task 8.7; Requirements 6.3, 6.7) -------
+//
+// design.md D7 makes the audio sink the clock: pump() reads the audio position
+// once per call and, for each frame due, drops it if it is more than one interval
+// BEHIND that position, waits if it is more than one interval AHEAD, and presents
+// it otherwise. The clock is a callable returning an optional, so these tests need
+// no audio engine, no sink and no sound card — the "audio position" is a variable
+// the test sets, which is also what proves the seam is genuinely optional.
+
+TEST(PreviewControllerAudioClock, AbsentByDefaultSoPacingIsUnchanged) {
+    auto ctx = gpu::GpuContext::softwareFallback();
+    gpu::Compositor comp(ctx);
+    ManualClock clock;
+    PreviewController controller(comp, ctx, fixedProject(makeProject(FrameRate::fps30())), clock);
+
+    EXPECT_FALSE(controller.hasAudioMasterClock());
+
+    controller.play();
+    clock.advance(kOneSecond);
+    const std::size_t rendered = controller.pump();
+
+    // Exactly the wall-clock behaviour of RendersAtLeast24FramesPerWallSecond.
+    EXPECT_GE(rendered, 24u);
+    EXPECT_FALSE(controller.lastAudioPosition().has_value());
+}
+
+TEST(PreviewControllerAudioClock, AnEmptyPositionFallsBackToWallClockPacing) {
+    auto ctx = gpu::GpuContext::softwareFallback();
+    gpu::Compositor comp(ctx);
+    ManualClock clock;
+    PreviewController controller(comp, ctx, fixedProject(makeProject(FrameRate::fps30())), clock);
+
+    // Installed, but not authoritative — the engine is stopped, or audio output was
+    // unavailable and audio is suppressed (Requirement 6.7).
+    controller.setAudioMasterClock([]() -> std::optional<Duration> { return std::nullopt; });
+    EXPECT_TRUE(controller.hasAudioMasterClock());
+
+    controller.play();
+    clock.advance(kOneSecond);
+    EXPECT_GE(controller.pump(), 24u);
+    EXPECT_FALSE(controller.lastAudioPosition().has_value());
+}
+
+TEST(PreviewControllerAudioClock, VideoWaitsWhenMoreThanOneIntervalAheadOfAudio) {
+    auto ctx = gpu::GpuContext::softwareFallback();
+    gpu::Compositor comp(ctx);
+    ManualClock clock;
+    // 25 fps: a frame interval of exactly 40 ms, so the "one interval" boundary is
+    // exact rather than a rounded rational.
+    PreviewController controller(comp, ctx, fixedProject(makeProject(FrameRate::fps25())), clock);
+    ASSERT_EQ(controller.frameInterval(), Duration::fromMilliseconds(40));
+
+    Duration audio = Duration::zero();
+    controller.setAudioMasterClock([&audio]() -> std::optional<Duration> { return audio; });
+
+    controller.play();
+    // The wall clock runs a whole second ahead, but audio has not moved: video
+    // slews to AUDIO, so only the frames within one interval of position zero are
+    // presented — frame 0 (at 0 ms) and frame 1 (at exactly one interval).
+    clock.advance(kOneSecond);
+    const std::size_t rendered = controller.pump();
+
+    EXPECT_EQ(rendered, 2u);
+    ASSERT_TRUE(controller.lastAudioPosition().has_value());
+    EXPECT_EQ(*controller.lastAudioPosition(), Duration::zero());
+    EXPECT_EQ(controller.droppedFrameCount(), 0u);
+
+    // Another pump with audio still at zero presents nothing, however far the wall
+    // clock moves.
+    clock.advance(kOneSecond);
+    EXPECT_EQ(controller.pump(), 0u);
+    EXPECT_EQ(controller.presentedFrameCount(), 2u);
+
+    // Once audio advances, video follows it.
+    audio = Duration::fromMilliseconds(200); // 5 frames at 25 fps
+    EXPECT_GT(controller.pump(), 0u);
+    EXPECT_LE(controller.playhead(), audio + controller.frameInterval());
+}
+
+TEST(PreviewControllerAudioClock, FramesMoreThanOneIntervalBehindAudioAreDroppedAndSkipped) {
+    auto ctx = gpu::GpuContext::softwareFallback();
+    gpu::Compositor comp(ctx);
+    ManualClock clock;
+    PreviewController controller(comp, ctx, fixedProject(makeProject(FrameRate::fps25())), clock);
+    ASSERT_EQ(controller.frameInterval(), Duration::fromMilliseconds(40));
+
+    // Audio has already played 500 ms; at 25 fps a frame interval is 40 ms. Frame k
+    // sits at 40k ms and is "more than one interval behind" while 40k + 40 < 500,
+    // i.e. k = 0..11 — twelve dropped frames. Frames 12 (480 ms) and 13 (520 ms)
+    // are inside [audio - interval, audio + interval] and are presented; frame 14
+    // (560 ms) is more than one interval ahead, so the pump stops there.
+    const Duration audio = Duration::fromMilliseconds(500);
+    controller.setAudioMasterClock([audio]() -> std::optional<Duration> { return audio; });
+
+    controller.play();
+    clock.advance(kOneSecond);
+    const std::size_t rendered = controller.pump();
+
+    EXPECT_EQ(controller.droppedFrameCount(), 12u);
+    EXPECT_EQ(rendered, 2u);
+    EXPECT_EQ(controller.presentedFrameCount(), 2u);
+
+    // The first frame actually presented is the first one NOT more than one
+    // interval behind the audio position, and the playhead never lags audio by
+    // more than one interval — the A/V bound of Requirement 6.3.
+    ASSERT_TRUE(controller.lastFrame().has_value());
+    EXPECT_LE(audio - controller.playhead(), controller.frameInterval());
+    // Frame + dropped accounting is preserved: every slot from 0 to the last frame
+    // presented is accounted for exactly once (Requirement 5.7).
+    EXPECT_EQ(controller.presentedFrameCount() + controller.droppedFrameCount(), 14u);
+}
+
+TEST(PreviewControllerAudioClock, RemovingTheClockRestoresWallClockPacing) {
+    auto ctx = gpu::GpuContext::softwareFallback();
+    gpu::Compositor comp(ctx);
+    ManualClock clock;
+    PreviewController controller(comp, ctx, fixedProject(makeProject(FrameRate::fps25())), clock);
+
+    controller.setAudioMasterClock([]() -> std::optional<Duration> { return Duration::zero(); });
+    controller.play();
+    clock.advance(kOneSecond);
+    EXPECT_EQ(controller.pump(), 2u); // paced by audio at position zero
+
+    controller.setAudioMasterClock({});
+    EXPECT_FALSE(controller.hasAudioMasterClock());
+    // The wall clock is a second past the anchor, so the catch-up resumes.
+    EXPECT_GT(controller.pump(), 2u);
+    EXPECT_FALSE(controller.lastAudioPosition().has_value());
+}
+
+TEST(PreviewControllerAudioClock, EndOfTimelineStillHaltsUnderTheAudioClock) {
+    auto ctx = gpu::GpuContext::softwareFallback();
+    gpu::Compositor comp(ctx);
+    comp.setFrameProvider(solidProvider(gpu::RgbaColor{4, 5, 6, 255}));
+
+    const Duration length = Duration::fromMilliseconds(100);
+    Project project =
+        makeProject(FrameRate::fps30(), {makeVideoTrack({makeClip(Duration::zero(), length)})});
+
+    ManualClock clock;
+    PreviewController controller(comp, ctx, fixedProject(project), clock);
+
+    // Audio well past the end of the timeline: the halt must still win over the
+    // drop rule, so the transport stops rather than dropping past the end.
+    controller.setAudioMasterClock(
+        []() -> std::optional<Duration> { return Duration::fromSeconds(5.0); });
+
+    controller.play();
+    clock.advance(kOneSecond);
+    controller.pump();
+
+    EXPECT_EQ(controller.state(), PlaybackState::Stopped);
+    EXPECT_TRUE(controller.reachedEndOfTimeline());
+    EXPECT_EQ(controller.playhead(), length);
 }
 
 } // namespace palmier::ui

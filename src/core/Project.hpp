@@ -12,6 +12,8 @@
 //   * colorSpace  — the working/target color space (defaults to Rec.709).
 //   * tracks      — the ordered multi-track lanes of clips.
 //   * assets      — the table of referenced media; every Clip.assetRef resolves here.
+//   * clipGroups  — clips that a later multicam ripple trim will keep in sync;
+//                   reserved by schema 1.1 and not interpreted by any edit today.
 //   * version     — the .palmier schema version (must be a supported version).
 //
 // Validation rules are enforced by ProjectValidation (validateProject): a valid
@@ -24,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "core/ClipGroup.hpp"
 #include "core/ColorSpace.hpp"
 #include "core/FrameRate.hpp"
 #include "core/MediaAssetRef.hpp"
@@ -42,6 +45,7 @@ struct Project {
     ColorSpace                 colorSpace = defaultColorSpace();
     std::vector<Track>         tracks;
     std::vector<MediaAssetRef> assets;
+    std::vector<ClipGroup>     clipGroups; ///< Reserved for multicam ripple trim.
     SchemaVersion              version = SchemaVersion::current();
 };
 

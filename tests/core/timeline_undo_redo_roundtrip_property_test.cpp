@@ -60,6 +60,11 @@
 #include "core/Track.hpp"
 #include "core/Transition.hpp"
 #include "core/Uuid.hpp"
+#include "services/Json.hpp"
+#include "services/McpToolExecutor.hpp"
+#include "services/ProjectSession.hpp"
+#include "services/ToolRegistry.hpp"
+#include "ui/GuiToolGateway.hpp"
 
 namespace palmier {
 namespace {
@@ -319,6 +324,108 @@ RC_GTEST_PROP(TimelineEngineUndoRedoProperties,
         } else {
             // A rejected / no-op command records nothing and must leave the
             // project exactly as it was.
+            RC_ASSERT(projectsEqual(engine.snapshot(), before));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task 11.10 — extend the undo round-trip property over the GUI gateway path.
+// ---------------------------------------------------------------------------
+//
+// Feature: end-to-end-editor-integration, Property 3: Undo restores the
+// immediately prior state — for any edit issued through the real GUI gateway
+// path (ui::GuiToolGateway, task 11.1/11.4), undoing it restores the exact
+// project state that preceded it.
+// Validates: Requirements 1.8
+//
+// This exercises the SAME session + engine a ui::TimelineViewModel bound to a
+// gateway would observe: a services::ProjectSession's TimelineEngine, edited
+// through services::McpToolExecutor::executeTool(..., InvocationSource::Gui) —
+// exactly what every ui::GuiToolGateway method does — and undone through the
+// engine's own undo() (which is what TimelineViewModel::undo() always calls,
+// gateway or not: there is no tool-call form of undo/redo for the GUI's own
+// Edit-menu action, only for the offline agent's `edit.undo`/`edit.redo`
+// phrases). It is deliberately narrower than the engine-level property above
+// (fewer command kinds, using the tool surface's argument shapes rather than
+// constructing EditCommands directly) because its purpose is to confirm the
+// GUI's call path reaches the identical guarantee, not to re-prove P1 itself.
+using palmier::services::Json;
+using palmier::services::McpToolExecutor;
+using palmier::services::ProjectSession;
+using palmier::services::ToolRegistry;
+using palmier::services::buildDefaultToolRegistry;
+using palmier::services::InvocationSource;
+
+RC_GTEST_PROP(TimelineEngineUndoRedoProperties,
+              GuiGatewayUndoRestoresImmediatelyPriorState,
+              ()) {
+    const int videoTracks = *rc::gen::inRange(1, 4);
+    const int numCommands = *rc::gen::inRange(1, 15);
+    const FrameRate fps = FrameRate::fps30();
+
+    ProjectSession session;
+    (void)session.engine().reset(makeSeedProject(videoTracks));
+    TimelineEngine& engine = session.engine();
+
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
+    palmier::ui::GuiToolGateway gateway(executor);
+
+    for (int step = 0; step < numCommands; ++step) {
+        const Project before = engine.snapshot();
+        const std::vector<ClipLocator> clips = allClips(before);
+
+        // A small subset of gestures, each routed through the real gateway
+        // method a ui::TimelineViewModel with a gateway installed would call.
+        const int kind = clips.empty() ? 0 : *rc::gen::inRange(0, 3);
+        Result<Json> outcome = err<Json>(Error{});
+
+        switch (kind) {
+            case 0: {  // addClip, past the track end so it never overlaps.
+                const std::size_t ti = static_cast<std::size_t>(
+                    *rc::gen::inRange(0, static_cast<int>(before.tracks.size())));
+                const Uuid trackId = before.tracks[ti].id;
+                const Duration gap = ms(*rc::gen::inRange(0, 500));
+                const Duration start = trackEnd(before, trackId) + gap;
+                const Duration len = fps.durationForFrames(*rc::gen::inRange(1, 60));
+                const Uuid assetId = Uuid::generateV4();
+                outcome = gateway.addClip(trackId, assetId, "mem://asset", std::nullopt,
+                                          start, ms(0), len, 1.0, 1.0);
+                break;
+            }
+            case 1: {  // moveClip, past the track end so it never overlaps.
+                const ClipLocator& loc = clips[static_cast<std::size_t>(
+                    *rc::gen::inRange(0, static_cast<int>(clips.size())))];
+                const Duration gap = ms(*rc::gen::inRange(0, 500));
+                const Duration newStart = trackEnd(before, loc.trackId) + gap;
+                outcome = gateway.moveClip(loc.clipId, newStart);
+                break;
+            }
+            default: {  // addEffect on an arbitrary clip.
+                const ClipLocator& loc = clips[static_cast<std::size_t>(
+                    *rc::gen::inRange(0, static_cast<int>(clips.size())))];
+                const double amount =
+                    static_cast<double>(*rc::gen::inRange(0, 100)) / 100.0;
+                outcome = gateway.addEffect(loc.clipId, Effect::brightness(amount));
+                break;
+            }
+        }
+
+        if (outcome.isOk()) {
+            const Project after = engine.snapshot();
+
+            // The GUI's Undo action always calls the engine's own undo()
+            // directly (there is no tool-call form of undo/redo); Property 3
+            // is exactly that this restores the immediately prior state.
+            const CommandResult undone = engine.undo();
+            RC_ASSERT(undone.changed());
+            RC_ASSERT(projectsEqual(engine.snapshot(), before));
+
+            const CommandResult redone = engine.redo();
+            RC_ASSERT(redone.changed());
+            RC_ASSERT(projectsEqual(engine.snapshot(), after));
+        } else {
             RC_ASSERT(projectsEqual(engine.snapshot(), before));
         }
     }

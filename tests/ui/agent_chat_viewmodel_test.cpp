@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -46,6 +47,7 @@
 #include "services/AgentOrchestrator.hpp"
 #include "services/Json.hpp"
 #include "services/McpToolExecutor.hpp"
+#include "services/ProjectSession.hpp"
 #include "services/ToolRegistry.hpp"
 
 namespace palmier::ui {
@@ -58,6 +60,7 @@ using palmier::services::IAgentAuthGate;
 using palmier::services::IntentInterpreter;
 using palmier::services::Json;
 using palmier::services::McpToolExecutor;
+using palmier::services::ProjectSession;
 using palmier::services::ToolRegistry;
 using palmier::services::buildDefaultToolRegistry;
 
@@ -121,21 +124,31 @@ struct FakeGpuContext {
     [[nodiscard]] const std::optional<std::string>& unavailableNotice() const { return notice; }
 };
 
-// Owns the whole real send stack (engine -> registry -> executor -> gate ->
-// orchestrator) so references stay alive for the model under test.
+// Seed `session` with `project` the way `project.open` will — through the one
+// engine the session owns for its lifetime — and hand that engine back.
+TimelineEngine& seedSession(ProjectSession& session, Project project) {
+    (void)session.engine().reset(std::move(project));
+    return session.engine();
+}
+
+// Owns the whole real send stack (project session -> registry -> executor -> gate
+// -> orchestrator) so references stay alive for the model under test. The tool
+// surface and the executor act on the session since task 3.4 (design.md D1);
+// `engine` is just a view onto the one engine that session owns.
 struct Harness {
     Uuid trackId;
     Uuid assetId;
-    TimelineEngine engine;
+    ProjectSession session;
+    TimelineEngine& engine;
     ToolRegistry registry;
     McpToolExecutor executor;
     MockGate gate;
     AgentOrchestrator orchestrator;
 
     Harness()
-        : engine(makeProject(trackId, assetId)),
-          registry(buildDefaultToolRegistry(engine)),
-          executor(registry, &engine),
+        : engine(seedSession(session, makeProject(trackId, assetId))),
+          registry(buildDefaultToolRegistry(session)),
+          executor(registry, &session),
           orchestrator(executor, gate, makeInterpreter(trackId, assetId)) {}
 };
 

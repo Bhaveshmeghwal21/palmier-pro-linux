@@ -24,6 +24,17 @@
 // every submit() goes to the same (hardware or software) encoder and the output
 // is never corrupted by a partial switch.
 //
+// Audio stream (task 9.3; Requirement 6.5). An EncodeSpec may carry an
+// AudioEncodeSpec, in which case the encoder muxes EXACTLY ONE audio stream
+// alongside the video stream: submitAudio() queues mixed, interleaved-float
+// blocks at the Audio_Engine output format (48 kHz / 2 channels by default), and
+// finish() flushes BOTH streams before writing the container trailer. The two
+// streams are independent queues with independent ordering guards, which is what
+// lets ExportEngine interleave them frame interval by frame interval without the
+// video stream's pacing constraining the audio stream's block size. An encoder
+// built without an AudioEncodeSpec rejects submitAudio() with FailedPrecondition
+// rather than silently discarding audio.
+//
 // Testability: the actual codec work lives behind the IEncodeBackend seam
 // (mirroring MediaDecoder's IDecodeBackend). create() takes an
 // EncodeBackendFactory that builds *and initializes* a backend for a chosen
@@ -45,6 +56,8 @@
 #include <string>
 #include <utility>
 
+#include <optional>
+
 #include "core/Duration.hpp"
 #include "core/FrameRate.hpp"
 #include "core/Resolution.hpp"
@@ -53,8 +66,37 @@
 #include "gpu/Compositor.hpp"
 #include "gpu/FramePool.hpp"
 #include "gpu/GpuTypes.hpp"
+#include "media/AudioGraph.hpp"
 
 namespace palmier::media {
+
+// ---------------------------------------------------------------------------
+// AudioEncodeSpec — the optional second (audio) stream
+// ---------------------------------------------------------------------------
+
+/// The audio stream muxed alongside the video stream when an export includes
+/// audio (design.md D7 "Decision — export audio"; Requirement 6.5). The defaults
+/// are the Audio_Engine output format — 48 000 Hz, 2 interleaved channels — so a
+/// caller that simply asks for audio gets exactly the format `AudioGraph` mixes
+/// into and `AudioEngine::renderRange` produces, with no conversion in between.
+///
+///   * sampleRate / channels — the format submitAudio() accepts. Every submitted
+///     AudioBuffer must declare exactly these, so no silent resample happens
+///     inside the encoder.
+///   * codecName — the FFmpeg audio encoder short name ("aac" by default).
+///   * bitrateBitsPerSecond — target average bit rate; 0 means "let the backend
+///     choose"; a negative value is rejected.
+struct AudioEncodeSpec {
+    int          sampleRate{48'000};
+    int          channels{2};
+    std::string  codecName{"aac"};
+    std::int64_t bitrateBitsPerSecond{192'000};
+
+    /// The interleaved-float working format this stream is submitted in.
+    [[nodiscard]] AudioFormat format() const noexcept {
+        return AudioFormat{sampleRate, channels, SampleFormat::F32};
+    }
+};
 
 // ---------------------------------------------------------------------------
 // EncodeSpec — what to encode and how
@@ -80,16 +122,20 @@ namespace palmier::media {
 ///   * outputPath / containerFormat — where the muxed output is written and the
 ///     container short-name (e.g. "mp4"); consumed by the FFmpeg backend and
 ///     ignored by mock backends.
+///   * audio — when set, ONE audio stream is muxed alongside the video stream
+///     and submitAudio() is accepted; when unset the output is video-only and
+///     submitAudio() reports FailedPrecondition (Requirement 6.5).
 struct EncodeSpec {
-    gpu::CodecId            codec{gpu::CodecId::H264};
-    std::int64_t            bitrateBitsPerSecond{0};
-    Resolution              resolution{};
-    FrameRate               frameRate{FrameRate::fps30()};
-    bool                    preferHardware{true};
-    gpu::GpuCaps            caps{gpu::GpuCaps::software()};
-    gpu::BridgeAvailability availability{gpu::BridgeAvailability::fromBuildConfig()};
-    std::filesystem::path   outputPath{};
-    std::string             containerFormat{};
+    gpu::CodecId                   codec{gpu::CodecId::H264};
+    std::int64_t                   bitrateBitsPerSecond{0};
+    Resolution                     resolution{};
+    FrameRate                      frameRate{FrameRate::fps30()};
+    bool                           preferHardware{true};
+    gpu::GpuCaps                   caps{gpu::GpuCaps::software()};
+    gpu::BridgeAvailability        availability{gpu::BridgeAvailability::fromBuildConfig()};
+    std::filesystem::path          outputPath{};
+    std::string                    containerFormat{};
+    std::optional<AudioEncodeSpec> audio{};
 };
 
 // ---------------------------------------------------------------------------
@@ -106,6 +152,19 @@ struct EncoderInputFrame {
     bool              gpuResident{false};   ///< image is a zero-copy GPU import.
     gpu::ImageHandle  image{};              ///< binding handle (hardware path).
     const void*       hostData{nullptr};    ///< host-memory RGBA pixels (software path; may be null).
+};
+
+// ---------------------------------------------------------------------------
+// EncoderInputAudio — one mixed audio block handed to an encode backend
+// ---------------------------------------------------------------------------
+
+/// One block of mixed, interleaved-float audio queued to the audio stream. The
+/// buffer is borrowed for the duration of the call: a backend that buffers must
+/// copy. `presentation` is the block's timeline position, non-decreasing across
+/// consecutive submissions (the same ordering rule the video stream follows).
+struct EncoderInputAudio {
+    Duration           presentation{Duration::zero()};
+    const AudioBuffer* buffer{nullptr};
 };
 
 // ---------------------------------------------------------------------------
@@ -131,7 +190,22 @@ public:
     /// the output stream uncorrupted so the caller can surface it and stop.
     [[nodiscard]] virtual Result<void> encode(const EncoderInputFrame& frame) = 0;
 
-    /// Flush any buffered frames and finalize the output (write trailer/mux).
+    /// Queue one block of mixed audio to the audio stream (Requirement 6.5).
+    ///
+    /// This is NOT pure-virtual on purpose: a backend that muxes video only —
+    /// which is every backend built from an EncodeSpec whose `audio` is unset,
+    /// and every video-only test mock — inherits a definition that reports
+    /// Unsupported. MediaEncoder never calls it unless the spec configured an
+    /// audio stream, so the default is unreachable for a correctly-built
+    /// encoder and exists so adding the audio stream did not break every
+    /// existing IEncodeBackend implementation.
+    [[nodiscard]] virtual Result<void> encodeAudio(const EncoderInputAudio& audio) {
+        (void)audio;
+        return unsupported("this encode backend has no audio stream");
+    }
+
+    /// Flush any buffered frames — BOTH streams when an audio stream is
+    /// configured — and finalize the output (write the trailer/mux).
     [[nodiscard]] virtual Result<void> finish() = 0;
 };
 
@@ -189,9 +263,30 @@ public:
     ///   * (backend errors)  — propagated unchanged.
     [[nodiscard]] Result<void> submit(const gpu::RenderedFrame& frame);
 
-    /// Flush and finalize the output. Idempotency: a second call fails with
-    /// FailedPrecondition. On backend failure the encoder is still marked
-    /// finished (no further frames are accepted) and the error is returned.
+    /// Queue one block of mixed timeline audio to the audio stream at timeline
+    /// position `presentation` (Requirement 6.5). `buffer` must be interleaved
+    /// float at exactly the spec's audio sample rate and channel count — the
+    /// Audio_Engine output format — so the encoder never resamples silently.
+    /// Errors (each of which leaves the output stream uncorrupted and the
+    /// encoder state unchanged):
+    ///   * FailedPrecondition — the encoder was already finished, or this
+    ///                          encoder has no audio stream (spec.audio unset).
+    ///   * InvalidArgument   — the buffer's sample rate or channel count does
+    ///                          not match the audio spec, or its presentation
+    ///                          time regresses below the previously submitted
+    ///                          block.
+    ///   * (backend errors)  — propagated unchanged.
+    ///
+    /// An EMPTY buffer (zero frames) at a non-regressing presentation time is
+    /// accepted and forwarded: a frame interval that mixes to no audio frames is
+    /// a normal occurrence at high frame rates, not an error.
+    [[nodiscard]] Result<void> submitAudio(const AudioBuffer& buffer, Duration presentation);
+
+    /// Flush and finalize the output: both the video stream and, when one is
+    /// configured, the audio stream, then the container trailer. Idempotency: a
+    /// second call fails with FailedPrecondition. On backend failure the encoder
+    /// is still marked finished (no further frames are accepted) and the error is
+    /// returned.
     [[nodiscard]] Result<void> finish();
 
     /// The EncodeSpec the encoder was created with.
@@ -217,6 +312,32 @@ public:
     /// any frame is submitted).
     [[nodiscard]] Duration lastPresentationTime() const noexcept { return lastPresentation_; }
 
+    /// True when this encoder muxes an audio stream alongside the video stream.
+    [[nodiscard]] bool hasAudioStream() const noexcept { return spec_.audio.has_value(); }
+
+    /// The audio stream's configuration, or nullopt for a video-only encoder.
+    [[nodiscard]] const std::optional<AudioEncodeSpec>& audioSpec() const noexcept {
+        return spec_.audio;
+    }
+
+    /// Number of audio blocks successfully submitted so far.
+    [[nodiscard]] std::size_t submittedAudioBlockCount() const noexcept {
+        return submittedAudioBlocks_;
+    }
+
+    /// Total audio FRAMES (one sample per channel) successfully submitted. The
+    /// export mix duration of Requirement 6.8 is this count at the audio stream's
+    /// sample rate.
+    [[nodiscard]] std::uint64_t submittedAudioFrameCount() const noexcept {
+        return submittedAudioFrames_;
+    }
+
+    /// The presentation time of the most recently submitted audio block (zero
+    /// before any block is submitted).
+    [[nodiscard]] Duration lastAudioPresentationTime() const noexcept {
+        return lastAudioPresentation_;
+    }
+
     /// The routing/fallback bridge (observability: route taken, failure log).
     [[nodiscard]] const gpu::CodecBridge& bridge() const noexcept { return bridge_; }
 
@@ -233,6 +354,10 @@ private:
     bool                            hasSubmitted_{false};
     Duration                        lastPresentation_{Duration::zero()};
     std::size_t                     submittedFrames_{0};
+    bool                            hasSubmittedAudio_{false};
+    Duration                        lastAudioPresentation_{Duration::zero()};
+    std::size_t                     submittedAudioBlocks_{0};
+    std::uint64_t                   submittedAudioFrames_{0};
 };
 
 } // namespace palmier::media

@@ -13,11 +13,15 @@
 //     history no-op (Requirement 2.10), including the emitted ChangeSet origin.
 //   * observe(): granular ChangeSet delivery (added/modified/removed clips) and
 //     RAII unsubscription.
+//   * reset(): whole-project replacement — project swapped in place, observers
+//     notified with ChangeOrigin::Reset (subscriptions survive the swap), both
+//     undo and redo history cleared, and an invariant-violating project rejected
+//     without touching the current state (Requirements 3.4, 4.3).
 //
 // The concrete editing commands are implemented in task 3.3, so these tests use
 // small in-file EditCommand doubles that mutate tracks/clips directly.
 //
-// _Requirements: 2.9, 2.10, 6.6_
+// _Requirements: 2.9, 2.10, 3.4, 4.3, 6.6_
 
 #include "core/TimelineEngine.hpp"
 
@@ -368,6 +372,137 @@ TEST(TimelineEngine, ResetSubscriptionStopsNotifications) {
                                  Duration::zero(), Duration::fromMilliseconds(500)))
                     .changed());
     EXPECT_EQ(calls, 1);  // no further notifications after reset
+}
+
+// --- reset(): whole-project replacement (Requirements 3.4, 4.3) ------------
+
+TEST(TimelineEngine, ResetSwapsTheProjectValue) {
+    TimelineEngine engine(makeProjectWithOneTrack());
+    const ClipId original = Uuid::generateV4();
+    ASSERT_TRUE(addClip(engine, 0,
+                        makeClip(original, Duration::zero(), Duration::zero(),
+                                 Duration::fromMilliseconds(1000)))
+                    .changed());
+
+    // A different project: two tracks, one clip with a different id/length.
+    Project loaded = makeProjectWithOneTrack();
+    loaded.name = "loaded";
+    const ClipId replacement = Uuid::generateV4();
+    loaded.tracks[0].clips.push_back(makeClip(replacement, Duration::zero(),
+                                              Duration::zero(),
+                                              Duration::fromMilliseconds(4000)));
+    Track audio;
+    audio.id = Uuid::generateV4();
+    audio.kind = TrackKind::Audio;
+    loaded.tracks.push_back(std::move(audio));
+    const Uuid loadedId = loaded.id;
+
+    ASSERT_TRUE(engine.reset(std::move(loaded)).changed());
+
+    const Project snap = engine.snapshot();
+    EXPECT_EQ(snap.id, loadedId);
+    EXPECT_EQ(snap.name, "loaded");
+    ASSERT_EQ(snap.tracks.size(), 2u);
+    EXPECT_FALSE(engine.clip(original).has_value());
+    ASSERT_TRUE(engine.clip(replacement).has_value());
+    EXPECT_EQ(engine.duration(), Duration::fromMilliseconds(4000));
+}
+
+TEST(TimelineEngine, ResetNotifiesObserversWithResetOrigin) {
+    TimelineEngine engine(makeProjectWithOneTrack());
+    const ClipId original = Uuid::generateV4();
+    ASSERT_TRUE(addClip(engine, 0,
+                        makeClip(original, Duration::zero(), Duration::zero(),
+                                 Duration::fromMilliseconds(1000)))
+                    .changed());
+
+    std::vector<ChangeSet> received;
+    // The subscription predates the reset and must survive it: the engine object
+    // identity is stable across a project load.
+    Subscription sub = engine.observe([&](const ChangeSet& cs) { received.push_back(cs); });
+
+    Project loaded = makeProjectWithOneTrack();
+    const ClipId replacement = Uuid::generateV4();
+    loaded.tracks[0].clips.push_back(makeClip(replacement, Duration::zero(),
+                                              Duration::zero(),
+                                              Duration::fromMilliseconds(2000)));
+
+    ASSERT_TRUE(engine.reset(std::move(loaded)).changed());
+
+    ASSERT_EQ(received.size(), 1u);
+    EXPECT_EQ(received[0].origin, ChangeOrigin::Reset);
+    EXPECT_EQ(received[0].previousDuration, Duration::fromMilliseconds(1000));
+    EXPECT_EQ(received[0].currentDuration, Duration::fromMilliseconds(2000));
+    ASSERT_EQ(received[0].addedClips.size(), 1u);
+    EXPECT_EQ(received[0].addedClips[0], replacement);
+    ASSERT_EQ(received[0].removedClips.size(), 1u);
+    EXPECT_EQ(received[0].removedClips[0], original);
+
+    // The same subscription keeps receiving ordinary edits afterwards.
+    received.clear();
+    ASSERT_TRUE(engine.apply(std::make_unique<SetOpacityCommand>(replacement, 0.25)).changed());
+    ASSERT_EQ(received.size(), 1u);
+    EXPECT_EQ(received[0].origin, ChangeOrigin::Apply);
+}
+
+TEST(TimelineEngine, ResetNotifiesEvenWhenTheDiffIsEmpty) {
+    TimelineEngine engine(makeProjectWithOneTrack());
+
+    std::vector<ChangeSet> received;
+    Subscription sub = engine.observe([&](const ChangeSet& cs) { received.push_back(cs); });
+
+    ASSERT_TRUE(engine.reset(makeProjectWithOneTrack()).changed());
+
+    ASSERT_EQ(received.size(), 1u);
+    EXPECT_EQ(received[0].origin, ChangeOrigin::Reset);
+    EXPECT_TRUE(received[0].empty());
+}
+
+TEST(TimelineEngine, ResetClearsUndoAndRedoHistory) {
+    TimelineEngine engine(makeProjectWithOneTrack());
+    const ClipId id = Uuid::generateV4();
+    ASSERT_TRUE(addClip(engine, 0,
+                        makeClip(id, Duration::zero(), Duration::zero(),
+                                 Duration::fromMilliseconds(1000)))
+                    .changed());
+    ASSERT_TRUE(engine.apply(std::make_unique<SetOpacityCommand>(id, 0.5)).changed());
+    ASSERT_TRUE(engine.undo().changed());  // populates the redo history
+    ASSERT_TRUE(engine.canUndo());
+    ASSERT_TRUE(engine.canRedo());
+
+    ASSERT_TRUE(engine.reset(makeProjectWithOneTrack()).changed());
+
+    EXPECT_FALSE(engine.canUndo());
+    EXPECT_FALSE(engine.canRedo());
+    EXPECT_TRUE(engine.undo().isNoOp());
+    EXPECT_TRUE(engine.redo().isNoOp());
+    EXPECT_TRUE(engine.snapshot().tracks[0].clips.empty());
+}
+
+TEST(TimelineEngine, ResetRejectsAnInvariantViolatingProjectAndChangesNothing) {
+    TimelineEngine engine(makeProjectWithOneTrack());
+    const ClipId id = Uuid::generateV4();
+    ASSERT_TRUE(addClip(engine, 0,
+                        makeClip(id, Duration::zero(), Duration::zero(),
+                                 Duration::fromMilliseconds(1000)))
+                    .changed());
+
+    int notifications = 0;
+    Subscription sub = engine.observe([&](const ChangeSet&) { ++notifications; });
+
+    // A clip at a negative timeline position violates the timeline invariants.
+    Project invalid = makeProjectWithOneTrack();
+    invalid.tracks[0].clips.push_back(makeClip(Uuid::generateV4(),
+                                               Duration::fromMilliseconds(-10),
+                                               Duration::zero(),
+                                               Duration::fromMilliseconds(500)));
+
+    const auto result = engine.reset(std::move(invalid));
+    EXPECT_TRUE(result.isError());
+    EXPECT_EQ(notifications, 0);
+    EXPECT_TRUE(engine.canUndo());
+    ASSERT_TRUE(engine.clip(id).has_value());
+    EXPECT_EQ(engine.duration(), Duration::fromMilliseconds(1000));
 }
 
 TEST(TimelineEngine, SubscriptionSafeAfterEngineDestroyed) {

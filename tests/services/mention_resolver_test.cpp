@@ -17,6 +17,7 @@
 
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include <gtest/gtest.h>
 
@@ -31,10 +32,19 @@
 #include "core/Uuid.hpp"
 #include "services/AgentOrchestrator.hpp"
 #include "services/McpToolExecutor.hpp"
+#include "services/ProjectSession.hpp"
 #include "services/ToolRegistry.hpp"
 
 namespace palmier::services {
 namespace {
+
+// The tool surface and the executor act on a ProjectSession (task 3.4; design.md
+// D1): the session owns one TimelineEngine for its lifetime and the handlers
+// resolve it at invocation time. Tests seed their fixture project into that one
+// engine the way `project.open` will.
+void seedSession(ProjectSession& session, Project project) {
+    (void)session.engine().reset(std::move(project));
+}
 
 MediaAssetRef makeAsset(std::string path) {
     return MediaAssetRef(Uuid::generateV4(), std::move(path));
@@ -251,9 +261,10 @@ struct RecordingInterpreter {
 TEST(MentionResolverIntegration, ResolvedMentionReachesInterpreterRewritten) {
     Uuid trackId;
     MediaAssetRef intro = makeAsset("/media/intro.mp4");
-    TimelineEngine engine(makeProject(trackId, intro));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, intro));
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
     MockGate gate;
 
     std::string seenMessage;
@@ -269,9 +280,10 @@ TEST(MentionResolverIntegration, ResolvedMentionReachesInterpreterRewritten) {
 TEST(MentionResolverIntegration, UnmatchedMentionBlocksSubmission) {
     Uuid trackId;
     MediaAssetRef intro = makeAsset("/media/intro.mp4");
-    TimelineEngine engine(makeProject(trackId, intro));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, intro));
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
     MockGate gate;
 
     std::string seenMessage;
@@ -289,9 +301,10 @@ TEST(MentionResolverIntegration, AmbiguousMentionBlocksSubmission) {
     Uuid trackId;
     MediaAssetRef introA = makeAsset("/a/clip.mp4");
     MediaAssetRef introB = makeAsset("/b/clip.mp4");
-    TimelineEngine engine(makeProject(trackId, introA));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, introA));
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
     MockGate gate;
 
     std::string seenMessage;
@@ -308,9 +321,10 @@ TEST(MentionResolverIntegration, AmbiguousMentionBlocksSubmission) {
 TEST(MentionResolverIntegration, LiveManagerPreprocessorTracksCurrentLibrary) {
     Uuid trackId;
     MediaAssetRef intro = makeAsset("/media/intro.mp4");
-    TimelineEngine engine(makeProject(trackId, intro));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, intro));
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
     MockGate gate;
 
     MediaManager manager;

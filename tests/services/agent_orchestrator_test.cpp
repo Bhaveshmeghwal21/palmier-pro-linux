@@ -46,11 +46,20 @@
 #include "services/ByokCredentials.hpp"
 #include "services/Json.hpp"
 #include "services/McpToolExecutor.hpp"
+#include "services/ProjectSession.hpp"
 #include "services/SecretStore.hpp"
 #include "services/ToolRegistry.hpp"
 
 namespace palmier::services {
 namespace {
+
+// The tool surface and the executor act on a ProjectSession (task 3.4; design.md
+// D1): the session owns one TimelineEngine for its lifetime and the handlers
+// resolve it at invocation time. Tests seed their fixture project into that one
+// engine the way `project.open` will.
+void seedSession(ProjectSession& session, Project project) {
+    (void)session.engine().reset(std::move(project));
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures / helpers
@@ -127,9 +136,11 @@ std::size_t countRole(const ChatSession& session, ChatRole role) {
 
 TEST(AgentOrchestrator, MessageAppliesEditThroughSharedExecutor) {
     Uuid trackId, assetId;
-    TimelineEngine engine(makeProject(trackId, assetId));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, assetId));
+    TimelineEngine& engine = session.engine();
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
     MockGate gate;  // authorized by default
 
     AgentOrchestrator agent(executor, gate, makeInterpreter(trackId, assetId));
@@ -148,9 +159,10 @@ TEST(AgentOrchestrator, MessageAppliesEditThroughSharedExecutor) {
 
 TEST(AgentOrchestrator, ReadToolReturnsProjectState) {
     Uuid trackId, assetId;
-    TimelineEngine engine(makeProject(trackId, assetId));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, assetId));
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
     MockGate gate;
 
     AgentOrchestrator agent(executor, gate, makeInterpreter(trackId, assetId));
@@ -167,9 +179,11 @@ TEST(AgentOrchestrator, ReadToolReturnsProjectState) {
 
 TEST(AgentOrchestrator, FailedEditLeavesProjectUnchangedAndReportsError) {
     Uuid trackId, assetId;
-    TimelineEngine engine(makeProject(trackId, assetId));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, assetId));
+    TimelineEngine& engine = session.engine();
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
     MockGate gate;
 
     AgentOrchestrator agent(executor, gate, makeInterpreter(trackId, assetId));
@@ -195,9 +209,11 @@ TEST(AgentOrchestrator, FailedEditLeavesProjectUnchangedAndReportsError) {
 
 TEST(AgentOrchestrator, UninterpretableMessageDoesNotMutateProject) {
     Uuid trackId, assetId;
-    TimelineEngine engine(makeProject(trackId, assetId));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, assetId));
+    TimelineEngine& engine = session.engine();
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
     MockGate gate;
 
     AgentOrchestrator agent(executor, gate, makeInterpreter(trackId, assetId));
@@ -214,9 +230,11 @@ TEST(AgentOrchestrator, UninterpretableMessageDoesNotMutateProject) {
 
 TEST(AgentOrchestrator, UnauthorizedSendRejectedAndPreservesMessage) {
     Uuid trackId, assetId;
-    TimelineEngine engine(makeProject(trackId, assetId));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, assetId));
+    TimelineEngine& engine = session.engine();
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
 
     MockGate gate;
     gate.verdict = err(makeError(ErrorCode::Unauthenticated, "auth required"));
@@ -238,9 +256,11 @@ TEST(AgentOrchestrator, UnauthorizedSendRejectedAndPreservesMessage) {
 
 TEST(AgentOrchestrator, PreservedMessageClearedAfterSuccessfulSend) {
     Uuid trackId, assetId;
-    TimelineEngine engine(makeProject(trackId, assetId));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, assetId));
+    TimelineEngine& engine = session.engine();
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
 
     MockGate gate;
     gate.verdict = err(makeError(ErrorCode::Unauthenticated, "auth required"));
@@ -319,9 +339,11 @@ TEST(AgentOrchestrator, RealGateDrivesEndToEndSend) {
     // Wire the real gate into a full orchestrator and confirm the gated send path
     // works end to end: rejected before login, accepted after an active login.
     Uuid trackId, assetId;
-    TimelineEngine engine(makeProject(trackId, assetId));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, assetId));
+    TimelineEngine& engine = session.engine();
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
 
     ScriptedAuthBackend backend(EntitlementStatus::Active);
     AuthenticationService auth(backend);
@@ -347,9 +369,11 @@ TEST(AgentOrchestrator, RealGateDrivesEndToEndSend) {
 
 TEST(AgentOrchestrator, PreprocessorRejectionBlocksSubmission) {
     Uuid trackId, assetId;
-    TimelineEngine engine(makeProject(trackId, assetId));
-    ToolRegistry registry = buildDefaultToolRegistry(engine);
-    McpToolExecutor executor(registry, &engine);
+    ProjectSession session;
+    seedSession(session, makeProject(trackId, assetId));
+    TimelineEngine& engine = session.engine();
+    ToolRegistry registry = buildDefaultToolRegistry(session);
+    McpToolExecutor executor(registry, &session);
     MockGate gate;
 
     AgentOrchestrator agent(executor, gate, makeInterpreter(trackId, assetId));

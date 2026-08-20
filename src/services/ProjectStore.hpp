@@ -22,7 +22,7 @@
 //
 //   {
 //     "format": "palmier-project",   // magic string; identifies the document kind
-//     "version": "1.0",              // SchemaVersion (major.minor) the doc was written at
+//     "version": "1.1",              // SchemaVersion (major.minor) the doc was written at
 //     "project": { ...Project... }   // the serialized Project (see below)
 //   }
 //
@@ -35,14 +35,36 @@
 //   colorSpace  : string  (stable key, e.g. "rec709")
 //   tracks      : [ Track, ... ]        (array order == track order / z-order)
 //   assets      : [ MediaAssetRef, ... ]
+//   clipGroups  : [ ClipGroup, ... ]    (1.1; optional on read, default [])
 //
-//   Track       : { id, kind ("video"|"audio"), muted, locked, clips: [Clip,...] }
+//   Track       : { id, kind ("video"|"audio"), name, muted, locked, clips: [Clip,...] }
+//                 (name is 1.1; optional on read, default "")
 //   Clip        : { id, assetRef, timelineStart, sourceIn, sourceOut,
 //                   effects: [Effect,...], transitionIn: Transition|null,
 //                   gain, opacity }
 //   Effect      : { id, type (stable key), parameters: { name: number, ... } }
 //   Transition  : { id, kind (stable key), duration }
 //   MediaAssetRef : { assetId: string, sourcePath: string }
+//   ClipGroup   : { id: string, clipIds: [string, ...] }
+//
+// Schema 1.1 additions
+// --------------------
+// 1.1 adds exactly three things, each of them additive and optional on read with a
+// documented default, so a 1.0 document deserializes unchanged:
+//
+//   * the effect type key "invert_colors" (EffectType::InvertColors);
+//   * "tracks[].name"  — string, default "" when absent;
+//   * "clipGroups"     — array of { id, clipIds[] }, default [] when absent.
+//
+// A writer at 1.1 always emits the latter two (as "" and [] for a project that
+// carries neither), so the round-trip and idempotence properties hold verbatim.
+// `clipGroups` is *reserved*: it is persisted faithfully but no edit interprets it
+// — the multicam ripple trim that will consume it is deliberately out of scope, and
+// reserving the field now means adding that behaviour needs no further schema bump.
+//
+// Because 1.1 documents declare version "1.1", a 1.0-era build correctly rejects
+// them as unsupported (same major, older reader minor) rather than loading them
+// with fields silently dropped.
 //
 // All Duration fields (timelineStart, sourceIn, sourceOut, transition duration)
 // are written as integer nanosecond tick counts, matching Duration's internal,

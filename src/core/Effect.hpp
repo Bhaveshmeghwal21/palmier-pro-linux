@@ -28,6 +28,10 @@ enum class EffectType {
     Blur,
     CropTransform,
     ColorGrade,
+    /// Per-channel colour inversion (upstream PR 408, Requirements 14.4): each
+    /// 8-bit red, green and blue value becomes 255 minus the input value, while
+    /// every alpha value is left unchanged. Takes no parameters.
+    InvertColors,
     Custom,
 };
 
@@ -49,6 +53,10 @@ struct Effect {
     }
     [[nodiscard]] static Effect blur(double radius) {
         return Effect{Uuid::generateV4(), EffectType::Blur, {{"radius", radius}}};
+    }
+    /// Colour inversion; parameterless (see EffectType::InvertColors).
+    [[nodiscard]] static Effect invertColors() {
+        return Effect{Uuid::generateV4(), EffectType::InvertColors, {}};
     }
 };
 

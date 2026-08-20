@@ -164,6 +164,11 @@ private:
 ///                  message is not submitted.
 ///   * Ambiguous -> FailedPrecondition error (Req 8.4): a selection is required;
 ///                  the message lists the candidates and is not submitted.
+///
+/// Both refusal messages name the mention text AND state the number of matching
+/// assets as a decimal number ("0 matching assets" / "N matching assets"), which
+/// is what Requirement 11.7 asks of the agent's mention refusal: "an error that
+/// names the mention text and the number of matching assets".
 [[nodiscard]] Result<std::string> toPreprocessorResult(const MentionResolution& resolution);
 
 /// A MessagePreprocessor that resolves mentions against an explicit media-item

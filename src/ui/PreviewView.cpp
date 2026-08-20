@@ -22,10 +22,21 @@ namespace palmier::ui {
 PreviewView::PreviewView(gpu::Compositor& compositor, const gpu::GpuContext& context,
                          PreviewProjectSource projectSource, QWidget* parent)
     : QWidget(parent),
-      controller_(compositor, context, std::move(projectSource)),
+      ownedController_(std::in_place, compositor, context, std::move(projectSource)),
+      controller_(*ownedController_),
       timer_(new QTimer(this)) {
     setMinimumSize(160, 90);
+    wireSinkAndTimer();
+}
 
+PreviewView::PreviewView(PreviewController& controller, QWidget* parent)
+    : QWidget(parent), ownedController_(std::nullopt), controller_(controller),
+      timer_(new QTimer(this)) {
+    setMinimumSize(160, 90);
+    wireSinkAndTimer();
+}
+
+void PreviewView::wireSinkAndTimer() {
     // Upload each composited frame to our QImage for painting.
     controller_.setFrameSink(
         [this](const gpu::RenderedFrame& frame, RenderPath path) { uploadFrame(frame, path); });

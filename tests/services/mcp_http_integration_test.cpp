@@ -41,8 +41,11 @@
 // sockets + the standard library, so it builds without Qt/FFmpeg/Vulkan/libsecret
 // and links only Palmier::core.
 
+#include "services/McpProtocolHandler.hpp"
 #include "services/McpServer.hpp"
+#include "services/McpSessionRegistry.hpp"
 #include "services/McpToolExecutor.hpp"
+#include "services/ProjectSession.hpp"
 #include "services/ToolRegistry.hpp"
 
 #include <arpa/inet.h>
@@ -50,10 +53,14 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <cctype>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -136,11 +143,27 @@ struct HttpReply {
     std::string body;         ///< Response body (after the header terminator).
     std::string raw;          ///< The full raw response, for coarse assertions.
     bool        ok = false;   ///< True iff a response was received.
+
+    /// Response headers with lower-case names, in arrival order (task 5.3: the
+    /// `Mcp-Session-Id` emission is observed here).
+    std::vector<std::pair<std::string, std::string>> headers;
+
+    /// The value of the response header `name` (matched case-insensitively), or
+    /// nullptr when absent.
+    [[nodiscard]] const std::string* header(std::string_view name) const {
+        std::string wanted(name);
+        for (char& c : wanted) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (const auto& [key, value] : headers) {
+            if (key == wanted) return &value;
+        }
+        return nullptr;
+    }
 };
 
 // Perform a single blocking HTTP request to 127.0.0.1:port and return the reply.
 HttpReply httpRequest(std::uint16_t port, const std::string& method,
-                      const std::string& path, const std::string& body) {
+                      const std::string& path, const std::string& body,
+                      const std::vector<std::pair<std::string, std::string>>& extraHeaders = {}) {
     HttpReply reply;
     const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return reply;
@@ -156,10 +179,19 @@ HttpReply httpRequest(std::uint16_t port, const std::string& method,
 
     std::string req = method + " " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\n";
     req += "Content-Type: application/json\r\n";
+    for (const auto& [name, value] : extraHeaders) {
+        req += name + ": " + value + "\r\n";
+    }
     req += "Content-Length: " + std::to_string(body.size()) + "\r\n";
     req += "Connection: close\r\n\r\n";
     req += body;
-    ::send(fd, req.data(), req.size(), 0);
+    // Large bodies need a loop: a single send() may not accept everything.
+    std::size_t sent = 0;
+    while (sent < req.size()) {
+        const ssize_t n = ::send(fd, req.data() + sent, req.size() - sent, 0);
+        if (n <= 0) break;
+        sent += static_cast<std::size_t>(n);
+    }
 
     std::string resp;
     char buf[4096];
@@ -188,12 +220,34 @@ HttpReply httpRequest(std::uint16_t port, const std::string& method,
     const std::size_t sep = resp.find("\r\n\r\n");
     if (sep != std::string::npos) {
         reply.body = resp.substr(sep + 4);
+
+        // Parse the header block (skipping the status line) into lower-cased names.
+        const std::string headerBlock = resp.substr(0, sep);
+        std::size_t       lineStart = headerBlock.find("\r\n");
+        while (lineStart != std::string::npos) {
+            lineStart += 2;
+            const std::size_t lineEnd = headerBlock.find("\r\n", lineStart);
+            const std::string line = headerBlock.substr(
+                lineStart, lineEnd == std::string::npos ? std::string::npos : lineEnd - lineStart);
+            const std::size_t colon = line.find(':');
+            if (colon != std::string::npos) {
+                std::string name = line.substr(0, colon);
+                for (char& c : name) {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                std::size_t valueStart = colon + 1;
+                while (valueStart < line.size() && line[valueStart] == ' ') ++valueStart;
+                reply.headers.emplace_back(name, line.substr(valueStart));
+            }
+            lineStart = lineEnd;
+        }
     }
     return reply;
 }
 
 // ---------------------------------------------------------------------------
-// A wired MCP stack: engine + default tool registry + executor + HTTP server,
+// A wired MCP stack: project session + default tool registry + executor + HTTP
+// server,
 // started on an ephemeral loopback port. Allows registering extra tools BEFORE
 // building the executor (used for the failure-rollback case).
 // ---------------------------------------------------------------------------
@@ -201,11 +255,12 @@ HttpReply httpRequest(std::uint16_t port, const std::string& method,
 class McpStack {
 public:
     // `withProject == false` models "no project open": the executor is given a
-    // null engine, while the registry is still built over the (untouched) engine
+    // null session, while the registry is still built over the (untouched) session
     // so the tool surface is identical.
     explicit McpStack(bool withProject = true) {
-        engine_ = std::make_unique<TimelineEngine>(makeProject(trackId_, assetId_));
-        registry_ = buildDefaultToolRegistry(*engine_);
+        session_ = std::make_unique<ProjectSession>();
+        (void)session_->engine().reset(makeProject(trackId_, assetId_));
+        registry_ = buildDefaultToolRegistry(*session_);
     }
 
     // Register an extra tool into the surface before starting. Must be called
@@ -215,7 +270,7 @@ public:
     // Build the executor + server and bind an ephemeral loopback port.
     void start(bool withProject = true) {
         executor_ = std::make_unique<McpToolExecutor>(
-            registry_, withProject ? engine_.get() : nullptr);
+            registry_, withProject ? session_.get() : nullptr);
         server_ = std::make_unique<McpServer>(
             [this](const Json& request) { return executor_->execute(request); });
         const Result<void> r = server_->start("127.0.0.1", 0);
@@ -235,7 +290,8 @@ public:
         return httpRequest(port_, method, path, body);
     }
 
-    TimelineEngine& engine() { return *engine_; }
+    ProjectSession& session() { return *session_; }
+    TimelineEngine& engine() { return session_->engine(); }
     const Uuid& trackId() const { return trackId_; }
     const Uuid& assetId() const { return assetId_; }
     bool started() const { return started_; }
@@ -244,7 +300,7 @@ public:
 private:
     Uuid                             trackId_;
     Uuid                             assetId_;
-    std::unique_ptr<TimelineEngine>  engine_;
+    std::unique_ptr<ProjectSession>  session_;
     ToolRegistry                     registry_;
     std::unique_ptr<McpToolExecutor> executor_;
     std::unique_ptr<McpServer>       server_;
@@ -347,7 +403,7 @@ TEST(McpHttpIntegration, FailingToolRollsBackAndReturnsErrorOverHttp) {
     Tool failing;
     failing.name = "test.apply_then_fail";
     failing.description = "Applies a clip and then reports failure.";
-    failing.inputSchema = Json::object();  // no declared constraints
+    // No declared arguments: the default ToolSchema accepts an empty object.
     TimelineEngine* enginePtr = &stack.engine();
     const Uuid trackId = stack.trackId();
     const Uuid assetId = stack.assetId();
@@ -464,6 +520,296 @@ TEST(McpHttpIntegration, MalformedJsonBodyReturns400ParseError) {
     ASSERT_TRUE(body.contains("error"));
     // JSON-RPC parse-error code is surfaced.
     EXPECT_EQ(body.find("error")->intOr("code"), -32700);
+}
+
+// ===========================================================================
+// Task 5.3 — JSON-RPC 2.0 over real loopback HTTP (Requirements 9.1, 9.6, 9.10,
+// 9.11, 10.1, 15.3).
+//
+// The section above pins the pre-JSON-RPC bespoke envelope, which the transport
+// still answers when no protocol layer is wired. This section wires the full
+// stage-5 stack the composition root builds —
+//
+//   ProjectSession -> buildDefaultToolRegistry -> McpToolExecutor
+//                          + McpSessionRegistry -> McpProtocolHandler
+//                                                        |
+//                                    McpServer(protocol delegate), 127.0.0.1:0
+//
+// — and drives a genuine client handshake over a loopback socket:
+// `initialize` -> `notifications/initialized` -> `tools/list` -> `tools/call`.
+// Requirement 15.3 is asserted on EVERY response: the body parses as JSON,
+// carries `"jsonrpc":"2.0"`, echoes the request identifier unchanged in type and
+// value, and carries exactly one of `result` / `error`; and every `tools/list`
+// entry carries `name`, `description` and `inputSchema`.
+// ===========================================================================
+
+/// A JSON-RPC MCP stack behind a real loopback listener on an ephemeral port
+/// (Requirement 10.1: loopback only; never the well-known 19789, so parallel
+/// CTest processes cannot collide).
+class JsonRpcStack {
+public:
+    JsonRpcStack() {
+        session_ = std::make_unique<ProjectSession>();
+        (void)session_->engine().reset(makeProject(trackId_, assetId_));
+        registry_ = buildDefaultToolRegistry(*session_);
+        executor_ = std::make_unique<McpToolExecutor>(registry_, session_.get());
+        handler_ = std::make_unique<McpProtocolHandler>(registry_, *executor_, sessions_,
+                                                       inlineMainThreadInvoker());
+        server_ = std::make_unique<McpServer>();
+        server_->setProtocolDelegate(protocolDelegateFor(*handler_));
+
+        const Result<void> started = server_->start(BindDecision::loopback(/*port=*/0));
+        started_ = started.isOk();
+        if (started_) port_ = server_->boundPort();
+    }
+
+    ~JsonRpcStack() {
+        if (server_) server_->stop();
+    }
+
+    [[nodiscard]] HttpReply post(const std::string& body,
+                                 std::optional<std::string> sessionId = std::nullopt) const {
+        std::vector<std::pair<std::string, std::string>> headers;
+        if (sessionId.has_value()) headers.emplace_back("Mcp-Session-Id", *sessionId);
+        return httpRequest(port_, "POST", "/mcp", body, headers);
+    }
+
+    [[nodiscard]] bool            started() const { return started_; }
+    [[nodiscard]] std::uint16_t   port() const { return port_; }
+    [[nodiscard]] TimelineEngine& engine() { return session_->engine(); }
+    [[nodiscard]] ToolRegistry&   registry() { return registry_; }
+    [[nodiscard]] const Uuid&     trackId() const { return trackId_; }
+    [[nodiscard]] const Uuid&     assetId() const { return assetId_; }
+
+private:
+    Uuid                                trackId_;
+    Uuid                                assetId_;
+    std::unique_ptr<ProjectSession>     session_;
+    ToolRegistry                        registry_;
+    McpSessionRegistry                  sessions_;
+    std::unique_ptr<McpToolExecutor>    executor_;
+    std::unique_ptr<McpProtocolHandler> handler_;
+    std::unique_ptr<McpServer>          server_;
+    bool                                started_ = false;
+    std::uint16_t                       port_ = 0;
+};
+
+std::string jsonRpcRequest(const Json& id, const std::string& method, Json params) {
+    Json request = Json::object();
+    request.set("jsonrpc", Json("2.0"));
+    if (!id.isNull()) request.set("id", id);
+    request.set("method", Json(method));
+    if (!params.isNull()) request.set("params", std::move(params));
+    return request.dump();
+}
+
+/// Requirement 15.3, asserted on every response: valid JSON, `"jsonrpc":"2.0"`,
+/// the request id echoed unchanged in type and value, exactly one of
+/// `result`/`error`.
+Json expectJsonRpcEnvelope(const HttpReply& reply, const Json& expectedId) {
+    EXPECT_TRUE(reply.ok) << "no HTTP response was received";
+    const Json body = parseBody(reply);
+    EXPECT_TRUE(body.isObject()) << reply.body;
+    EXPECT_EQ(body.stringOr("jsonrpc"), "2.0") << reply.body;
+
+    const Json* id = body.find("id");
+    EXPECT_NE(id, nullptr) << reply.body;
+    if (id != nullptr) {
+        EXPECT_EQ(static_cast<int>(id->type()), static_cast<int>(expectedId.type()))
+            << "the response changed the id's JSON type: " << reply.body;
+        EXPECT_TRUE(*id == expectedId) << "the response did not echo the id: " << reply.body;
+    }
+
+    const bool hasResult = body.contains("result");
+    const bool hasError = body.contains("error");
+    EXPECT_NE(hasResult, hasError) << "exactly one of result/error is required: " << reply.body;
+    return body;
+}
+
+TEST(McpJsonRpcHttpIntegration, FullHandshakeOverLoopbackHttp) {
+    JsonRpcStack stack;
+    ASSERT_TRUE(stack.started());
+    ASSERT_NE(stack.port(), 19789);  // ephemeral, never the well-known port
+    ASSERT_EQ(clipCount(stack.engine()), 0u);
+
+    // --- initialize --------------------------------------------------------
+    Json initializeParams = Json::object();
+    initializeParams.set("protocolVersion", Json("2025-06-18"));
+    initializeParams.set("clientInfo",
+                         Json::object({{"name", Json("integration-test-client")},
+                                       {"version", Json("1.0")}}));
+    const Json     initializeId(std::int64_t{1});
+    const HttpReply initialize =
+        stack.post(jsonRpcRequest(initializeId, "initialize", std::move(initializeParams)));
+    EXPECT_EQ(initialize.status, 200);
+    const Json initializeBody = expectJsonRpcEnvelope(initialize, initializeId);
+    const Json* initializeResult = initializeBody.find("result");
+    ASSERT_NE(initializeResult, nullptr);
+    EXPECT_EQ(initializeResult->stringOr("protocolVersion"), "2025-06-18");
+    const Json* serverInfo = initializeResult->find("serverInfo");
+    ASSERT_NE(serverInfo, nullptr);
+    EXPECT_FALSE(serverInfo->stringOr("name").empty());
+    EXPECT_FALSE(serverInfo->stringOr("version").empty());
+    const Json* capabilities = initializeResult->find("capabilities");
+    ASSERT_NE(capabilities, nullptr);
+    EXPECT_TRUE(capabilities->contains("tools"));
+
+    // Requirement 9.11: the session identifier arrives as a response header and is
+    // opaque and at least 32 characters long.
+    const std::string* sessionHeader = initialize.header("Mcp-Session-Id");
+    ASSERT_NE(sessionHeader, nullptr) << initialize.raw;
+    const std::string session = *sessionHeader;
+    EXPECT_GE(session.size(), 32u);
+    EXPECT_TRUE(McpSessionRegistry::isWellFormedId(session)) << session;
+
+    // --- notifications/initialized (Requirement 9.10) ----------------------
+    const HttpReply notified =
+        stack.post(jsonRpcRequest(Json(nullptr), "notifications/initialized", Json()), session);
+    ASSERT_TRUE(notified.ok);
+    EXPECT_EQ(notified.status, 202);
+    EXPECT_TRUE(notified.body.empty()) << notified.body;
+
+    // --- tools/list (Requirements 9.3, 15.3) -------------------------------
+    const Json      listId("list-1");
+    const HttpReply list = stack.post(jsonRpcRequest(listId, "tools/list", Json()), session);
+    EXPECT_EQ(list.status, 200);
+    const Json  listBody = expectJsonRpcEnvelope(list, listId);
+    const Json* listResult = listBody.find("result");
+    ASSERT_NE(listResult, nullptr);
+    const Json* tools = listResult->find("tools");
+    ASSERT_NE(tools, nullptr);
+    ASSERT_TRUE(tools->isArray());
+    EXPECT_EQ(tools->asArray().size(), stack.registry().size());
+    EXPECT_GT(tools->asArray().size(), 0u);
+    for (const Json& entry : tools->asArray()) {
+        ASSERT_TRUE(entry.isObject());
+        EXPECT_FALSE(entry.stringOr("name").empty());
+        EXPECT_FALSE(entry.stringOr("description").empty());
+        const Json* schema = entry.find("inputSchema");
+        ASSERT_NE(schema, nullptr) << entry.stringOr("name");
+        EXPECT_TRUE(schema->isObject()) << entry.stringOr("name");
+        EXPECT_EQ(schema->stringOr("type"), "object") << entry.stringOr("name");
+    }
+
+    // --- tools/call (Requirement 9.4) --------------------------------------
+    Json callParams = Json::object();
+    callParams.set("name", Json("timeline.add_clip"));
+    callParams.set("arguments", addClipArgs(stack.trackId(), stack.assetId()));
+    const Json      callId(std::int64_t{2});
+    const HttpReply call = stack.post(jsonRpcRequest(callId, "tools/call", std::move(callParams)),
+                                      session);
+    EXPECT_EQ(call.status, 200);
+    const Json  callBody = expectJsonRpcEnvelope(call, callId);
+    const Json* callResult = callBody.find("result");
+    ASSERT_NE(callResult, nullptr);
+    EXPECT_FALSE(callResult->boolOr("isError", true));
+    const Json* content = callResult->find("content");
+    ASSERT_NE(content, nullptr);
+    ASSERT_TRUE(content->isArray());
+    ASSERT_FALSE(content->asArray().empty());
+    EXPECT_EQ(content->asArray().front().stringOr("type"), "text");
+
+    // The edit reached the real project through the real execution policy.
+    EXPECT_EQ(clipCount(stack.engine()), 1u);
+}
+
+TEST(McpJsonRpcHttpIntegration, ToolsListWithoutASessionIsRefusedOverHttp) {
+    JsonRpcStack stack;
+    ASSERT_TRUE(stack.started());
+
+    // No session header at all (Requirement 9.15).
+    const Json      id(std::int64_t{5});
+    const HttpReply anonymous = stack.post(jsonRpcRequest(id, "tools/list", Json()));
+    const Json      anonymousBody = expectJsonRpcEnvelope(anonymous, id);
+    ASSERT_TRUE(anonymousBody.contains("error"));
+    EXPECT_EQ(anonymousBody.find("error")->intOr("code"),
+              McpProtocolHandler::kErrorSessionUnknown);
+
+    // A session identifier the endpoint never issued.
+    const HttpReply unknown =
+        stack.post(jsonRpcRequest(id, "tools/list", Json()), std::string(64, 'a'));
+    const Json unknownBody = expectJsonRpcEnvelope(unknown, id);
+    ASSERT_TRUE(unknownBody.contains("error"));
+    EXPECT_EQ(unknownBody.find("error")->intOr("code"), McpProtocolHandler::kErrorSessionUnknown);
+}
+
+TEST(McpJsonRpcHttpIntegration, UnsupportedMethodIsMethodNotFoundOverHttp) {
+    JsonRpcStack stack;
+    ASSERT_TRUE(stack.started());
+
+    const Json      id(std::int64_t{6});
+    const HttpReply reply = stack.post(jsonRpcRequest(id, "resources/list", Json()));
+    const Json      body = expectJsonRpcEnvelope(reply, id);
+    ASSERT_TRUE(body.contains("error"));
+    EXPECT_EQ(body.find("error")->intOr("code"), McpProtocolHandler::kErrorMethodNotFound);
+    EXPECT_NE(body.find("error")->stringOr("message").find("resources/list"), std::string::npos);
+}
+
+TEST(McpJsonRpcHttpIntegration, MalformedJsonAndOversizeBodiesAreParseErrors) {
+    JsonRpcStack stack;
+    ASSERT_TRUE(stack.started());
+
+    // Unparsable body (Requirement 9.6).
+    const HttpReply malformed = stack.post("{not json");
+    ASSERT_TRUE(malformed.ok);
+    EXPECT_EQ(malformed.status, 400);
+    const Json malformedBody = expectJsonRpcEnvelope(malformed, Json(nullptr));
+    ASSERT_TRUE(malformedBody.contains("error"));
+    EXPECT_EQ(malformedBody.find("error")->intOr("code"), McpProtocolHandler::kErrorParse);
+
+    // A body above the 1 MiB cap is refused with -32700 and never dispatched.
+    std::string oversize = R"({"jsonrpc":"2.0","id":1,"method":"tools/list","pad":")";
+    oversize += std::string(McpServer::kMaxRequestBodyBytes, 'x');
+    oversize += "\"}";
+    ASSERT_GT(oversize.size(), McpServer::kMaxRequestBodyBytes);
+    const HttpReply big = stack.post(oversize);
+    ASSERT_TRUE(big.ok);
+    EXPECT_EQ(big.status, 400);
+    const Json bigBody = expectJsonRpcEnvelope(big, Json(nullptr));
+    ASSERT_TRUE(bigBody.contains("error"));
+    EXPECT_EQ(bigBody.find("error")->intOr("code"), McpProtocolHandler::kErrorParse);
+    EXPECT_EQ(clipCount(stack.engine()), 0u);
+}
+
+TEST(McpJsonRpcHttpIntegration, HeaderCaptureAndBindDecisionAreLoopbackOnly) {
+    // Pure transport checks that need no listener: header capture into the
+    // protocol context, and the loopback-only contract of Requirement 10.1.
+    HttpRequest request;
+    request.method = "POST";
+    request.target = "/mcp";
+    request.body = "{}";
+    request.headers.emplace_back("mcp-session-id", "abc123");
+    request.headers.emplace_back("authorization", "Bearer token-value");
+    request.headers.emplace_back("origin", "http://localhost:3000");
+    EXPECT_NE(request.header("Mcp-Session-Id"), nullptr);
+    EXPECT_EQ(*request.header("MCP-SESSION-ID"), "abc123");
+    EXPECT_EQ(*request.header("Origin"), "http://localhost:3000");
+    EXPECT_EQ(request.header("x-absent"), nullptr);
+
+    McpServer server;
+    BindDecision routable;
+    routable.host = "203.0.113.7";
+    routable.port = 0;
+    routable.loopbackOnly = true;
+    const Result<void> refusedHost = server.start(routable);
+    ASSERT_TRUE(refusedHost.isError());
+    EXPECT_EQ(refusedHost.error().code(), ErrorCode::InvalidArgument);
+    EXPECT_FALSE(server.running());
+
+    BindDecision tls = BindDecision::loopback(0);
+    tls.tlsEnabled = true;
+    const Result<void> refusedTls = server.start(tls);
+    ASSERT_TRUE(refusedTls.isError());
+    EXPECT_EQ(refusedTls.error().code(), ErrorCode::Unsupported);
+    EXPECT_FALSE(server.running());
+
+    // The loopback default binds, and reports the loopback host it bound.
+    ASSERT_TRUE(server.start(BindDecision::loopback(0)).isOk());
+    EXPECT_TRUE(server.running());
+    EXPECT_EQ(server.boundHost(), "127.0.0.1");
+    EXPECT_GT(server.boundPort(), 0);
+    server.stop();
+    EXPECT_TRUE(server.boundHost().empty());
 }
 
 }  // namespace

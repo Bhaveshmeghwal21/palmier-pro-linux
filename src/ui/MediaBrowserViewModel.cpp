@@ -7,7 +7,10 @@
 
 #include <utility>
 
+#include "core/Error.hpp"
 #include "core/MediaManager.hpp"
+#include "services/Json.hpp"
+#include "ui/GuiToolGateway.hpp"
 
 namespace palmier::ui {
 
@@ -66,6 +69,14 @@ Result<MediaAssetRef> MediaBrowserViewModel::importMedia(const std::filesystem::
 
     lastImportError_.reset();
     return asset;
+}
+
+Result<services::Json> MediaBrowserViewModel::importMediaViaGateway(const std::string& path) {
+    if (gateway_ == nullptr) {
+        return err<services::Json>(
+            failedPrecondition("MediaBrowserViewModel: no gateway is installed"));
+    }
+    return gateway_->importMedia(path);
 }
 
 // --- Library (Requirement 3.1) ----------------------------------------------

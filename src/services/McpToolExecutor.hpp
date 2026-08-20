@@ -19,11 +19,11 @@
 // HTTP, sockets, or MCP framing. The HTTP server (task 15.2) decodes a request
 // into a tool name + arguments and calls into this executor; the in-app agent
 // (task 16.x) can drive the identical policy. It wraps a `ToolRegistry` (the
-// shared tool surface from task 15.1) plus the `TimelineEngine` the tools mutate,
-// and enforces:
+// shared tool surface from task 15.1) plus the `ProjectSession` holding the
+// project the tools mutate, and enforces:
 //
 //   * 7.4  A recognized tool executes on the current project and returns its
-//          result within the time budget (default 30 seconds).
+//          result within the time budget (default 60 seconds, Requirement 9.16).
 //   * 7.5  An unrecognized tool name leaves the project unchanged and returns an
 //          error indicating the tool name is unknown (ErrorCode::NotFound).
 //   * 7.6  If a tool's execution fails, the project is rolled back to its exact
@@ -35,6 +35,26 @@
 //          error indicating no project is open is returned (ErrorCode::
 //          FailedPrecondition); and tool inputs are validated against the tool's
 //          declared JSON input schema BEFORE any EditCommand is created.
+//
+// Task 3.4 — the session, the shared validator, the budget and the source tag
+// -----------------------------------------------------------------------------
+// Four changes, none of them behavioural beyond what the requirements state
+// (design.md decisions D1 and D3):
+//
+//   * The `TimelineEngine*` member became a `ProjectSession*`. The engine is
+//     resolved through `session->engine()` at invocation time, exactly as the
+//     registry's handlers do, so the executor and the handlers always observe the
+//     same engine — including after a project has been loaded into the session
+//     (D1). A null session still models "no project open".
+//   * `validateAgainstSchema` no longer re-implements a JSON-Schema subset: it
+//     delegates to `ToolSchema::validate`, the single declaration each tool
+//     publishes through `Tool::inputSchema()` (D3, Requirements 9.9, 9.12).
+//   * The default time budget is 60 seconds, matching Requirement 9.16.
+//   * `executeTool` takes an `InvocationSource { Gui, Mcp, Agent }`. It is a
+//     LOGGING tag only: it names which surface issued the call for the optional
+//     invocation log and has no effect on validation, execution, rollback or the
+//     budget, so the GUI, the MCP endpoint and the in-app agent remain one
+//     execution path (Requirements 1.7, 9.4, 11.5).
 //
 // Rollback strategy. The TimelineEngine is already atomic per command (a failed
 // apply leaves the project byte-for-byte unchanged and records nothing). The
@@ -58,19 +78,29 @@
 #include "core/Result.hpp"
 #include "services/Json.hpp"
 
-namespace palmier {
-class TimelineEngine;  // core/TimelineEngine.hpp — the mutation target.
-}  // namespace palmier
-
 namespace palmier::services {
 
-class ToolRegistry;  // services/ToolRegistry.hpp — the shared tool surface.
+class ToolRegistry;    // services/ToolRegistry.hpp — the shared tool surface.
+class ToolSchema;      // services/ToolSchema.hpp — the one argument declaration.
+class ProjectSession;  // services/ProjectSession.hpp — the current project.
+
+// ---------------------------------------------------------------------------
+// InvocationSource
+// ---------------------------------------------------------------------------
+
+/// Which surface issued a tool invocation. Recorded for logging only: the
+/// execution policy is identical for all three, which is what makes the GUI, the
+/// MCP endpoint and the in-app agent one path (Requirements 1.7, 9.4, 11.5).
+enum class InvocationSource { Gui, Mcp, Agent };
+
+/// A stable lowercase name for `source` ("gui", "mcp", "agent"), for log records.
+[[nodiscard]] std::string_view invocationSourceName(InvocationSource source) noexcept;
 
 // ---------------------------------------------------------------------------
 // McpToolExecutor
 // ---------------------------------------------------------------------------
 
-/// Runs editor tools from a ToolRegistry against a TimelineEngine under the MCP
+/// Runs editor tools from a ToolRegistry against a ProjectSession under the MCP
 /// execution policy (Requirements 7.4-7.7, 7.10). Transport-agnostic: the HTTP
 /// server (task 15.2) and the in-app agent (task 16.x) both call into it.
 class McpToolExecutor {
@@ -79,37 +109,50 @@ public:
     /// deterministically without real waiting; defaults to std::steady_clock.
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
 
+    /// Records one finished invocation. Called with the issuing surface, the tool
+    /// name, whether it succeeded and how long it took, AFTER the policy has been
+    /// applied. Purely observational — it cannot change the outcome.
+    using InvocationLog = std::function<void(InvocationSource source, std::string_view tool,
+                                            bool succeeded,
+                                            std::chrono::milliseconds elapsed)>;
+
     /// Tuning knobs. `timeBudget` is the per-invocation completion budget
-    /// (Requirements 7.4/7.7; default 30 seconds). `clock`, when set, overrides
-    /// the monotonic clock used to measure a tool's elapsed time.
+    /// (Requirements 7.4/7.7/9.16; default 60 seconds). `clock`, when set,
+    /// overrides the monotonic clock used to measure a tool's elapsed time.
+    /// `invocationLog`, when set, receives one record per completed invocation.
     struct Options {
-        std::chrono::milliseconds timeBudget = std::chrono::seconds(30);
+        std::chrono::milliseconds timeBudget = std::chrono::seconds(60);
         Clock                     clock;  // empty -> std::steady_clock::now
+        InvocationLog             invocationLog;  // empty -> nothing is recorded
     };
 
-    /// Construct an executor over `registry` and `engine`.
+    /// Construct an executor over `registry` and `session`.
     ///
-    /// `engine` is the project the tools mutate and may be null to model "no
+    /// `session` holds the project the tools mutate and may be null to model "no
     /// project open" (Requirement 7.10): while null, every tool call returns the
     /// no-project error and the registry is never invoked. When non-null it MUST
-    /// be the same engine the registry's handlers were built against (see
+    /// be the same session the registry's handlers were built against (see
     /// buildDefaultToolRegistry), so the observed/rolled-back mutations line up.
     /// `registry` must outlive the executor.
     ///
-    /// The two-argument form uses the default Options (a 30-second budget and the
+    /// The two-argument form uses the default Options (a 60-second budget and the
     /// std::steady_clock). (The overload — rather than a defaulted Options
     /// argument — sidesteps the "default member initializer required before the
     /// end of its enclosing class" rule for the nested Options aggregate.)
-    McpToolExecutor(const ToolRegistry& registry, TimelineEngine* engine);
-    McpToolExecutor(const ToolRegistry& registry, TimelineEngine* engine,
+    McpToolExecutor(const ToolRegistry& registry, ProjectSession* session);
+    McpToolExecutor(const ToolRegistry& registry, ProjectSession* session,
                     Options options);
 
-    /// Point the executor at a different current project (or null for "no project
-    /// open"). Used by the composition root when the open project changes.
-    void setEngine(TimelineEngine* engine) noexcept { engine_ = engine; }
+    /// Point the executor at a different session (or null for "no project open").
+    /// Note that a project *load* does not need this: the session keeps one engine
+    /// across `project.open` (design.md D1).
+    void setSession(ProjectSession* session) noexcept { session_ = session; }
 
-    /// True iff a project is currently open (an engine is bound).
-    [[nodiscard]] bool hasProject() const noexcept { return engine_ != nullptr; }
+    /// The bound session, or nullptr when none is bound.
+    [[nodiscard]] ProjectSession* session() const noexcept { return session_; }
+
+    /// True iff a project is currently open (a session is bound).
+    [[nodiscard]] bool hasProject() const noexcept { return session_ != nullptr; }
 
     /// The per-invocation completion budget.
     [[nodiscard]] std::chrono::milliseconds timeBudget() const noexcept { return budget_; }
@@ -124,7 +167,12 @@ public:
     ///                           rolled back to its pre-invocation state.
     ///   * (tool's error)      — the tool's execution failed (7.6); project rolled
     ///                           back to its pre-invocation state.
-    [[nodiscard]] Result<Json> executeTool(std::string_view name, const Json& input);
+    ///
+    /// `source` names the surface that issued the call and is used only for the
+    /// invocation log: every source runs the identical policy (Requirements 1.7,
+    /// 9.4, 11.5).
+    [[nodiscard]] Result<Json> executeTool(std::string_view name, const Json& input,
+                                           InvocationSource source = InvocationSource::Mcp);
 
     /// Envelope entry point for the HTTP transport (task 15.2). Accepts a request
     /// object carrying the tool `name` and its `arguments` — either at the top
@@ -136,18 +184,16 @@ public:
     /// The HTTP layer (task 15.2) is responsible for MCP/JSON-RPC framing around
     /// this payload; keeping framing out of the executor preserves its transport
     /// independence.
-    [[nodiscard]] Json execute(const Json& request);
+    [[nodiscard]] Json execute(const Json& request,
+                               InvocationSource source = InvocationSource::Mcp);
 
-    /// Minimal JSON-Schema validation used by executeTool before a command is
-    /// created (Requirement 7.10). Checks, against the draft-07-style object
-    /// schemas the ToolRegistry emits: that an `"object"` schema receives an
-    /// object; that every entry in `"required"` is present; and that any supplied
-    /// property whose schema declares a `"type"` matches that type ("string",
-    /// "integer", "number", "boolean", "object", "array", "null"). It is
-    /// intentionally not a full validator — just enough to reject malformed tool
-    /// arguments up front. Returns ok() when no declared constraint is violated.
+    /// Argument validation run by executeTool before a command is created
+    /// (Requirements 7.10, 9.9). It delegates to `ToolSchema::validate`, the same
+    /// declaration `Tool::inputSchema()` publishes, so the advertised schema and
+    /// the enforced constraints cannot drift (design.md D3, Requirement 9.12).
+    /// Returns ok() when no declared constraint is violated.
     [[nodiscard]] static Result<void> validateAgainstSchema(const Json& input,
-                                                            const Json& schema);
+                                                            const ToolSchema& schema);
 
 private:
     // Undo `appliedCount` most-recently-applied commands to roll the project back
@@ -155,9 +201,10 @@ private:
     void rollback(int appliedCount);
 
     const ToolRegistry*       registry_;
-    TimelineEngine*           engine_;
+    ProjectSession*           session_;
     std::chrono::milliseconds budget_;
     Clock                     clock_;
+    InvocationLog             invocationLog_;
 };
 
 }  // namespace palmier::services

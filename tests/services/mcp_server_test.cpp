@@ -21,6 +21,9 @@
 
 #include "services/McpServer.hpp"
 
+#include "services/RemoteAccessGate.hpp"
+#include "services/TlsTransport.hpp"
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -252,6 +255,115 @@ TEST(McpServerPortConflict, RefusesWhenPortAlreadyInUse) {
     }
 
     ::close(occupier);
+}
+
+// ---- Remote-access admission, upstream of the protocol layer (task 6.3) ----
+//
+// The claim task 6.3 makes is a claim about *position*: the gate sits strictly
+// upstream of McpProtocolHandler, so a refused request cannot reach the
+// Tool_Surface. The tests below assert exactly that, by wiring a protocol delegate
+// that records whether it was called and checking it never was.
+
+TEST(McpServerAdmission, DeniedRequestNeverReachesTheProtocolDelegate) {
+    RecordingRejectionLog log;
+
+    RemoteAccessConfig config;
+    config.enabled = true;
+    config.bindAddress = "192.0.2.10";
+    config.bearerToken = std::string(40, 'k');
+    config.acknowledged = true;
+    RemoteAccessGate gate(config, log);
+    ASSERT_FALSE(gate.validate().loopbackOnly);
+
+    bool      delegateCalled = false;
+    McpServer server([](const Json&) { return Json(nullptr); });
+    server.setProtocolDelegate([&delegateCalled](const McpRequestContext&, std::string_view) {
+        delegateCalled = true;
+        McpReply reply;
+        reply.body = R"({"jsonrpc":"2.0","id":1,"result":{}})";
+        return reply;
+    });
+    server.setRemoteAccessGate(&gate);
+
+    McpRequestContext context;
+    context.sourceAddress = "198.51.100.4";   // no Authorization header at all
+
+    const HttpResponse refused =
+        server.dispatchWithContext(post("/mcp", R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})"),
+                                   context);
+
+    EXPECT_EQ(refused.status, 401);
+    EXPECT_FALSE(delegateCalled);
+    EXPECT_NE(refused.body.find("no_token"), std::string::npos);
+    // The refusal is recorded even though nothing was dispatched (Requirement 10.8).
+    EXPECT_EQ(log.size(), 1u);
+
+    // The same request carrying the configured token is dispatched normally.
+    context.authorization = "Bearer " + config.bearerToken;
+    const HttpResponse admitted =
+        server.dispatchWithContext(post("/mcp", R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})"),
+                                   context);
+    EXPECT_EQ(admitted.status, 200);
+    EXPECT_TRUE(delegateCalled);
+    EXPECT_EQ(log.size(), 1u);
+}
+
+// Requirement 10.10: wiring a gate on the default loopback configuration changes
+// nothing — a request with neither Authorization nor Origin is dispatched.
+TEST(McpServerAdmission, LoopbackGateChangesNothingForAnUnauthenticatedRequest) {
+    RecordingRejectionLog log;
+    RemoteAccessGate      gate(RemoteAccessConfig{}, log);
+
+    bool      delegateCalled = false;
+    McpServer server([](const Json&) { return Json(nullptr); });
+    server.setProtocolDelegate([&delegateCalled](const McpRequestContext&, std::string_view) {
+        delegateCalled = true;
+        McpReply reply;
+        reply.body = R"({"jsonrpc":"2.0","id":1,"result":{}})";
+        return reply;
+    });
+    server.setRemoteAccessGate(&gate);
+
+    McpRequestContext context;
+    context.sourceAddress = "127.0.0.1";
+
+    const HttpResponse response =
+        server.dispatchWithContext(post("/mcp", R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})"),
+                                   context);
+    EXPECT_EQ(response.status, 200);
+    EXPECT_TRUE(delegateCalled);
+    EXPECT_EQ(log.size(), 0u);
+}
+
+// A decision asking for TLS with no material installed is refused rather than
+// silently served as plaintext (Requirement 10.6).
+TEST(McpServerStart, TlsDecisionWithoutMaterialIsRefusedNotDowngraded) {
+    McpServer    server([](const Json&) { return Json(nullptr); });
+    BindDecision decision = BindDecision::loopback(0);
+    decision.tlsEnabled = true;
+
+    const Result<void> r = server.start(decision);
+    ASSERT_TRUE(r.isError());
+    EXPECT_EQ(r.error().code(), ErrorCode::Unsupported);
+    EXPECT_FALSE(server.running());
+    EXPECT_FALSE(server.hasTlsMaterial());
+}
+
+// The three TLS material conditions are reported by the transport exactly as the
+// gate reports them, so the two can never disagree about the same files
+// (Requirement 10.12). Without the TLS transport compiled in the same call reports
+// the capability as unavailable.
+TEST(McpServerStart, TlsMaterialLoadFailureIsReportedNotIgnored) {
+    McpServer server([](const Json&) { return Json(nullptr); });
+    const Result<void> r =
+        server.setTlsMaterial("/nonexistent/palmier/server.crt", "/nonexistent/palmier/server.key");
+    ASSERT_TRUE(r.isError());
+    EXPECT_FALSE(server.hasTlsMaterial());
+    if (tlsTransportAvailable()) {
+        EXPECT_EQ(r.error().code(), ErrorCode::Io);
+    } else {
+        EXPECT_EQ(r.error().code(), ErrorCode::Unsupported);
+    }
 }
 
 }  // namespace

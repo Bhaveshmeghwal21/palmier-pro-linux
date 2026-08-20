@@ -15,7 +15,7 @@
 // This ToolRegistry is the single, transport-agnostic definition of that surface.
 // It deliberately knows nothing about HTTP (task 15.2 binds it to a socket) or
 // about the agent's chat loop (task 16.1 drives it from parsed intents): it is
-// just a named collection of {schema, handler} tools over a `TimelineEngine`.
+// just a named collection of {schema, handler} tools over a `ProjectSession`.
 // Both callers construct one via `buildDefaultToolRegistry` so they share
 // identical handlers — the mechanism that guarantees P4 equivalence.
 //
@@ -52,6 +52,7 @@
 #ifndef PALMIER_SERVICES_TOOLREGISTRY_HPP
 #define PALMIER_SERVICES_TOOLREGISTRY_HPP
 
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -59,28 +60,39 @@
 
 #include "core/Result.hpp"
 #include "services/Json.hpp"
-
-namespace palmier {
-class TimelineEngine;  // core/TimelineEngine.hpp — the mutation target.
-}  // namespace palmier
+#include "services/MediaImportService.hpp"
+#include "services/ToolSchema.hpp"
 
 namespace palmier::services {
+
+class ProjectSession;  // services/ProjectSession.hpp — the current project.
 
 // ---------------------------------------------------------------------------
 // Tool descriptor
 // ---------------------------------------------------------------------------
 
-/// One exposed editor tool: an MCP-style name, a human-readable description, a
-/// JSON-Schema object describing its accepted input, and the handler that runs
-/// it. The handler receives already-parsed JSON arguments and returns either a
-/// success payload or an Error.
+/// One exposed editor tool: an MCP-style name, a human-readable description, the
+/// single `ToolSchema` declaring its accepted arguments, and the handler that
+/// runs it. The handler receives already-parsed JSON arguments and returns either
+/// a success payload or an Error.
+///
+/// Per design.md decision D3 ("Schema/handler agreement", Requirement 9.12) the
+/// accepted arguments are declared exactly once, in `schema`: the JSON Schema
+/// `tools/list` publishes is *rendered* from it (`inputSchema()`) and the
+/// validator the executor runs before any command is created enforces the same
+/// constraint set (`schema.validate()`), so the advertised surface and the
+/// runtime behaviour cannot drift.
 struct Tool {
     using Handler = std::function<Result<Json>(const Json& input)>;
 
     std::string name;         ///< e.g. "timeline.add_clip".
     std::string description;  ///< One-line human description.
-    Json        inputSchema;  ///< JSON-Schema (draft-07 style "object" schema).
+    ToolSchema  schema;       ///< The one declaration of the accepted arguments.
     Handler     handler;      ///< Argument-parsing + engine-mapping implementation.
+
+    /// The published JSON Schema (draft-07 style "object" schema), rendered from
+    /// `schema`. Never stored separately: there is nothing to keep in step.
+    [[nodiscard]] Json inputSchema() const { return schema.toJsonSchema(); }
 };
 
 // ---------------------------------------------------------------------------
@@ -93,6 +105,22 @@ struct Tool {
 /// advertised (so the surface is identical across configurations) but returns an
 /// Unsupported error when invoked.
 struct ToolRegistryHooks {
+    /// `media.import`'s one operation (task 4.4; Requirement 2.2): probe, validate
+    /// and register the file at the given path as exactly one asset of the current
+    /// project's media library, reporting the registered asset.
+    ///
+    /// It is declared as the operation rather than as a whole `Tool::Handler` so
+    /// that the *result shape* Requirement 2.2 specifies — the asset id, the
+    /// resolved source path, the container format, the duration, the resolution and
+    /// frame rate present only for a decodable video stream, and the duplicate flag
+    /// — is rendered in exactly one place (this registry) no matter who supplies
+    /// the operation. The composition root's hook is a one-line adapter over
+    /// `MediaImportService::import`; absent the hook `media.import` is still
+    /// advertised (so the tool surface is identical across configurations) and
+    /// reports Unsupported when invoked.
+    using MediaImportHook =
+        std::function<Result<ImportedAsset>(const std::filesystem::path& path)>;
+
     /// Handles `generation.generate` (Requirement 6): validate + gate + generate
     /// + place. Typically an adapter over GenerativeMediaCoordinator (task 14.2).
     Tool::Handler generate;
@@ -100,6 +128,21 @@ struct ToolRegistryHooks {
     /// Handles `timeline.export` (Requirement 11): render the timeline to a file.
     /// Typically an adapter over the Export Engine (task 10.x).
     Tool::Handler exportTimeline;
+
+    /// `media.import` (task 4.4). Empty ⇒ the tool reports Unsupported.
+    MediaImportHook importMedia;
+
+    /// The session-level tools (task 4.3) and `media.list` (task 4.4). Each of
+    /// these five has a default implementation over the bound `ProjectSession`, so
+    /// the headless sequence of Requirement 3.6 runs without any composition:
+    /// a hook is an *override* for a surface that needs to interpose (the GUI
+    /// routes File > Save through its destination prompt, for example), not a
+    /// prerequisite. An empty hook keeps the session-backed default.
+    Tool::Handler createProject;  ///< `project.create` (Requirements 3.2, 3.8).
+    Tool::Handler openProject;    ///< `project.open`  (Requirements 3.4, 3.9).
+    Tool::Handler saveProject;    ///< `project.save`  (Requirements 4.1, 4.4).
+    Tool::Handler projectInfo;    ///< `project.info`  (Requirement 3.7).
+    Tool::Handler listMedia;      ///< `media.list`.
 };
 
 // ---------------------------------------------------------------------------
@@ -147,12 +190,35 @@ private:
 // Default surface
 // ---------------------------------------------------------------------------
 
-/// Build the standard editor tool surface bound to `engine`. The structural-edit
-/// and read tools are wired directly to the TimelineEngine (mapping to the same
+/// Build the standard editor tool surface bound to `session`. The structural-edit
+/// and read tools are wired to the session's timeline engine (mapping to the same
 /// EditCommands the UI uses); `generation.generate` and `timeline.export` are
-/// wired to `hooks` when supplied. `engine` must outlive the returned registry
+/// wired to `hooks` when supplied. `session` must outlive the returned registry
 /// (its handlers capture it by reference).
-[[nodiscard]] ToolRegistry buildDefaultToolRegistry(TimelineEngine& engine,
+///
+/// Every handler resolves the engine through `session.engine()` **at invocation
+/// time** rather than capturing a `TimelineEngine&` when the registry is built
+/// (design.md decision D1). That is what makes a project loaded after the
+/// registry was constructed observable to the tools: the session keeps one stable
+/// engine object and swaps the project value inside it, so no handler, view model
+/// or subscription has to be rebound when the current project changes.
+[[nodiscard]] ToolRegistry buildDefaultToolRegistry(ProjectSession& session,
+                                                    ToolRegistryHooks hooks = {});
+
+/// As above, where a null `session` models "no project is current" — the state
+/// `McpToolExecutor` and `MediaImportService` already represent with a null
+/// session pointer (Requirement 3.5). The advertised surface is identical either
+/// way: every tool is registered and publishes the same schema, but while no
+/// project is current every tool OTHER than `project.create` and `project.open`
+/// returns a FailedPrecondition error stating that no project is open, having
+/// created no edit command and touched no state.
+///
+/// `project.create` and `project.open` are exempt because their job is to MAKE a
+/// project current. With no session bound they can only run through the
+/// `createProject` / `openProject` hooks (which own the session they create into);
+/// absent both a session and a hook they report Unsupported — never "no project is
+/// open" — so the exemption is observable from the outside.
+[[nodiscard]] ToolRegistry buildDefaultToolRegistry(ProjectSession* session,
                                                     ToolRegistryHooks hooks = {});
 
 }  // namespace palmier::services

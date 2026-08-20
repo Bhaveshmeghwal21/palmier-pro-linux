@@ -42,6 +42,21 @@
 //
 // The model holds references to a MediaManager and a KeyMomentMarkerModel that
 // must outlive it; it never owns project state itself.
+//
+// Gateway routing (task 11.4; Requirements 1.7, 9.4, 11.5): importMedia()
+// (validator-injected, `Result<MediaAssetRef>`) predates the services-level
+// session/tool architecture and its contract does not match the `media.import`
+// tool's result shape (an ImportedAsset carrying duration/resolution/hasAudio,
+// not a bare MediaAssetRef) or its FFmpeg-probing implementation, so changing
+// its signature would break the validator-injection design this model is built
+// around and every existing test of it. Rather than force an incompatible
+// shape through the gateway, importMediaViaGateway() is added alongside it: an
+// independent method that, when a gateway is installed, calls `media.import`
+// through the identical `services::McpToolExecutor` path the MCP endpoint and
+// the in-app agent use, returning the tool's own `services::Json` result. The
+// Qt Media Browser panel (task 11.2) calls this one when the application's
+// gateway is wired in; importMedia() remains available (and Qt-free-testable)
+// for callers that supply their own validator.
 
 #ifndef PALMIER_UI_MEDIABROWSERVIEWMODEL_HPP
 #define PALMIER_UI_MEDIABROWSERVIEWMODEL_HPP
@@ -61,11 +76,15 @@
 #include "core/Uuid.hpp"
 #include "services/KeyMomentMarkers.hpp"  // KeyMomentMarkerModel, MarkerPresence
 
+namespace palmier::services { class Json; }  // services/Json.hpp
+
 namespace palmier {
 class MediaManager;  // core/MediaManager.hpp — the project media library + versions.
 }  // namespace palmier
 
 namespace palmier::ui {
+
+class GuiToolGateway;  // ui/GuiToolGateway.hpp — optional gateway-backed import.
 
 // ---------------------------------------------------------------------------
 // MediaLibraryEntry — one row of the media library list (Requirement 3.1)
@@ -176,6 +195,23 @@ public:
     /// True iff the most recent import attempt failed and its message is retained.
     [[nodiscard]] bool hasImportError() const noexcept { return lastImportError_.has_value(); }
 
+    /// Install (or clear, with nullptr) the gateway importMediaViaGateway()
+    /// routes through.
+    void setGateway(GuiToolGateway* gateway) noexcept { gateway_ = gateway; }
+
+    /// The currently installed gateway, or nullptr when none is installed.
+    [[nodiscard]] GuiToolGateway* gateway() const noexcept { return gateway_; }
+
+    /// Import `path` through the installed gateway's `media.import` tool call
+    /// (task 11.4) — the SAME `services::McpToolExecutor` path the MCP endpoint
+    /// and the in-app agent use. Returns the tool's own success payload (an
+    /// object naming assetId/sourcePath/containerFormat/durationMs and, for a
+    /// video asset, width/height/fps) or its Error. Requires a gateway to be
+    /// installed (returns a FailedPrecondition Error otherwise); does not touch
+    /// `lastImportError()`, which belongs to the validator-injected importMedia()
+    /// path above.
+    [[nodiscard]] Result<services::Json> importMediaViaGateway(const std::string& path);
+
     // --- Library (Requirement 3.1) -----------------------------------------
 
     /// The project media library as display rows, in import order.
@@ -233,6 +269,7 @@ private:
     MediaManager&                    media_;
     services::KeyMomentMarkerModel&  markers_;
     ImportValidator                  validator_;
+    GuiToolGateway*                  gateway_ = nullptr;
     std::optional<ClipId>            selectedClip_;
     std::optional<std::string>       lastImportError_;
 };

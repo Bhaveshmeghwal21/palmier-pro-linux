@@ -58,6 +58,17 @@ Result<GeneratedMediaPlacement> GenerativeMediaCoordinator::generateAndPlace(
             invalidArgument("generated clip sourceOut must exceed sourceIn"));
     }
 
+    // Requirement 12.9 — a syntactically valid but unknown target track is also a
+    // caller error, and must be refused before anything downstream runs. Checked
+    // here rather than left to TimelineEnginePlacer::place: place() only runs
+    // once a generation has already produced an asset, so deferring this check
+    // to it would let an unknown-track request reach the network and catalogue
+    // an orphaned library entry before the refusal — exactly the gap this check
+    // closes.
+    if (!placement_.trackExists(where.trackId)) {
+        return err<GeneratedMediaPlacement>(notFound("target track does not exist"));
+    }
+
     // 6.5 / 9.7 — entitlement gate. An unauthorized request never contacts the
     // provider and never touches the timeline.
     Result<GenerationAuthorization> auth = gate_.authorize(request);
@@ -73,17 +84,45 @@ Result<GeneratedMediaPlacement> GenerativeMediaCoordinator::generateAndPlace(
     }
     const MediaAsset asset = std::move(generated).value();
 
-    // 6.2 — add the generated media to the project library.
-    if (Result<void> imported = library_.importAsset(asset.ref); imported.isError()) {
+    // A provider that answered with an unusable asset reference has failed the
+    // generation; refuse it here, while nothing has been catalogued or placed, so
+    // the library import below cannot fail for a reason the caller could not have
+    // avoided.
+    if (asset.ref.assetId.isNil() || asset.ref.sourcePath.empty()) {
+        return err<GeneratedMediaPlacement>(makeError(
+            ErrorCode::Internal,
+            "the generative backend returned no usable media reference for the "
+            "completed job"));
+    }
+
+    // 6.2 / 12.7 — place the generated media on the timeline FIRST, at the
+    // user-specified frame position. The placement is the step that can still be
+    // refused (an absent track, an out-of-range position, an overlap), and it is
+    // atomic: a refusal leaves the timeline and the undo history unchanged.
+    //
+    // Ordering matters here. Cataloguing the asset in the media library before the
+    // placement had been validated would leave an orphaned library entry behind
+    // whenever the placement was refused — the timeline rollback cannot remove it,
+    // because the library is not part of the project snapshot the engine restores.
+    // Requirements 6.6 and 12.7 both require the library to be in its pre-request
+    // state after a failure, so the refusable step runs before the one that adds
+    // the entry.
+    TimelinePlacementRequest placementRequest{
+        where.trackId, asset.ref, where.framePosition, where.sourceIn, where.sourceOut};
+    Result<GeneratedMediaPlacement> placed = placement_.place(placementRequest);
+    if (placed.isError()) {
+        return placed;
+    }
+
+    // 6.2 — the placement stands, so the generated media joins the project
+    // library. An `AlreadyExists` result means the asset is already catalogued,
+    // which is the state this step exists to reach.
+    if (Result<void> imported = library_.importAsset(asset.ref);
+        imported.isError() && imported.error().code() != ErrorCode::AlreadyExists) {
         return err<GeneratedMediaPlacement>(std::move(imported).error());
     }
 
-    // 6.2 — place it on the timeline at the user-specified frame position. The
-    // placement is atomic: a rejected placement (out-of-range position or an
-    // overlap) leaves the timeline unchanged.
-    TimelinePlacementRequest placementRequest{
-        where.trackId, asset.ref, where.framePosition, where.sourceIn, where.sourceOut};
-    return placement_.place(placementRequest);
+    return placed;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +292,12 @@ private:
 } // namespace
 
 TimelineEnginePlacer::TimelineEnginePlacer(TimelineEngine& engine) : engine_(engine) {}
+
+bool TimelineEnginePlacer::trackExists(const Uuid& trackId) const {
+    const Project project = engine_.snapshot();
+    return std::any_of(project.tracks.begin(), project.tracks.end(),
+                       [&](const Track& t) { return t.id == trackId; });
+}
 
 Result<GeneratedMediaPlacement> TimelineEnginePlacer::place(
     const TimelinePlacementRequest& request) {

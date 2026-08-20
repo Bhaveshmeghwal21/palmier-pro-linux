@@ -91,6 +91,12 @@ std::string idLabel(const Uuid& id) {
     return id.isNil() ? std::string{"<nil>"} : id.toString();
 }
 
+// The tool-surface spelling of a track kind, used in error messages so a
+// rejected `kind` argument is named the way the caller supplied it.
+std::string_view trackKindLabel(TrackKind kind) {
+    return kind == TrackKind::Audio ? "audio" : "video";
+}
+
 }  // namespace
 
 // ===========================================================================
@@ -104,6 +110,23 @@ Result<void> AddClipCommand::apply(Project& project) {
     Track* track = findTrack(project, trackId_);
     if (track == nullptr) {
         return err(notFound("AddClipCommand: track " + idLabel(trackId_) + " not found"));
+    }
+
+    // Register the clip's asset in the project asset table if it is not already
+    // resolvable there, so the clip's assetRef resolves (project validation rule).
+    // Project.assets is the ONLY asset table a saved document carries, so an asset
+    // known merely to a session-level MediaManager (as an imported asset is) would
+    // otherwise produce a document that validateProject rejects on load. Doing it
+    // here makes that impossible for every caller that places a clip, not just for
+    // one import path. Resolution is by assetId, so a ref already in the table adds
+    // nothing; the nil identity is never added, because it cannot be catalogued
+    // when the library is rebuilt from the document.
+    assetAdded_ = false;
+    if (clip_.assetRef.isValid() &&
+        std::none_of(project.assets.begin(), project.assets.end(),
+                     [this](const MediaAssetRef& a) { return a == clip_.assetRef; })) {
+        project.assets.push_back(clip_.assetRef);
+        assetAdded_ = true;
     }
 
     // Insert keeping the track ordered by timelineStart: before the first clip
@@ -125,6 +148,19 @@ Result<void> AddClipCommand::revert(Project& project) {
     clips.erase(std::remove_if(clips.begin(), clips.end(),
                                [&](const Clip& c) { return c.id == clip_.id; }),
                 clips.end());
+
+    // Undo the asset registration too, and ONLY when this command performed it, so
+    // revert() is an exact inverse and an asset another clip still references (or
+    // one the table already carried) is never removed.
+    if (assetAdded_) {
+        auto& assets = project.assets;
+        assets.erase(std::remove_if(assets.begin(), assets.end(),
+                                    [this](const MediaAssetRef& a) {
+                                        return a == clip_.assetRef;
+                                    }),
+                     assets.end());
+        assetAdded_ = false;
+    }
     return ok();
 }
 
@@ -468,6 +504,173 @@ Result<void> AddEffectCommand::revert(Project& project) {
     effects.erase(std::remove_if(effects.begin(), effects.end(),
                                  [&](const Effect& e) { return e.id == effect_.id; }),
                   effects.end());
+    return ok();
+}
+
+// ===========================================================================
+// AddTrackCommand
+// ===========================================================================
+
+AddTrackCommand::AddTrackCommand(TrackKind kind)
+    : kind_(kind), trackId_(Uuid::generateV4()) {}
+
+AddTrackCommand::AddTrackCommand(TrackKind kind, Uuid trackId)
+    : kind_(kind), trackId_(trackId) {}
+
+Result<void> AddTrackCommand::apply(Project& project) {
+    if (trackId_.isNil()) {
+        return err(invalidArgument("AddTrackCommand: track id must not be nil"));
+    }
+    if (findTrack(project, trackId_) != nullptr) {
+        // Requirement 3.3: the returned identifier is unique within the project.
+        return err(failedPrecondition("AddTrackCommand: track " + idLabel(trackId_) +
+                                      " is already present in the project"));
+    }
+
+    // Count the tracks of this kind and remember the position just past the last
+    // one so the new lane is appended at that kind's tail (Requirement 3.3).
+    std::size_t ofKind = 0;
+    std::size_t insertAt = project.tracks.size();
+    for (std::size_t i = 0; i < project.tracks.size(); ++i) {
+        if (project.tracks[i].kind == kind_) {
+            ++ofKind;
+            insertAt = i + 1;
+        }
+    }
+
+    // Requirement 3.8: a request that would exceed the per-kind cap is rejected
+    // and names the offending argument.
+    if (ofKind >= kMaxTracksPerKind) {
+        return err(outOfRange(
+            std::string("AddTrackCommand: 'kind' ") + std::string(trackKindLabel(kind_)) +
+            " already holds " + std::to_string(ofKind) + " tracks; at most " +
+            std::to_string(kMaxTracksPerKind) + " tracks of one kind are allowed"));
+    }
+
+    Track track;
+    track.id = trackId_;
+    track.kind = kind_;
+    project.tracks.insert(project.tracks.begin() + static_cast<std::ptrdiff_t>(insertAt),
+                          std::move(track));
+    index_ = insertAt;
+    return ok();
+}
+
+Result<void> AddTrackCommand::revert(Project& project) {
+    if (!index_) {
+        return err(failedPrecondition("AddTrackCommand: revert before a successful apply"));
+    }
+    auto it = std::find_if(project.tracks.begin(), project.tracks.end(),
+                           [&](const Track& t) { return t.id == trackId_; });
+    if (it == project.tracks.end()) {
+        return err(notFound("AddTrackCommand: track " + idLabel(trackId_) + " not found"));
+    }
+    project.tracks.erase(it);
+    return ok();
+}
+
+// ===========================================================================
+// RemoveTrackCommand
+// ===========================================================================
+
+RemoveTrackCommand::RemoveTrackCommand(Uuid trackId) : trackId_(trackId) {}
+
+std::optional<std::size_t> RemoveTrackCommand::removedClipCount() const noexcept {
+    if (!removed_) {
+        return std::nullopt;
+    }
+    return removed_->clips.size();
+}
+
+Result<void> RemoveTrackCommand::apply(Project& project) {
+    auto it = std::find_if(project.tracks.begin(), project.tracks.end(),
+                           [&](const Track& t) { return t.id == trackId_; });
+    if (it == project.tracks.end()) {
+        // Requirement 3.8: an unknown track identifier changes nothing.
+        return err(notFound("RemoveTrackCommand: track " + idLabel(trackId_) +
+                            " not found in the current project"));
+    }
+
+    index_ = static_cast<std::size_t>(std::distance(project.tracks.begin(), it));
+    removed_ = *it;                 // the track and every clip on it
+    project.tracks.erase(it);       // erase preserves the order of the rest
+    return ok();
+}
+
+Result<void> RemoveTrackCommand::revert(Project& project) {
+    if (!removed_) {
+        return err(failedPrecondition("RemoveTrackCommand: revert before a successful apply"));
+    }
+    const std::size_t index = std::min(index_, project.tracks.size());
+    project.tracks.insert(project.tracks.begin() + static_cast<std::ptrdiff_t>(index),
+                          *removed_);
+    return ok();
+}
+
+// ===========================================================================
+// SetTrackMutedCommand
+// ===========================================================================
+
+SetTrackMutedCommand::SetTrackMutedCommand(Uuid trackId, bool muted)
+    : trackId_(trackId), muted_(muted) {}
+
+Result<void> SetTrackMutedCommand::apply(Project& project) {
+    auto it = std::find_if(project.tracks.begin(), project.tracks.end(),
+                           [&](const Track& t) { return t.id == trackId_; });
+    if (it == project.tracks.end()) {
+        // Same rule as every other track-addressed edit (Requirement 3.8): an
+        // unknown identifier changes nothing.
+        return err(notFound("SetTrackMutedCommand: track " + idLabel(trackId_) +
+                            " not found in the current project"));
+    }
+    prior_ = it->muted;
+    it->muted = muted_;
+    return ok();
+}
+
+Result<void> SetTrackMutedCommand::revert(Project& project) {
+    if (!prior_) {
+        return err(failedPrecondition(
+            "SetTrackMutedCommand: revert before a successful apply"));
+    }
+    auto it = std::find_if(project.tracks.begin(), project.tracks.end(),
+                           [&](const Track& t) { return t.id == trackId_; });
+    if (it == project.tracks.end()) {
+        return err(notFound("SetTrackMutedCommand: track " + idLabel(trackId_) +
+                            " not found in the current project"));
+    }
+    it->muted = *prior_;
+    return ok();
+}
+
+// ===========================================================================
+// SetTransitionCommand
+// ===========================================================================
+
+SetTransitionCommand::SetTransitionCommand(ClipId clipId, Transition transition)
+    : clipId_(clipId), transition_(std::move(transition)) {}
+
+Result<void> SetTransitionCommand::apply(Project& project) {
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("AddTransition: clip " + idLabel(clipId_) + " not found"));
+    }
+    Clip& clip = loc->track->clips[loc->index];
+    prior_ = clip.transitionIn;
+    captured_ = true;
+    clip.transitionIn = transition_;
+    return ok();
+}
+
+Result<void> SetTransitionCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition("AddTransition: revert before a successful apply"));
+    }
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("AddTransition: clip " + idLabel(clipId_) + " not found"));
+    }
+    loc->track->clips[loc->index].transitionIn = prior_;
     return ok();
 }
 

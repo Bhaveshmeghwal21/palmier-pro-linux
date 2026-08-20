@@ -34,6 +34,22 @@
 // or a generic Rejected failure — plus the human-readable message the engine or
 // command produced. The most recent indication is also retained so a status area
 // can display it.
+//
+// Gateway routing (task 11.4; Requirements 1.7, 9.4, 11.5): the adapter's
+// mutating gestures may additionally be routed through a `ui::GuiToolGateway`,
+// which calls the SAME `services::McpToolExecutor::executeTool` path the MCP
+// endpoint and the in-app agent use, tagged `InvocationSource::Gui`. Passing a
+// gateway to the constructor (or `setGateway`) switches every gesture method
+// (moveClip/trimClip/splitClip/reorderClips/addClip/removeClip) from calling
+// `TimelineEngine::apply` directly to calling the gateway; the classification
+// into a GestureResult is unchanged either way, because the gateway's tool calls
+// resolve to the identical concrete EditCommand applied to the identical engine.
+// With no gateway installed (the default), the adapter behaves exactly as before
+// — calling the engine directly — which keeps it fully Qt-free and unit-testable
+// without a live tool registry/executor pair; this is the path the existing
+// TimelineViewModel unit tests exercise. The Qt UI shell (task 11.2) always
+// constructs the adapter WITH a gateway bound to the application's shared
+// executor, so real GUI edits take the gateway path.
 
 #ifndef PALMIER_UI_TIMELINEVIEWMODEL_HPP
 #define PALMIER_UI_TIMELINEVIEWMODEL_HPP
@@ -53,12 +69,17 @@
 #include "core/FrameRate.hpp"
 #include "core/MediaAssetRef.hpp"
 #include "core/Project.hpp"
+#include "core/Result.hpp"
 #include "core/Subscription.hpp"
 #include "core/Track.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Uuid.hpp"
 
+namespace palmier::services { class Json; }  // services/Json.hpp — tool call payloads.
+
 namespace palmier::ui {
+
+class GuiToolGateway;  // ui/GuiToolGateway.hpp — optional gesture routing.
 
 /// How a gesture resolved, from the view's perspective. Derived from the
 /// CommandResult the engine returned together with the gesture kind, so the
@@ -131,7 +152,10 @@ public:
 
     /// Binds to `engine` (which must outlive this adapter) and takes an initial
     /// snapshot. Subscribes to the engine's ChangeSet stream to stay in sync.
-    explicit TimelineViewModel(TimelineEngine& engine);
+    /// When `gateway` is non-null (it must then outlive this adapter), every
+    /// mutating gesture is routed through it instead of calling
+    /// `TimelineEngine::apply` directly (task 11.4).
+    explicit TimelineViewModel(TimelineEngine& engine, GuiToolGateway* gateway = nullptr);
 
     ~TimelineViewModel();
 
@@ -219,8 +243,21 @@ public:
     GestureResult removeClip(ClipId id);
 
     /// Undo / redo the most recent edit. Empty history is a NoOp (Req 2.10).
+    /// Always goes directly through the engine's own undo/redo stack (there is
+    /// no `edit.undo`/`edit.redo` tool-call form these route through beyond
+    /// what services::OfflineIntentInterpreter's `edit.undo`/`edit.redo` tools
+    /// already expose for the agent path; the engine call is identical either
+    /// way and this keeps undo/redo working even with no gateway installed).
     GestureResult undo();
     GestureResult redo();
+
+    /// Install (or clear, with nullptr) the gateway mutating gestures route
+    /// through. `gateway`, when non-null, must outlive this adapter.
+    void setGateway(GuiToolGateway* gateway) noexcept { gateway_ = gateway; }
+
+    /// The currently installed gateway, or nullptr when gestures call the engine
+    /// directly.
+    [[nodiscard]] GuiToolGateway* gateway() const noexcept { return gateway_; }
 
     // --- Indication surface -----------------------------------------------
 
@@ -252,10 +289,17 @@ private:
     // and update the retained last-indication state.
     GestureResult classify(const CommandResult& result, GestureIndication onFailure);
 
+    // As above, for a gateway tool call's Result<Json> (task 11.4). Relies on
+    // the engine subscription having already refreshed cached_/lastChange_
+    // synchronously, since the gateway applies its command to the same engine.
+    GestureResult classifyToolResult(const Result<services::Json>& result,
+                                     GestureIndication onFailure);
+
     // Called for every ChangeSet the engine emits: refresh cache, forward.
     void onChange(const ChangeSet& change);
 
     TimelineEngine&                          engine_;
+    GuiToolGateway*                          gateway_ = nullptr;
     Project                                  cached_;
     Subscription                             subscription_;
     std::optional<ChangeSet>                 lastChange_;

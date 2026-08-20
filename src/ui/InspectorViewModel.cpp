@@ -20,6 +20,8 @@
 #include "core/Project.hpp"
 #include "core/Track.hpp"
 #include "core/TimelineEngine.hpp"
+#include "services/Json.hpp"
+#include "ui/GuiToolGateway.hpp"
 
 namespace palmier {
 
@@ -45,6 +47,17 @@ std::optional<MutableClipLocation> locateClip(Project& project, const ClipId& cl
 
 std::string idLabel(const Uuid& id) {
     return id.isNil() ? std::string{"<nil>"} : id.toString();
+}
+
+// Translate a gateway tool call's Result<Json> into the CommandResult shape
+// InspectorViewModel's mutation methods have always returned, so the caller
+// (and the existing tests) see the identical outcome whether the mutation went
+// through the gateway or straight through TimelineEngine::apply.
+CommandResult toCommandResult(const Result<services::Json>& result) {
+    if (result.isOk()) {
+        return CommandResult::applied();
+    }
+    return CommandResult::failed(result.error());
 }
 
 } // namespace
@@ -156,7 +169,8 @@ Result<void> SetEffectParameterCommand::revert(Project& project) {
 // InspectorViewModel
 // ===========================================================================
 
-InspectorViewModel::InspectorViewModel(TimelineEngine& engine) : engine_(engine) {
+InspectorViewModel::InspectorViewModel(TimelineEngine& engine, ui::GuiToolGateway* gateway)
+    : engine_(engine), gateway_(gateway) {
     // Refresh the panel when the project changes from any surface. The callback
     // only forwards the notification; the projection is pulled lazily on demand.
     subscription_ = engine_.observe([this](const ChangeSet&) { notifyChanged(); });
@@ -215,6 +229,9 @@ CommandResult InspectorViewModel::addEffect(Effect effect) {
     if (!selected_) {
         return CommandResult::failed(failedPrecondition("Inspector: no clip is selected"));
     }
+    if (gateway_ != nullptr) {
+        return toCommandResult(gateway_->addEffect(*selected_, effect));
+    }
     return engine_.apply(std::make_unique<AddEffectCommand>(*selected_, std::move(effect)));
 }
 
@@ -260,6 +277,11 @@ CommandResult InspectorViewModel::trimStart(Duration newSourceIn, FrameRate fps,
     if (!selected_) {
         return CommandResult::failed(failedPrecondition("Inspector: no clip is selected"));
     }
+    if (gateway_ != nullptr) {
+        return toCommandResult(
+            gateway_->trimClip(*selected_, TrimClipCommand::Edge::Start, newSourceIn,
+                               sourceDuration));
+    }
     return engine_.apply(std::make_unique<TrimClipCommand>(
         *selected_, TrimClipCommand::Edge::Start, newSourceIn, fps, sourceDuration));
 }
@@ -268,6 +290,11 @@ CommandResult InspectorViewModel::trimEnd(Duration newSourceOut, FrameRate fps,
                                           Duration sourceDuration) {
     if (!selected_) {
         return CommandResult::failed(failedPrecondition("Inspector: no clip is selected"));
+    }
+    if (gateway_ != nullptr) {
+        return toCommandResult(
+            gateway_->trimClip(*selected_, TrimClipCommand::Edge::End, newSourceOut,
+                               sourceDuration));
     }
     return engine_.apply(std::make_unique<TrimClipCommand>(
         *selected_, TrimClipCommand::Edge::End, newSourceOut, fps, sourceDuration));

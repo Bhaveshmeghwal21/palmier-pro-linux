@@ -99,6 +99,7 @@ public:
     int                      calls = 0;
     TimelinePlacementRequest lastRequest;
     std::function<Result<GeneratedMediaPlacement>(const TimelinePlacementRequest&)> onPlace;
+    bool                     knownTrack = true;
 
     Result<GeneratedMediaPlacement> place(const TimelinePlacementRequest& r) override {
         ++calls;
@@ -107,6 +108,8 @@ public:
         return GeneratedMediaPlacement{r.asset, Uuid::generateV4(),
                                        Duration::zero()};
     }
+
+    bool trackExists(const Uuid&) const override { return knownTrack; }
 };
 
 // Scriptable auth backend for exercising the real AuthServiceGenerationGate.
@@ -448,6 +451,36 @@ TEST(GenerativeMediaCoordinatorTest, PlacementOnUnknownTrackRejected) {
     ASSERT_TRUE(result.isError());
     EXPECT_EQ(result.error().code(), ErrorCode::NotFound);
     EXPECT_EQ(fx.engine->snapshot().tracks[0].clips.size(), 0u);
+}
+
+// Requirement 12.9: a syntactically valid but unknown track must be refused
+// BEFORE any generation runs — not merely before the clip lands on the
+// timeline. This is the gap task 10.6 documented and left open: generation used
+// to run (and the asset used to reach the media library) before
+// TimelineEnginePlacer::place ever looked the track up.
+TEST(GenerativeMediaCoordinatorTest, UnknownTrackRejectedBeforeGeneratingOrTouchingLibrary) {
+    MockGate gate;
+    gate.onAuthorize = [](const GenerationRequest&) {
+        return GenerationAuthorization{"bearer"};
+    };
+    MockRunner runner;
+    runner.onGenerate = [](const GenerationRequest&, std::string_view) { return videoAsset(); };
+    MediaManager library;
+    RecordingPlacement placement;
+    placement.knownTrack = false;
+    GenerativeMediaCoordinator coordinator(gate, runner, library, placement);
+
+    Result<GeneratedMediaPlacement> result =
+        coordinator.generateAndPlace(videoRequest(), placementAt(Uuid::generateV4(), 0));
+
+    ASSERT_TRUE(result.isError());
+    EXPECT_EQ(result.error().code(), ErrorCode::NotFound);
+    // Nothing downstream ran: no entitlement check, no generation, no library
+    // add, and place() itself was never called.
+    EXPECT_EQ(gate.calls, 0);
+    EXPECT_EQ(runner.calls, 0);
+    EXPECT_EQ(placement.calls, 0);
+    EXPECT_EQ(library.assetCount(), 0u);
 }
 
 TEST(GenerativeMediaCoordinatorTest, GenerationFailureLeavesLibraryAndTimelineUnchanged) {

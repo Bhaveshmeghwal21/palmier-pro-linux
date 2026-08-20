@@ -6,6 +6,86 @@
 # Only built when PALMIER_BUILD_UI is ON. Concrete sources are added by later
 # tasks (19.x).
 
+# ---------------------------------------------------------------------------
+# palmier_ui_preview_vm — the Qt-free preview/player playback engine
+# (task 19.3; extended by task 7.5 of end-to-end-editor-integration).
+#
+# PreviewController owns the playhead clock and the whole playback transport
+# (play/pause/stop/seek-with-clamp, the end-of-timeline halt, drop accounting, the
+# playhead-indicator cadence, the decode-failure pause and the runtime fallback to
+# software compositing) and drives gpu::Compositor at the playhead. It has NO Qt
+# dependency, so it links only the domain core and the GPU layer.
+#
+# Defined ABOVE the PALMIER_BUILD_UI guard below — and therefore built in BOTH
+# trees — because the composition root (Palmier::app_composition, src/app) owns
+# the single instance of it as the Requirement 1.1 Playback_Engine, and the
+# composition root is Qt-free and is built and tested with the UI off. Everything
+# in this file after the guard needs Qt and stays behind it. The thin Qt surface
+# (palmier_ui_preview_view, at the end of this file) owns one of these.
+# ---------------------------------------------------------------------------
+add_library(palmier_ui_preview_vm STATIC
+    PreviewController.cpp)
+add_library(Palmier::ui_preview_vm ALIAS palmier_ui_preview_vm)
+
+target_include_directories(palmier_ui_preview_vm PUBLIC
+    "${PROJECT_SOURCE_DIR}/src")
+
+target_compile_features(palmier_ui_preview_vm PUBLIC cxx_std_20)
+
+target_link_libraries(palmier_ui_preview_vm PUBLIC
+    Palmier::core
+    Palmier::gpu)
+
+# ---------------------------------------------------------------------------
+# palmier_ui_gateway — the Qt-free GUI-to-tool-surface gateway (task 11.1;
+# Requirements 1.7, 9.4, 11.5).
+#
+# GuiToolGateway routes every GUI mutating gesture through
+# services::McpToolExecutor::executeTool (tagged InvocationSource::Gui) — the
+# SAME execution path the MCP endpoint and the in-app agent use. It carries no
+# Qt dependency, so it is unit-testable without a Qt runtime and is defined
+# ABOVE the PALMIER_BUILD_UI guard (like palmier_ui_preview_vm above) so both
+# build trees compile and test it; the Qt panels below link it once
+# PALMIER_BUILD_UI is ON.
+# ---------------------------------------------------------------------------
+add_library(palmier_ui_gateway STATIC
+    GuiToolGateway.cpp)
+add_library(Palmier::ui_gateway ALIAS palmier_ui_gateway)
+
+target_include_directories(palmier_ui_gateway PUBLIC
+    "${PROJECT_SOURCE_DIR}/src")
+
+target_compile_features(palmier_ui_gateway PUBLIC cxx_std_20)
+
+target_link_libraries(palmier_ui_gateway PUBLIC
+    Palmier::core
+    Palmier::services)
+
+# ---------------------------------------------------------------------------
+# palmier_ui_project_file_actions — the Qt-free File-menu action orchestration
+# (task 11.5; Requirements 4.1, 4.2, 4.3, 4.5, 4.9, 4.10).
+#
+# ProjectFileActions drives the New/Open/Save/Save As gestures and the
+# unsaved-changes PendingIntent prompt against a GuiToolGateway + ProjectSession.
+# Every real QFileDialog/QMessageBox call is behind the injected UiPrompts seam
+# (MainWindow supplies the real one), so this class carries no Qt dependency and
+# is unit-testable without a Qt runtime — defined above the PALMIER_BUILD_UI
+# guard for the same reason as palmier_ui_gateway above.
+# ---------------------------------------------------------------------------
+add_library(palmier_ui_project_file_actions STATIC
+    ProjectFileActions.cpp)
+add_library(Palmier::ui_project_file_actions ALIAS palmier_ui_project_file_actions)
+
+target_include_directories(palmier_ui_project_file_actions PUBLIC
+    "${PROJECT_SOURCE_DIR}/src")
+
+target_compile_features(palmier_ui_project_file_actions PUBLIC cxx_std_20)
+
+target_link_libraries(palmier_ui_project_file_actions PUBLIC
+    Palmier::core
+    Palmier::services
+    Palmier::ui_gateway)
+
 if(NOT PALMIER_BUILD_UI)
     return()
 endif()
@@ -40,7 +120,9 @@ target_link_libraries(palmier_ui INTERFACE
 # ---------------------------------------------------------------------------
 if(TARGET Qt6::Widgets)
     add_library(palmier_ui_shell STATIC
-        MainWindow.cpp)
+        MainWindow.cpp
+        TimelinePanel.cpp
+        ExportDialog.cpp)
     add_library(Palmier::ui_shell ALIAS palmier_ui_shell)
 
     set_target_properties(palmier_ui_shell PROPERTIES AUTOMOC ON)
@@ -52,8 +134,27 @@ if(TARGET Qt6::Widgets)
 
     target_compile_definitions(palmier_ui_shell PUBLIC PALMIER_HAVE_QT=1)
 
+    # NOTE: MainWindow.hpp/.cpp reference app::ApplicationComposition (by
+    # reference, forward-declared in the header), but this target deliberately
+    # does NOT link Palmier::app_composition here: src/app (which defines that
+    # target) is added AFTER src/ui in the top-level CMakeLists.txt, and
+    # target_link_libraries cannot name a target that does not exist yet. The
+    # link is completed from the OTHER side instead: src/app/CMakeLists.txt adds
+    # `target_link_libraries(palmier_ui_shell PUBLIC Palmier::app_composition)`
+    # once app_composition exists, which is equally valid CMake (a target's
+    # link interface may be extended after its own add_library() call) and
+    # keeps both subdirectories buildable in the existing top-level order.
     target_link_libraries(palmier_ui_shell PUBLIC
         Palmier::core
+        Palmier::services
+        Palmier::gpu
+        Palmier::media
+        Palmier::ui_gateway
+        Palmier::ui_project_file_actions
+        Palmier::ui_preview_vm
+        Palmier::ui_inspector_vm
+        Palmier::ui_media_browser_vm
+        Palmier::ui_agent_chat_vm
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets)
@@ -82,7 +183,8 @@ target_compile_features(palmier_ui_media_browser_vm PUBLIC cxx_std_20)
 
 target_link_libraries(palmier_ui_media_browser_vm PUBLIC
     Palmier::core
-    Palmier::services)
+    Palmier::services
+    Palmier::ui_gateway)
 
 # ---------------------------------------------------------------------------
 # palmier_ui_media_browser — the compiled Qt 6 Media Browser panel (task 19.5).
@@ -138,7 +240,8 @@ target_include_directories(palmier_ui_inspector_vm PUBLIC
 target_compile_features(palmier_ui_inspector_vm PUBLIC cxx_std_20)
 
 target_link_libraries(palmier_ui_inspector_vm PUBLIC
-    Palmier::core)
+    Palmier::core
+    Palmier::ui_gateway)
 
 # ---------------------------------------------------------------------------
 # palmier_ui_inspector_panel — the thin Qt 6 widget over the view model
@@ -195,7 +298,8 @@ target_include_directories(palmier_ui_timeline_vm PUBLIC
 target_compile_features(palmier_ui_timeline_vm PUBLIC cxx_std_20)
 
 target_link_libraries(palmier_ui_timeline_vm PUBLIC
-    Palmier::core)
+    Palmier::core
+    Palmier::ui_gateway)
 
 # The Qt QAbstractItemModel binding is compiled into the editor shell only when
 # Qt 6 is present; it wraps the always-built Qt-free adapter above.
@@ -203,7 +307,8 @@ if(TARGET palmier_ui_shell)
     target_sources(palmier_ui_shell PRIVATE
         TimelineModel.cpp)
     target_link_libraries(palmier_ui_shell PUBLIC
-        Palmier::ui_timeline_vm)
+        Palmier::ui_timeline_vm
+        Palmier::ui_gateway)
 endif()
 
 
@@ -261,29 +366,9 @@ if(TARGET Qt6::Widgets)
 endif()
 
 
-# ---------------------------------------------------------------------------
-# palmier_ui_preview_vm — the Qt-free preview/player playback engine (task 19.3).
-#
-# PreviewController owns the playhead clock, drives the Compositor to render the
-# composited preview at the playhead at a minimum of 24 fps (Requirement 2.8),
-# and selects the GPU-active compositing path with a CPU/software fallback
-# (Requirement 10.7). It has NO Qt dependency, so it links only the domain core
-# and the GPU layer and is fully unit-testable headlessly (see the
-# palmier_ui_preview_controller_tests target in tests/CMakeLists.txt). The thin
-# Qt surface (palmier_ui_preview_view below) owns one of these.
-# ---------------------------------------------------------------------------
-add_library(palmier_ui_preview_vm STATIC
-    PreviewController.cpp)
-add_library(Palmier::ui_preview_vm ALIAS palmier_ui_preview_vm)
-
-target_include_directories(palmier_ui_preview_vm PUBLIC
-    "${PROJECT_SOURCE_DIR}/src")
-
-target_compile_features(palmier_ui_preview_vm PUBLIC cxx_std_20)
-
-target_link_libraries(palmier_ui_preview_vm PUBLIC
-    Palmier::core
-    Palmier::gpu)
+# (palmier_ui_preview_vm — the Qt-free preview/player playback engine, task 19.3 —
+# is defined at the TOP of this file, above the PALMIER_BUILD_UI guard, because the
+# Qt-free composition root owns the single instance of it in both build trees.)
 
 # ---------------------------------------------------------------------------
 # palmier_ui_preview_view — the thin Qt 6 preview surface (task 19.3).
@@ -315,4 +400,18 @@ if(TARGET Qt6::Widgets)
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets)
+endif()
+
+# palmier_ui_shell (MainWindow, TimelinePanel, ExportDialog — defined earlier in
+# this file) uses PreviewView, MediaBrowserPanel, InspectorPanel and
+# AgentChatPanel directly (task 11.2 docks each of the five panels), so its link
+# interface is extended here, after each of those Qt panel targets has been
+# defined, for the same forward-reference reason app_composition is linked from
+# src/app/CMakeLists.txt instead of from palmier_ui_shell's own definition above.
+if(TARGET palmier_ui_shell)
+    target_link_libraries(palmier_ui_shell PUBLIC
+        Palmier::ui_preview_view
+        Palmier::ui_media_browser
+        Palmier::ui_inspector_panel
+        Palmier::ui_agent_chat_panel)
 endif()

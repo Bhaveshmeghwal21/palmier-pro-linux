@@ -21,6 +21,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -171,6 +173,102 @@ TEST(SoftwareEffect, ColorGradeLiftAddsOffset) {
     EXPECT_NEAR(px[0], 36, 1); // 10 + 25.5
 }
 
+// --- InvertColors (upstream PR 408; Requirements 14.4, 14.5) ----------------
+
+TEST(SoftwareEffect, InvertColorsSubtractsEachRgbChannelFrom255) {
+    auto px = solid(2, 2, 0, 128, 255, 200);
+    applyEffectSoftware(makeEffect(EffectType::InvertColors, {}), px.data(), 2, 2);
+    for (std::size_t i = 0; i < px.size(); i += 4) {
+        EXPECT_EQ(px[i + 0], 255); // 255 - 0
+        EXPECT_EQ(px[i + 1], 127); // 255 - 128
+        EXPECT_EQ(px[i + 2], 0);   // 255 - 255
+        EXPECT_EQ(px[i + 3], 200); // alpha unchanged
+    }
+}
+
+TEST(SoftwareEffect, InvertColorsHoldsForEveryByteValueAndLeavesAlphaAlone) {
+    // One pixel per possible channel value; alpha carries a distinct value so a
+    // stray inversion of alpha would be caught.
+    std::vector<std::uint8_t> px(256u * 4u);
+    for (std::size_t v = 0; v < 256; ++v) {
+        px[v * 4 + 0] = static_cast<std::uint8_t>(v);
+        px[v * 4 + 1] = static_cast<std::uint8_t>(255 - v);
+        px[v * 4 + 2] = static_cast<std::uint8_t>((v * 7) % 256);
+        px[v * 4 + 3] = static_cast<std::uint8_t>((v * 3) % 256);
+    }
+    const auto before = px;
+    applyEffectSoftware(makeEffect(EffectType::InvertColors, {}), px.data(), 256, 1);
+    for (std::size_t v = 0; v < 256; ++v) {
+        for (int c = 0; c < 3; ++c) {
+            EXPECT_EQ(px[v * 4 + c], 255 - before[v * 4 + c]) << "value " << v << " channel " << c;
+        }
+        EXPECT_EQ(px[v * 4 + 3], before[v * 4 + 3]); // alpha unchanged
+    }
+}
+
+TEST(SoftwareEffect, InvertColorsAppliedTwiceIsTheIdentity) {
+    auto px = solid(3, 2, 17, 200, 99, 42);
+    px[4] = 1;  // a couple of odd values so the round trip is not trivially symmetric
+    px[8] = 254;
+    const auto before = px;
+    const Effect invert = makeEffect(EffectType::InvertColors, {});
+    applyEffectSoftware(invert, px.data(), 3, 2);
+    applyEffectSoftware(invert, px.data(), 3, 2);
+    EXPECT_EQ(px, before);
+}
+
+TEST(SoftwareEffect, InvertColorsIgnoresStrayParameters) {
+    auto px = solid(1, 1, 10, 20, 30, 40);
+    applyEffectSoftware(makeEffect(EffectType::InvertColors, {{"amount", 0.5}}), px.data(), 1, 1);
+    EXPECT_EQ(px[0], 245);
+    EXPECT_EQ(px[1], 235);
+    EXPECT_EQ(px[2], 225);
+    EXPECT_EQ(px[3], 40);
+}
+
+// The invert-colors kernel must produce the same bytes as the software
+// reference so playback (software or GPU) and export agree within 1 of 255
+// (Requirements 14.5). The kernel's semantics are computed here the way its
+// GLSL does — in normalized [0,1] space with a round-to-nearest rgba8 store —
+// independently of the host's integer arithmetic.
+TEST(SoftwareEffect, InvertColorsKernelSemanticsMatchTheSoftwareReference) {
+    const auto storeUnorm = [](double n) -> int {
+        const double s = std::clamp(n, 0.0, 1.0) * 255.0;
+        return static_cast<int>(std::lround(s));
+    };
+
+    std::vector<std::uint8_t> cpu(256u * 4u);
+    for (std::size_t v = 0; v < 256; ++v) {
+        cpu[v * 4 + 0] = static_cast<std::uint8_t>(v);
+        cpu[v * 4 + 1] = static_cast<std::uint8_t>((v * 5) % 256);
+        cpu[v * 4 + 2] = static_cast<std::uint8_t>(255 - v);
+        cpu[v * 4 + 3] = static_cast<std::uint8_t>((v * 11) % 256);
+    }
+    const auto src = cpu;
+    applyEffectSoftware(makeEffect(EffectType::InvertColors, {}), cpu.data(), 256, 1);
+
+    for (std::size_t v = 0; v < 256; ++v) {
+        for (int c = 0; c < 3; ++c) {
+            // GLSL: clamp(1.0 - value/255, 0, 1) stored back to rgba8.
+            const int kernel = storeUnorm(1.0 - static_cast<double>(src[v * 4 + c]) / 255.0);
+            EXPECT_LE(std::abs(kernel - static_cast<int>(cpu[v * 4 + c])), 1)
+                << "value " << static_cast<int>(src[v * 4 + c]) << " channel " << c;
+        }
+        const int kernelAlpha = static_cast<int>(src[v * 4 + 3]); // kernel copies alpha
+        EXPECT_EQ(kernelAlpha, static_cast<int>(cpu[v * 4 + 3]));
+    }
+}
+
+TEST(EffectKernels, InvertColorsKernelIsMappedAndCarriesTheInversionMath) {
+    EXPECT_EQ(kernelForEffectType(EffectType::InvertColors), EffectKernel::InvertColors);
+    EXPECT_EQ(effectTypeForKernel(EffectKernel::InvertColors), EffectType::InvertColors);
+    EXPECT_EQ(effectKernelName(EffectKernel::InvertColors), "invert_colors");
+
+    const std::string src{effectKernelSource(EffectKernel::InvertColors)};
+    EXPECT_NE(src.find("vec3(1.0) - c.rgb"), std::string::npos); // 255 - value
+    EXPECT_NE(src.find("vec4(rgb, c.a)"), std::string::npos);    // alpha unchanged
+}
+
 TEST(SoftwareEffect, CustomEffectIsPassThrough) {
     auto px = solid(2, 2, 11, 22, 33, 44);
     const auto before = px;
@@ -226,10 +324,10 @@ TEST(EffectKernels, KernelNamesAreDistinct) {
 }
 
 TEST(EffectKernels, KernelAndEffectTypeMappingsRoundTrip) {
-    // The five per-clip effect kinds map both ways.
+    // The six per-clip effect kinds map both ways.
     const EffectType types[] = {EffectType::Brightness, EffectType::Contrast,
                                 EffectType::Blur, EffectType::CropTransform,
-                                EffectType::ColorGrade};
+                                EffectType::ColorGrade, EffectType::InvertColors};
     for (const EffectType type : types) {
         const auto kernel = kernelForEffectType(type);
         ASSERT_TRUE(kernel.has_value());
@@ -267,7 +365,7 @@ TEST(EffectKernels, RegistryBuildsAndRegistersEffectTypeKernels) {
 
     ASSERT_TRUE(built.isOk()) << built.error().toString();
     const EffectKernelRegistry& registry = built.value();
-    EXPECT_EQ(registry.size(), allEffectKernels().size()); // all 6 compiled
+    EXPECT_EQ(registry.size(), allEffectKernels().size()); // all 7 compiled
 
     // Every kernel module is valid SPIR-V, including the transition kernel.
     for (const EffectKernel kernel : allEffectKernels()) {
@@ -281,14 +379,15 @@ TEST(EffectKernels, RegistryBuildsAndRegistersEffectTypeKernels) {
     Compositor comp(ctx);
     const std::size_t registered = registry.registerWith(comp);
 
-    // The five EffectType kernels register; Transition does not (no EffectType).
-    EXPECT_EQ(registered, 5u);
-    EXPECT_EQ(comp.registeredEffectCount(), 5u);
+    // The six EffectType kernels register; Transition does not (no EffectType).
+    EXPECT_EQ(registered, 6u);
+    EXPECT_EQ(comp.registeredEffectCount(), 6u);
     EXPECT_TRUE(comp.isEffectRegistered(EffectType::Brightness));
     EXPECT_TRUE(comp.isEffectRegistered(EffectType::Blur));
     EXPECT_TRUE(comp.isEffectRegistered(EffectType::CropTransform));
     EXPECT_TRUE(comp.isEffectRegistered(EffectType::ColorGrade));
     EXPECT_TRUE(comp.isEffectRegistered(EffectType::Contrast));
+    EXPECT_TRUE(comp.isEffectRegistered(EffectType::InvertColors));
 }
 
 } // namespace

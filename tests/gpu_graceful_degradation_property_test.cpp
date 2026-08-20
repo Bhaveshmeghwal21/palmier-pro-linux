@@ -280,6 +280,8 @@ struct GenFrame {
                          {"gainB", genScaled(0, 2000)},
                          {"lift", genScaled(-500, 500)},
                          {"saturation", genScaled(0, 2000)}});
+        case EffectType::InvertColors:
+            return make({}); // parameterless (not drawn by the generator above)
         case EffectType::Custom:
             return make({{"anything", genScaled(-1000, 1000)}});
     }

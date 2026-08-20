@@ -43,6 +43,7 @@
 #include <rapidcheck/gtest.h>
 
 #include "core/Clip.hpp"
+#include "core/ClipGroup.hpp"
 #include "core/ColorSpace.hpp"
 #include "core/Duration.hpp"
 #include "core/Effect.hpp"
@@ -160,6 +161,8 @@ Track drawTrack(const std::vector<MediaAssetRef>& assets) {
     Track track;
     track.id = drawUuid();
     track.kind = *rc::gen::element<TrackKind>(TrackKind::Video, TrackKind::Audio);
+    // Schema 1.1: an arbitrary label (including the empty default) must survive.
+    track.name = *rc::gen::arbitrary<std::string>();
     track.muted = *rc::gen::arbitrary<bool>();
     track.locked = *rc::gen::arbitrary<bool>();
     const int clipCount = *rc::gen::inRange<int>(0, 6);
@@ -202,6 +205,20 @@ Project drawProject() {
     const int trackCount = *rc::gen::inRange<int>(0, 5);
     for (int i = 0; i < trackCount; ++i) {
         p.tracks.push_back(drawTrack(p.assets));
+    }
+
+    // Schema 1.1 reserves clipGroups. Nothing interprets it, so any set of group
+    // identities and clip identities is a legal document; the store must return it
+    // exactly as written.
+    const int groupCount = *rc::gen::inRange<int>(0, 4);
+    for (int g = 0; g < groupCount; ++g) {
+        ClipGroup group;
+        group.id = drawUuid();
+        const int memberCount = *rc::gen::inRange<int>(0, 5);
+        for (int m = 0; m < memberCount; ++m) {
+            group.clipIds.push_back(drawUuid());
+        }
+        p.clipGroups.push_back(group);
     }
     return p;
 }
@@ -251,10 +268,17 @@ void assertSameProject(const Project& a, const Project& b) {
         RC_ASSERT(a.assets[i].sourcePath == b.assets[i].sourcePath);
     }
 
+    RC_ASSERT(a.clipGroups.size() == b.clipGroups.size());
+    for (std::size_t g = 0; g < a.clipGroups.size(); ++g) {
+        RC_ASSERT(a.clipGroups[g].id == b.clipGroups[g].id);
+        RC_ASSERT(a.clipGroups[g].clipIds == b.clipGroups[g].clipIds);
+    }
+
     RC_ASSERT(a.tracks.size() == b.tracks.size());
     for (std::size_t t = 0; t < a.tracks.size(); ++t) {
         RC_ASSERT(a.tracks[t].id == b.tracks[t].id);
         RC_ASSERT(a.tracks[t].kind == b.tracks[t].kind);
+        RC_ASSERT(a.tracks[t].name == b.tracks[t].name);
         RC_ASSERT(a.tracks[t].muted == b.tracks[t].muted);
         RC_ASSERT(a.tracks[t].locked == b.tracks[t].locked);
         RC_ASSERT(a.tracks[t].clips.size() == b.tracks[t].clips.size());

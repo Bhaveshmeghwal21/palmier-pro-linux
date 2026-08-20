@@ -138,6 +138,13 @@ public:
     virtual ~ITimelinePlacement() = default;
     [[nodiscard]] virtual Result<GeneratedMediaPlacement> place(
         const TimelinePlacementRequest& request) = 0;
+
+    /// Whether `trackId` names a track in the CURRENT project (Requirement 12.9).
+    /// Deliberately independent of `place()`, which also needs the generated
+    /// asset: this lets the coordinator refuse an unknown track before running a
+    /// generation, rather than discovering the same absence only once `place()`
+    /// is finally reachable.
+    [[nodiscard]] virtual bool trackExists(const Uuid& trackId) const = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -161,8 +168,10 @@ public:
     ///
     /// Failure ordering (nothing downstream runs once a step rejects):
     ///   * empty / >2000-char prompt          -> InvalidArgument (Req 6.7);
-    ///   * no active subscription and no BYOK  -> Unauthenticated (Req 6.5/9.7);
     ///   * sourceOut <= sourceIn               -> InvalidArgument;
+    ///   * unknown target track                -> NotFound (Req 12.9), checked
+    ///                                            before generation ever runs;
+    ///   * no active subscription and no BYOK  -> Unauthenticated (Req 6.5/9.7);
     ///   * generation fails / times out        -> forwarded error (Req 6.6/6.8);
     ///   * placement rejected (bounds/overlap) -> forwarded error, timeline
     ///                                            unchanged (Req 6.2).
@@ -240,6 +249,8 @@ public:
 
     [[nodiscard]] Result<GeneratedMediaPlacement> place(
         const TimelinePlacementRequest& request) override;
+
+    [[nodiscard]] bool trackExists(const Uuid& trackId) const override;
 
 private:
     TimelineEngine& engine_;

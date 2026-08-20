@@ -30,6 +30,7 @@
 #include <QVariant>
 
 #include "core/TimelineEngine.hpp"
+#include "ui/GuiToolGateway.hpp"
 #include "ui/TimelineViewModel.hpp"
 
 namespace palmier::ui {
@@ -71,8 +72,11 @@ public:
         ClipEffectCountRole,
     };
 
-    /// `engine` must outlive the model.
-    explicit TimelineModel(TimelineEngine& engine, QObject* parent = nullptr);
+    /// `engine` must outlive the model. When `gateway` is non-null (it must
+    /// then outlive the model too), every gesture invoked from QML routes
+    /// through it instead of calling TimelineEngine::apply directly (task 11.4).
+    explicit TimelineModel(TimelineEngine& engine, QObject* parent = nullptr,
+                           GuiToolGateway* gateway = nullptr);
     ~TimelineModel() override;
 
     // --- QAbstractItemModel ------------------------------------------------
