@@ -381,7 +381,12 @@ configured generative backend, and an unmet account/credential precondition is r
 | `prompt` | string | **yes** | 1–2000 characters |
 | `model` | string | **yes** | a model id the configured backend serves |
 | `trackId` | string *uuid* | **yes** | the track to place the generated clip on |
-| `mediaType` | string | no | `video`, `image`; defaults to `video` |
+| `mediaType` | string | no | `video`, `image`, `audio`; defaults to `video` |
+| `mode` | string | no | `generate`, `upscale`; defaults to `generate` |
+| `sourceAssetId` | string *uuid* | no | the clip to upscale (`mode: "upscale"`), or the clip audio is generated FROM rather than from `prompt` alone |
+| `targetWidth` | integer | no | ≥ 1, requested output width in pixels for `mode: "upscale"` |
+| `targetHeight` | integer | no | ≥ 1, requested output height in pixels for `mode: "upscale"` |
+| `requestedDurationTicks` | integer | no | ≥ 1, nanoseconds, requested audio duration for `mediaType: "audio"` |
 | `params` | object | no | model-specific **string** parameters; non-string members are ignored |
 | `framePosition` | integer | no | ≥ 0, frames from timeline start; defaults to 0 |
 | `sourceInTicks` | integer | no | ≥ 0, nanoseconds; defaults to 0 |
@@ -389,9 +394,22 @@ configured generative backend, and an unmet account/credential precondition is r
 
 Whether `model` is one the backend serves is an open, backend-defined set, and
 `sourceOutTicks > sourceInTicks` is a cross-field relation; neither is expressible in the schema, so
-both are enforced downstream.
+both are enforced downstream. The model catalog (`generation.list_models`) is what makes `model`,
+`mode: "upscale"` and an audio duration range checkable at all: naming a model absent from the
+catalog, a mode a named model does not serve, or an audio duration outside a named model's declared
+range is refused before submission, naming the offending value.
 
 Result: `assetId` (string), `sourcePath` (string), `clipId` (string), `timelineStartTicks`
+(integer).
+
+## `generation.list_models`
+
+List every model in the generation model catalog, grouped by provider (usable-editor Phase 2 task 7;
+PR 406). No arguments: the catalog is fixed, in-tree data.
+
+Result: `providers` (object) — each member key is a provider name and its value is an array of that
+provider's models, each carrying `id` (string), `mediaType` (string), `servesUpscale` (boolean) and,
+only for a model that serves audio generation, `minDurationTicks` (integer) and `maxDurationTicks`
 (integer).
 
 ## `timeline.export`

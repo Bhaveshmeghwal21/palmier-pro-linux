@@ -398,9 +398,30 @@ Project makeSeedProject(int videoTracks) {
         GenerationRequest request;
         request.model = input.stringOr("model");
         request.prompt = input.stringOr("prompt");
-        request.mediaType = (input.stringOr("mediaType", "video") == "image")
-                                ? GenerationMediaType::Image
-                                : GenerationMediaType::Video;
+        const std::string mediaTypeText = input.stringOr("mediaType", "video");
+        if (mediaTypeText == "image") {
+            request.mediaType = GenerationMediaType::Image;
+        } else if (mediaTypeText == "audio") {
+            request.mediaType = GenerationMediaType::Audio;
+        } else {
+            request.mediaType = GenerationMediaType::Video;
+        }
+        request.mode = services::generationModeFromStringView(input.stringOr("mode", "generate"))
+                          .value_or(services::GenerationMode::Generate);
+        if (const std::optional<Uuid> sourceAssetId =
+                Uuid::parse(input.stringOr("sourceAssetId"));
+            sourceAssetId.has_value()) {
+            request.sourceAssetId = *sourceAssetId;
+        }
+        const std::int64_t targetWidth = input.intOr("targetWidth", 0);
+        const std::int64_t targetHeight = input.intOr("targetHeight", 0);
+        if (targetWidth > 0 && targetHeight > 0) {
+            request.targetResolution =
+                Resolution{static_cast<std::uint32_t>(targetWidth),
+                          static_cast<std::uint32_t>(targetHeight)};
+        }
+        request.requestedDuration =
+            Duration::fromNanoseconds(input.intOr("requestedDurationTicks", 0));
 
         GenerationPlacement placement;
         const std::optional<Uuid> trackId = Uuid::parse(input.stringOr("trackId"));
@@ -460,6 +481,21 @@ public:
             const Result<void> saved =
                 auth_.saveByokCredentials(ByokCredential{model, kStoredProviderKey});
             EXPECT_TRUE(saved.isOk());
+        }
+
+        // PR 406/396/395: a real composition authorizes whatever models the
+        // installed catalog declares, not merely the two fixture models above
+        // — the gate derives the provider from `request.model`, so an upscale
+        // or audio test naming a catalog model needs it authorized here, the
+        // same way kVideoModel/kImageModel are, or every such request refuses
+        // at the entitlement gate before the catalog check it means to exercise
+        // is ever reached.
+        if (catalog != nullptr) {
+            for (const CatalogModel& model : catalog->listModels()) {
+                const Result<void> saved = auth_.saveByokCredentials(
+                    ByokCredential{model.id, kStoredProviderKey});
+                EXPECT_TRUE(saved.isOk());
+            }
         }
 
         // Task 10.5's registry selects the backend; the injected transport is the
@@ -641,7 +677,13 @@ TEST(GenerativeLifecycleNetworkSeam, TheGenerateToolIsTheOneRoutedEntryPoint) {
 
     const services::ArgSpec* mediaType = tool->schema.find("mediaType");
     ASSERT_NE(mediaType, nullptr);
-    EXPECT_EQ(mediaType->enumValues, std::vector<std::string>({"video", "image"}));
+    // PR 395 widened the closed set to admit "audio"; "video"/"image" remain
+    // Requirement 12.9's original two, which is what Property 66 still relies on
+    // ("names a media kind other than video or image" is refused before this
+    // widening AND after it, since the coordinator's own catalog-driven check
+    // still refuses an audio request with no catalog able to authorize it —
+    // see the no-catalog branch of checkAgainstCatalog).
+    EXPECT_EQ(mediaType->enumValues, std::vector<std::string>({"video", "image", "audio"}));
     EXPECT_EQ(transport.sends, 0u);
 }
 
@@ -997,10 +1039,11 @@ TEST(GenerationModelCatalogTools, ListModelsToolReturnsTheCatalogGroupedByProvid
     // but through the actual generation.list_models tool a caller invokes, over a
     // hook that mirrors the composition root's makeListModelsHook exactly (the
     // registry itself has no default implementation for this tool, matching every
-    // other capability-specific hook in this rig).
+    // other capability-specific hook in this rig). A bare ProjectSession is enough
+    // here: every tool in this registry is session-guarded (guardedHookHandler
+    // refuses a null session before the hook itself ever runs), and this test
+    // needs no generative-coordinator wiring at all.
     const GenerationModelCatalog catalog;
-    ScriptedTransport transport;
-    GenerationRig rig(transport, 1, &catalog);
 
     ToolRegistryHooks hooks;
     hooks.listModels = [&catalog](const Json&) -> Result<Json> {
@@ -1018,7 +1061,8 @@ TEST(GenerationModelCatalogTools, ListModelsToolReturnsTheCatalogGroupedByProvid
         out.set("providers", std::move(providers));
         return out;
     };
-    ToolRegistry registryWithListModels = buildDefaultToolRegistry(nullptr, std::move(hooks));
+    ProjectSession session;
+    ToolRegistry registryWithListModels = buildDefaultToolRegistry(&session, std::move(hooks));
     const Tool* listModelsTool = registryWithListModels.find("generation.list_models");
     ASSERT_NE(listModelsTool, nullptr) << "generation.list_models is not published";
     ASSERT_TRUE(static_cast<bool>(listModelsTool->handler));

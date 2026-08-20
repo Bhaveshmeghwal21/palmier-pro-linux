@@ -58,6 +58,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -74,6 +75,7 @@
 #include "core/Resolution.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Uuid.hpp"
+#include "services/GenerationModelCatalog.hpp"
 #include "services/Json.hpp"
 #include "services/MediaImportService.hpp"
 #include "services/ProjectSession.hpp"
@@ -204,6 +206,34 @@ public:
             }
             return Result<services::ImportedAsset>(std::move(asset));
         };
+        // generation.list_models's real hook needs only the catalog (pure,
+        // in-tree data — no FFmpeg, no network), so it is wired for real here
+        // rather than stubbed, matching this fixture's own stated goal: observe
+        // the registry's OWN rendering of every result shape it owns.
+        hooks.listModels = [this](const services::Json&) -> Result<services::Json> {
+            std::map<std::string, services::Json> byProvider;
+            for (const services::CatalogModel& model : catalog_.listModels()) {
+                services::Json entry = services::Json::object();
+                entry.set("id", model.id);
+                entry.set("mediaType", std::string(services::toStringView(model.mediaType)));
+                entry.set("servesUpscale", model.servesUpscale);
+                if (model.audioDurationRange.has_value()) {
+                    const auto& [minDuration, maxDuration] = *model.audioDurationRange;
+                    entry.set("minDurationTicks",
+                             static_cast<std::int64_t>(minDuration.ticks()));
+                    entry.set("maxDurationTicks",
+                             static_cast<std::int64_t>(maxDuration.ticks()));
+                }
+                services::Json& list = byProvider[model.provider];
+                if (!list.isArray()) list = services::Json::array();
+                list.push_back(std::move(entry));
+            }
+            services::Json providers = services::Json::object();
+            for (auto& [provider, list] : byProvider) providers.set(provider, std::move(list));
+            services::Json out = services::Json::object();
+            out.set("providers", std::move(providers));
+            return out;
+        };
         registry_ = services::buildDefaultToolRegistry(session_, std::move(hooks));
     }
 
@@ -269,6 +299,7 @@ public:
     }
 
 private:
+    services::GenerationModelCatalog catalog_;
     services::ProjectSession session_;
     services::ToolRegistry   registry_;
     std::vector<ObservedResult> observed_;
@@ -302,6 +333,7 @@ private:
 
     const std::vector<Uuid> assets = observer.registerAssets(2);
     observer.run("media.list", object());
+    observer.run("generation.list_models", object());
 
     const services::Json videoTrack =
         observer.run("timeline.add_track", with("kind", services::Json(std::string{"video"})));

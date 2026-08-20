@@ -2829,6 +2829,7 @@ target_sources(palmier_docs_tests PRIVATE
     docs/documentation_consistency_test.cpp
     docs/suite_hygiene_property_test.cpp
     support/DocumentationChecker.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/GenerationModelCatalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"

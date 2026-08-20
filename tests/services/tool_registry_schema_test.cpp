@@ -194,11 +194,19 @@ std::vector<ToolExpectation> expectedSurface() {
          {{"prompt", "string", true},
           {"model", "string", true},
           {"mediaType", "string", false},
+          {"mode", "string", false},
+          {"sourceAssetId", "string", false},
+          {"targetWidth", "integer", false},
+          {"targetHeight", "integer", false},
+          {"requestedDurationTicks", "integer", false},
           {"params", "object", false},
           {"trackId", "string", true},
           {"framePosition", "integer", false},
           {"sourceInTicks", "integer", false},
           {"sourceOutTicks", "integer", false}}},
+        // usable-editor Phase 2 task 7 (PR 406) — the model catalog listing.
+        // Takes no argument: the catalog is fixed, in-tree data.
+        {"generation.list_models", {}},
         // Task 9.7 — `timeline.export` is now wired to services::ExportCoordinator,
         // and Requirement 7.2 lists what a caller may ask for: "an output path,
         // container format, video codec, resolution, frame rate and bit rate".
@@ -358,7 +366,7 @@ TEST(ToolRegistrySchema, IdentifierArgumentsPublishAndEnforceTheUuidFormat) {
         {"timeline.move_clip", "clipId"},      {"timeline.trim_clip", "clipId"},
         {"timeline.split_clip", "clipId"},     {"timeline.reorder_clips", "trackId"},
         {"timeline.add_effect", "clipId"},     {"timeline.add_transition", "clipId"},
-        {"generation.generate", "trackId"},
+        {"generation.generate", "trackId"},    {"generation.generate", "sourceAssetId"},
     };
 
     for (const Case& c : cases) {
@@ -407,7 +415,10 @@ TEST(ToolRegistrySchema, ClosedValueSetsArePublished) {
 
     const Json generate = registry.find("generation.generate")->inputSchema();
     EXPECT_EQ(enumValues(*generate.find("properties")->find("mediaType")),
-              (std::vector<std::string>{"video", "image"}));
+              (std::vector<std::string>{"video", "image", "audio"}));
+    // PR 396 — the upscale mode value set.
+    EXPECT_EQ(enumValues(*generate.find("properties")->find("mode")),
+              (std::vector<std::string>{"generate", "upscale"}));
 }
 
 TEST(ToolRegistrySchema, NumericAndLengthBoundsArePublished) {
