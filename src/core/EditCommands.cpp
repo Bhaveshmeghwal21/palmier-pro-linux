@@ -1119,4 +1119,46 @@ Result<void> SetEffectParameterCommand::revert(Project& project) {
     return ok();
 }
 
+// ===========================================================================
+// SetProjectSettingsCommand
+// ===========================================================================
+
+SetProjectSettingsCommand::SetProjectSettingsCommand(std::optional<FrameRate> fps,
+                                                     std::optional<Resolution> canvas,
+                                                     std::optional<ColorSpace> colorSpace)
+    : fps_(fps), canvas_(canvas), colorSpace_(colorSpace) {}
+
+Result<void> SetProjectSettingsCommand::apply(Project& project) {
+    // core has no dependency on services::, so the declared numeric ranges
+    // (Requirement 7.1's "same ranges project.create accepts") are the
+    // Tool_Surface's to enforce; this only rejects a value that is not even
+    // internally well-formed, matching every other command's own-invariant check.
+    if (fps_ && !fps_->isValid()) {
+        return err(invalidArgument("SetProjectSettingsCommand: fps is not a valid frame rate"));
+    }
+    if (canvas_ && !canvas_->isValid()) {
+        return err(invalidArgument("SetProjectSettingsCommand: canvas is not a valid resolution"));
+    }
+
+    priorFps_ = project.timelineFps;
+    priorCanvas_ = project.canvas;
+    priorColorSpace_ = project.colorSpace;
+    captured_ = true;
+
+    if (fps_) project.timelineFps = *fps_;
+    if (canvas_) project.canvas = *canvas_;
+    if (colorSpace_) project.colorSpace = *colorSpace_;
+    return ok();
+}
+
+Result<void> SetProjectSettingsCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition("SetProjectSettingsCommand: revert before a successful apply"));
+    }
+    project.timelineFps = priorFps_;
+    project.canvas = priorCanvas_;
+    project.colorSpace = priorColorSpace_;
+    return ok();
+}
+
 }  // namespace palmier

@@ -367,6 +367,11 @@ private:
     observer.run("timeline.read", object());
     observer.run("project.info", object());
 
+    // Mutable project settings (task 10; Requirement 7): a genuine change (24fps,
+    // distinct from the 30fps the project was created with above), so the tool
+    // applies an edit rather than reporting a no-op.
+    observer.run("project.set_settings", with("fps", services::Json(24.0)));
+
     services::Json mute = object();
     mute.set("trackId", trackId);
     mute.set("muted", true);

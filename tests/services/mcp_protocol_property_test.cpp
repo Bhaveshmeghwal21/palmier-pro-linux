@@ -130,6 +130,7 @@ constexpr std::string_view kProjectCreate = "project.create";
 constexpr std::string_view kProjectOpen   = "project.open";
 constexpr std::string_view kProjectSave   = "project.save";
 constexpr std::string_view kProjectInfo   = "project.info";
+constexpr std::string_view kSetProjectSettings = "project.set_settings";
 constexpr std::string_view kMediaImport   = "media.import";
 constexpr std::string_view kMediaList     = "media.list";
 constexpr std::string_view kAddTrack      = "timeline.add_track";
@@ -653,6 +654,15 @@ struct Invocation {
     }
     if (name == kProjectSave) {
         args.set("path", Json(scratch.file("saved").string()));
+        return Invocation{name, std::move(args)};
+    }
+    // Mutable project settings (task 10; Requirement 7): at least one field must
+    // be given, so the generic schemaValidArgs() fallback (which may supply none)
+    // would not be applicable here. A distinct fps from the seed's own rate proves
+    // this changes the setting rather than reporting a no-op-shaped success.
+    if (name == kSetProjectSettings) {
+        const double newFps = project.timelineFps.toDouble() >= 60.0 ? 24.0 : 60.0;
+        args.set("fps", Json(newFps));
         return Invocation{name, std::move(args)};
     }
     if (name == kAddTrack) {

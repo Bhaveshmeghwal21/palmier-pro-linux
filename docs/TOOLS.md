@@ -178,6 +178,26 @@ Result: `projectId` (string), `name` (string), `fps` (object), `canvas` (object)
 `assetCount` is read from the media library, which is the same source `media.list` reads, so the two
 always agree.
 
+## `project.set_settings`
+
+Change the current project's frame rate, canvas and/or colour space after creation, accepting the
+same ranges `project.create` accepts (usable-editor Phase 3 task 10; Requirement 7).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `fps` | number | no | 1..240 |
+| `width` | integer | no | 16..7680; must be given together with `height` |
+| `height` | integer | no | 16..4320; must be given together with `width` |
+| `colorSpace` | string | no | the same closed set `project.create`'s `colorSpace` accepts |
+
+Every argument is optional, but at least one of `fps`, `width`/`height` or `colorSpace` must be
+given. A field left out is left exactly as it was; any combination that IS supplied changes in one
+undoable edit. No clip is touched by an `fps` change: every clip's timeline position and source
+range is stored as an absolute duration with no embedded frame rate, so there is nothing to migrate.
+
+Result: `fps` (object, present only when changed), `canvas` (object, present only when changed),
+`colorSpace` (string, present only when changed), *(command result)*.
+
 ## `media.import`
 
 Probe, validate and register a media file as an asset of the current project's media library.

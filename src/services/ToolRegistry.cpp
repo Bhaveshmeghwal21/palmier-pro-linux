@@ -82,6 +82,8 @@ constexpr const char* kProjectCreate  = "project.create";
 constexpr const char* kProjectOpen    = "project.open";
 constexpr const char* kProjectSave    = "project.save";
 constexpr const char* kProjectInfo    = "project.info";
+// Mutable project settings (usable-editor Phase 3 task 10; Requirement 7).
+constexpr const char* kSetProjectSettings = "project.set_settings";
 constexpr const char* kMediaImport    = "media.import";
 constexpr const char* kMediaList      = "media.list";
 constexpr const char* kAddTrack       = "timeline.add_track";
@@ -1612,6 +1614,128 @@ Tool makeProjectInfoTool(ProjectSession* session, Tool::Handler hook) {
 }
 
 // ---------------------------------------------------------------------------
+// project.set_settings (task 10.1; Requirement 7) — change the current
+// project's frame rate, canvas and/or colour space after creation, accepting
+// the identical ranges project.create accepts. Every argument is optional: a
+// field left out is left exactly as it was, and any combination that IS
+// supplied changes in one undoable edit (Requirement 7.4).
+// ---------------------------------------------------------------------------
+
+Tool makeSetProjectSettingsTool(ProjectSession* session) {
+    Tool t;
+    t.name = kSetProjectSettings;
+    t.description = "Change the current project's frame rate, canvas and/or colour space.";
+    t.schema
+        .arg(ArgSpec{.name = "fps",
+                     .kind = JsonKind::Number,
+                     .description = "New timeline frame rate in frames per second (" +
+                                    std::to_string(kMinFramesPerSecond) + ".." +
+                                    std::to_string(kMaxFramesPerSecond) + ").",
+                     .minNum = static_cast<double>(kMinFramesPerSecond),
+                     .maxNum = static_cast<double>(kMaxFramesPerSecond)})
+        .arg(ArgSpec{.name = "width",
+                     .kind = JsonKind::Integer,
+                     .description = "New canvas width in pixels (" +
+                                    std::to_string(kMinCanvasWidth) + ".." +
+                                    std::to_string(kMaxCanvasWidth) + "). Must be given "
+                                    "together with height.",
+                     .minInt = static_cast<std::int64_t>(kMinCanvasWidth),
+                     .maxInt = static_cast<std::int64_t>(kMaxCanvasWidth)})
+        .arg(ArgSpec{.name = "height",
+                     .kind = JsonKind::Integer,
+                     .description = "New canvas height in pixels (" +
+                                    std::to_string(kMinCanvasHeight) + ".." +
+                                    std::to_string(kMaxCanvasHeight) + "). Must be given "
+                                    "together with width.",
+                     .minInt = static_cast<std::int64_t>(kMinCanvasHeight),
+                     .maxInt = static_cast<std::int64_t>(kMaxCanvasHeight)})
+        .arg(ArgSpec{.name = "colorSpace",
+                     .kind = JsonKind::String,
+                     .description = "New working colour space.",
+                     .enumValues = colorSpaceValues()});
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kSetProjectSettings));
+        TimelineEngine& engine = session->engine();
+
+        const bool hasWidth = in.find("width") != nullptr;
+        const bool hasHeight = in.find("height") != nullptr;
+        if (hasWidth != hasHeight) {
+            return err<Json>(invalidArgument(
+                "project.set_settings: 'width' and 'height' must be given together"));
+        }
+        const bool hasFps = in.find("fps") != nullptr;
+        const bool hasColorSpace = in.find("colorSpace") != nullptr;
+        if (!hasFps && !hasWidth && !hasColorSpace) {
+            return err<Json>(invalidArgument(
+                "project.set_settings: at least one of fps, width/height or colorSpace "
+                "must be given"));
+        }
+
+        std::optional<FrameRate> fps;
+        if (hasFps) {
+            Result<double> value = requireNumber(in, "fps");
+            if (value.isError()) return err<Json>(std::move(value).error());
+            // The declared bound again, for the same reason project.create checks it
+            // directly: reached without the schema, an astronomically large number
+            // would otherwise be converted to a rational through an out-of-range cast.
+            if (!(value.value() >= static_cast<double>(kMinFramesPerSecond)) ||
+                value.value() > static_cast<double>(kMaxFramesPerSecond)) {
+                return err<Json>(outOfRange(
+                    "rejected argument 'fps': the frame rate must lie between " +
+                    std::to_string(kMinFramesPerSecond) + " and " +
+                    std::to_string(kMaxFramesPerSecond) + " frames per second"));
+            }
+            fps = frameRateFromFps(value.value());
+        }
+
+        std::optional<Resolution> canvas;
+        if (hasWidth) {
+            Result<std::int64_t> width = requireInt(in, "width");
+            if (width.isError()) return err<Json>(std::move(width).error());
+            Result<std::int64_t> height = requireInt(in, "height");
+            if (height.isError()) return err<Json>(std::move(height).error());
+            if (width.value() < static_cast<std::int64_t>(kMinCanvasWidth) ||
+                width.value() > static_cast<std::int64_t>(kMaxCanvasWidth)) {
+                return err<Json>(outOfRange("rejected argument 'width': " +
+                                            std::to_string(width.value()) + " is outside " +
+                                            std::to_string(kMinCanvasWidth) + "-" +
+                                            std::to_string(kMaxCanvasWidth) + " pixels"));
+            }
+            if (height.value() < static_cast<std::int64_t>(kMinCanvasHeight) ||
+                height.value() > static_cast<std::int64_t>(kMaxCanvasHeight)) {
+                return err<Json>(outOfRange("rejected argument 'height': " +
+                                            std::to_string(height.value()) + " is outside " +
+                                            std::to_string(kMinCanvasHeight) + "-" +
+                                            std::to_string(kMaxCanvasHeight) + " pixels"));
+            }
+            canvas = Resolution{static_cast<std::uint32_t>(width.value()),
+                                static_cast<std::uint32_t>(height.value())};
+        }
+
+        std::optional<ColorSpace> colorSpace;
+        if (hasColorSpace) {
+            Result<std::string> colorSpaceStr = requireString(in, "colorSpace");
+            if (colorSpaceStr.isError()) return err<Json>(std::move(colorSpaceStr).error());
+            colorSpace = parseColorSpace(colorSpaceStr.value());
+            if (!colorSpace) {
+                return err<Json>(invalidArgument(
+                    "rejected argument 'colorSpace': '" + colorSpaceStr.value() +
+                    "' is not a colour space the domain core exposes"));
+            }
+        }
+
+        Json out = Json::object();
+        if (fps) out.set("fps", serializeFrameRate(*fps));
+        if (canvas) out.set("canvas", serializeCanvas(*canvas));
+        if (colorSpace) out.set("colorSpace", std::string(toStringView(*colorSpace)));
+        return applyCommand(
+            engine, std::make_unique<SetProjectSettingsCommand>(fps, canvas, colorSpace),
+            std::move(out));
+    };
+    return t;
+}
+
+// ---------------------------------------------------------------------------
 // Media-library tools (task 4.4) — media.import / media.list
 // ---------------------------------------------------------------------------
 
@@ -1942,6 +2066,8 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(makeProjectOpenTool(session, std::move(hooks.openProject)));
     registry.add(makeProjectSaveTool(session, std::move(hooks.saveProject)));
     registry.add(makeProjectInfoTool(session, std::move(hooks.projectInfo)));
+    // Mutable project settings sits right after the read it complements (task 10.1).
+    registry.add(makeSetProjectSettingsTool(session));
     registry.add(makeMediaImportTool(session, std::move(hooks.importMedia)));
     registry.add(makeMediaListTool(session, std::move(hooks.listMedia)));
     registry.add(makeAddTrackTool(session));

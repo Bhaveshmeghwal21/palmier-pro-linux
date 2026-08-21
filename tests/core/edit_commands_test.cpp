@@ -19,12 +19,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "core/Clip.hpp"
+#include "core/ColorSpace.hpp"
 #include "core/FrameRate.hpp"
 #include "core/Project.hpp"
 #include "core/ProjectValidation.hpp"
@@ -1223,6 +1225,95 @@ TEST(CloseGapCommand, RefusesWhenNoGapFollows) {
     const CommandResult result = engine.apply(std::make_unique<CloseGapCommand>(a));
     EXPECT_FALSE(result.changed());
     EXPECT_EQ(engine.snapshot().tracks[0].clips[1].timelineStart, ms(1000));
+    EXPECT_FALSE(engine.canUndo());
+}
+
+// ===========================================================================
+// Mutable project settings (usable-editor task 10; Requirement 7)
+// ===========================================================================
+
+TEST(SetProjectSettingsCommand, ChangesAllThreeSettingsAndUndoesExactly) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);
+    project.timelineFps = FrameRate::fps30();
+    project.canvas = Resolution::hd1080();
+    project.colorSpace = ColorSpace::Rec709;
+    TimelineEngine engine(std::move(project));
+
+    ASSERT_TRUE(engine.apply(std::make_unique<SetProjectSettingsCommand>(
+                                 FrameRate::fps24(), Resolution::uhd4k(), ColorSpace::Rec2020))
+                    .changed());
+
+    const Project after = engine.snapshot();
+    EXPECT_EQ(after.timelineFps, FrameRate::fps24());
+    EXPECT_EQ(after.canvas, Resolution::uhd4k());
+    EXPECT_EQ(after.colorSpace, ColorSpace::Rec2020);
+
+    // Requirement 7.4: one Undo restores every field exactly.
+    ASSERT_TRUE(engine.undo().changed());
+    const Project restored = engine.snapshot();
+    EXPECT_EQ(restored.timelineFps, FrameRate::fps30());
+    EXPECT_EQ(restored.canvas, Resolution::hd1080());
+    EXPECT_EQ(restored.colorSpace, ColorSpace::Rec709);
+    EXPECT_FALSE(engine.canUndo());
+}
+
+TEST(SetProjectSettingsCommand, LeavesAnOmittedSettingUntouched) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);
+    project.timelineFps = FrameRate::fps30();
+    project.canvas = Resolution::hd1080();
+    project.colorSpace = ColorSpace::Rec709;
+    TimelineEngine engine(std::move(project));
+
+    // Only the colour space is supplied; fps and canvas are std::nullopt.
+    ASSERT_TRUE(engine.apply(std::make_unique<SetProjectSettingsCommand>(
+                                 std::nullopt, std::nullopt, ColorSpace::DisplayP3))
+                    .changed());
+
+    const Project after = engine.snapshot();
+    EXPECT_EQ(after.timelineFps, FrameRate::fps30());  // untouched
+    EXPECT_EQ(after.canvas, Resolution::hd1080());     // untouched
+    EXPECT_EQ(after.colorSpace, ColorSpace::DisplayP3);
+}
+
+// Requirement 7.3: every clip's timeline position and source range survives a
+// frame-rate change as a Duration — nothing is migrated, because Duration is an
+// absolute nanosecond count with no embedded frame rate.
+TEST(SetProjectSettingsCommand, FrameRateChangeLeavesEveryClipsDurationsExactlyAsTheyWere) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);
+    project.timelineFps = FrameRate::fps30();
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(
+        makeClip(clipId, ms(1500), ms(200), ms(1700)));
+    const Clip before = project.tracks[0].clips[0];
+    TimelineEngine engine(std::move(project));
+
+    ASSERT_TRUE(engine.apply(std::make_unique<SetProjectSettingsCommand>(
+                                 FrameRate::fps24(), std::nullopt, std::nullopt))
+                    .changed());
+
+    const Project after = engine.snapshot();
+    ASSERT_EQ(after.timelineFps, FrameRate::fps24());
+    ASSERT_EQ(after.tracks[0].clips.size(), 1u);
+    const Clip& clip = after.tracks[0].clips[0];
+    EXPECT_EQ(clip.timelineStart, before.timelineStart);
+    EXPECT_EQ(clip.sourceIn, before.sourceIn);
+    EXPECT_EQ(clip.sourceOut, before.sourceOut);
+    EXPECT_EQ(clip.duration(), before.duration());
+}
+
+TEST(SetProjectSettingsCommand, AnInvalidFrameRateIsRefusedAndLeavesTheProjectUnchanged) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);
+    project.timelineFps = FrameRate::fps30();
+    TimelineEngine engine(std::move(project));
+
+    const CommandResult result = engine.apply(std::make_unique<SetProjectSettingsCommand>(
+        FrameRate(), std::nullopt, std::nullopt));  // default-constructed: 0/0, invalid
+    EXPECT_FALSE(result.changed());
+    EXPECT_EQ(engine.snapshot().timelineFps, FrameRate::fps30());
     EXPECT_FALSE(engine.canUndo());
 }
 

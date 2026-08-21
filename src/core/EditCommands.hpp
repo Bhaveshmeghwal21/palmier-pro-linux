@@ -64,10 +64,12 @@
 #include <vector>
 
 #include "core/Clip.hpp"
+#include "core/ColorSpace.hpp"
 #include "core/Duration.hpp"
 #include "core/EditCommand.hpp"
 #include "core/Effect.hpp"
 #include "core/FrameRate.hpp"
+#include "core/Resolution.hpp"
 #include "core/Result.hpp"
 #include "core/Track.hpp"
 #include "core/Transition.hpp"
@@ -631,6 +633,53 @@ private:
     double      value_;
     bool        hadPrior_ = false;
     double      prior_ = 0.0;
+    bool        captured_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// SetProjectSettingsCommand — change frame rate, canvas and/or colour space.
+// ---------------------------------------------------------------------------
+//
+// Requirement 7: a project's frame rate, canvas resolution and colour space can
+// each be changed after creation, accepting the same ranges `project.create`
+// accepts (services::kMinFramesPerSecond..kMaxFramesPerSecond,
+// kMinCanvasWidth..kMaxCanvasWidth x kMinCanvasHeight..kMaxCanvasHeight; the
+// range check itself is the Tool_Surface's, since core has no reason to depend
+// on services:: — this command validates only that a supplied FrameRate/
+// Resolution is internally well-formed via isValid()).
+//
+// Any subset of the three settings may change in one call; each argument left
+// as std::nullopt is left exactly as it was. This is what makes "any setting
+// changes... undoable in one Undo" (Requirement 7.4) hold even when several
+// fields change together: one command, one history entry, one exact revert.
+//
+// Requirement 7.3: no clip is touched. Every clip's timeline position and
+// source range is a Duration (an absolute nanosecond count with no embedded
+// frame rate — see Duration.hpp), so changing timelineFps has nothing to
+// migrate; the clips are simply interpreted against a different rate from the
+// next read onward.
+class SetProjectSettingsCommand final : public EditCommand {
+public:
+    SetProjectSettingsCommand(std::optional<FrameRate> fps, std::optional<Resolution> canvas,
+                              std::optional<ColorSpace> colorSpace);
+
+    [[nodiscard]] std::string_view name() const noexcept override {
+        return "SetProjectSettings";
+    }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+private:
+    std::optional<FrameRate>  fps_;
+    std::optional<Resolution> canvas_;
+    std::optional<ColorSpace> colorSpace_;
+
+    // Captured on apply for an exact revert; only the fields this command
+    // actually changes are meaningful, but all three are captured together since
+    // Project's settings are a single unit to snapshot.
+    FrameRate   priorFps_;
+    Resolution  priorCanvas_;
+    ColorSpace  priorColorSpace_ = defaultColorSpace();
     bool        captured_ = false;
 };
 
