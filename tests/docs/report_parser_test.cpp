@@ -345,8 +345,8 @@ TEST(ParityCheckFalsifiability, DetectsADuplicatedEntry) {
 
 TEST(ParityCheckFalsifiability, DetectsAStatusOutsideItsValueSet) {
     const std::vector<Defect> defects =
-        checkParity(mutated(parityMarkdown(), "| clips | partial |", "| clips | mostly |"));
-    EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::InvalidStatus, "clips"))
+        checkParity(mutated(parityMarkdown(), "| timeline | partial |", "| timeline | mostly |"));
+    EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::InvalidStatus, "timeline"))
         << testsupport::toString(defects);
 }
 
@@ -389,7 +389,17 @@ TEST(ParityCheckFalsifiability, DetectsAnOverlongRationale) {
     std::vector<Defect> parseDefects;
     const ParityReport report = testsupport::parseParityReport(markdown, parseDefects);
     ASSERT_FALSE(report.entries.empty());
-    const testsupport::ParityEntry& subject = *report.entriesIn(ParityTable::ToolCategory).front();
+    // Found by its own requiresPriority(), not by table position: a `present` entry
+    // carries no rationale to overlong-ify, and which entry is first in the tool
+    // category table is a document detail this test has no reason to depend on.
+    const std::vector<const testsupport::ParityEntry*> toolCategories =
+        report.entriesIn(ParityTable::ToolCategory);
+    const auto found = std::find_if(toolCategories.begin(), toolCategories.end(),
+                                    [](const testsupport::ParityEntry* entry) {
+                                        return entry->requiresPriority();
+                                    });
+    ASSERT_NE(found, toolCategories.end()) << "no tool category entry needs a priority";
+    const testsupport::ParityEntry& subject = **found;
     ASSERT_TRUE(subject.requiresPriority());
 
     const std::vector<Defect> defects = checkParity(
