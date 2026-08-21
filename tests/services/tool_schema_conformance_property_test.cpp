@@ -122,6 +122,7 @@ namespace {
 // a later task registers — is held to the property with no exclusions.
 constexpr const char* kAddClip  = "timeline.add_clip";
 constexpr const char* kReorder  = "timeline.reorder_clips";
+constexpr const char* kReorderEffects = "timeline.reorder_effects";
 constexpr const char* kGenerate = "generation.generate";
 constexpr const char* kSetProjectSettings = "project.set_settings";
 
@@ -600,7 +601,7 @@ enum class SharedRule { None, MissingRequired, WrongTypedRequired, OutOfEnumRequ
     }
 
     // Class 2 — an array's item shape (only its item count is expressible).
-    if (tool.name == kReorder) {
+    if (tool.name == kReorder || tool.name == kReorderEffects) {
         const Json* order = args.find("order");
         if (order != nullptr && !allItemsAreUuidStrings(*order)) {
             return "class 2: array item shape — 'order' can only be declared an array, "
