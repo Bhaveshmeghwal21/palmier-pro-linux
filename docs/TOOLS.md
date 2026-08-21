@@ -195,8 +195,9 @@ given. A field left out is left exactly as it was; any combination that IS suppl
 undoable edit. No clip is touched by an `fps` change: every clip's timeline position and source
 range is stored as an absolute duration with no embedded frame rate, so there is nothing to migrate.
 
-Result: `fps` (object, present only when changed), `canvas` (object, present only when changed),
-`colorSpace` (string, present only when changed), *(command result)*.
+Result: *(command result)*. `fps` (object, present only when changed), `canvas` (object, present
+only when changed) and `colorSpace` (string, present only when changed) are each reported only when
+that particular setting was the one changed.
 
 ## `media.import`
 
