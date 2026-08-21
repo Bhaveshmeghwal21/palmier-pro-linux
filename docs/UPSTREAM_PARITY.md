@@ -16,7 +16,7 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: f9c92b23ca0bef5f379ff7b5397cb95371ad0df2 (branch `main`)
+- linux-ref: 03b12db2de7cfd8b32b035ed75cdfbeabee5c174 (branch `main`)
 - comparison-date: 2026-08-21
 
 ## Status definitions (Requirement 13.7)
@@ -90,7 +90,7 @@ every `N. ` line as a build-order item.
 
 | area | status | linux-components | priority | rationale | macos-framework | linux-replacement |
 |---|---|---|---|---|---|---|
-| timeline editing | partial | core::TimelineEngine, core::EditCommands, services::ToolRegistry, ui::TimelineViewModel, ui::TimelineModel, ui::TimelinePanel, ui::MainWindow, ui::InspectorViewModel, ui::MediaBrowserViewModel | must | The shell is mounted; selection drives the Inspector, actions create tracks/clips, a scrub moves the playhead, and ripple delete/trim/close-gap are selection-gated. No graphical timeline/effects yet. | SwiftUI | Qt 6 Widgets |
+| timeline editing | present | core::TimelineEngine, core::EditCommands, services::ToolRegistry, ui::TimelineViewModel, ui::TimelineModel, ui::TimelinePanel, ui::TimelineGraphView, ui::MainWindow, ui::InspectorViewModel, ui::MediaBrowserViewModel | - | - | - | - |
 | multicam | partial | core::ClipGroup, core::EditCommands::RippleTrimCommand, services::ToolRegistry timeline.ripple_trim | should | A ripple-trim on a grouped clip propagates in sync to every clipGroups member (PR 397); angle switching is still deferred, so multi-angle footage trims together but cannot be cut between angles. | - | - |
 | transcription and captions | absent | services::TranscriptionService | should | No recognizer backend is bundled and nothing reaches TranscriptionService; there is also no caption track kind, so captions cannot be produced or burned in. | - | - |
 | text and graphics | absent | none | should | No text, title or shape layer exists in the domain core or the renderer, so on-screen graphics cannot be authored at all. | - | - |
@@ -105,45 +105,45 @@ every `N. ` line as a build-order item.
 
 ## Build order (Requirement 13.9)
 
-Exactly the `absent` and `partial` entries of both tables — 26 of the 34 — sorted `must` before
+Exactly the `absent` and `partial` entries of both tables — 25 of the 34 — sorted `must` before
 `should` before `later`. This list is a **projection** of the two tables and carries no
 independent facts: an entry appears here if and only if its status above is `absent` or `partial`,
-with the priority recorded above. The eight omitted entries are the eight `present` ones —
+with the priority recorded above. The nine omitted entries are the nine `present` ones —
 `import`, `export`, `projects`, `generate`, `clips`, `effects` and `project settings` (all table 1),
-plus `generation and upscaling` (capability area, as of task 7).
+plus `generation and upscaling` and `timeline editing` (both capability areas, the latter as of
+usable-editor task 11).
 
 Each item is written `<name> (<table>) — <priority>` because `multicam` appears in both tables.
 
-1. timeline editing (capability area) — must
-2. MCP and agent chat (capability area) — must
-3. timeline (tool category) — should
-4. texts (tool category) — should
-5. captions (tool category) — should
-6. transcription (tool category) — should
-7. color (tool category) — should
-8. multicam (tool category) — should
-9. media (tool category) — should
-10. capture frame (tool category) — should
-11. multicam (capability area) — should
-12. transcription and captions (capability area) — should
-13. text and graphics (capability area) — should
-14. color and effects (capability area) — should
-15. audio scrub and metering (capability area) — should
-16. settings (capability area) — should
-17. denoise (tool category) — later
-18. organize (tool category) — later
-19. layout (tool category) — later
-20. search (tool category) — later
-21. sync (tool category) — later
-22. beats (tool category) — later
-23. words (tool category) — later
-24. project browser and search (capability area) — later
-25. telemetry (capability area) — later
-26. auto-update (capability area) — later
+1. MCP and agent chat (capability area) — must
+2. timeline (tool category) — should
+3. texts (tool category) — should
+4. captions (tool category) — should
+5. transcription (tool category) — should
+6. color (tool category) — should
+7. multicam (tool category) — should
+8. media (tool category) — should
+9. capture frame (tool category) — should
+10. multicam (capability area) — should
+11. transcription and captions (capability area) — should
+12. text and graphics (capability area) — should
+13. color and effects (capability area) — should
+14. audio scrub and metering (capability area) — should
+15. settings (capability area) — should
+16. denoise (tool category) — later
+17. organize (tool category) — later
+18. layout (tool category) — later
+19. search (tool category) — later
+20. sync (tool category) — later
+21. beats (tool category) — later
+22. words (tool category) — later
+23. project browser and search (capability area) — later
+24. telemetry (capability area) — later
+25. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 8 `present`, 11 `partial`, 15 `absent`; 26 in this list, of which 2 `must`, 14 `should` and 10 `later`. Per table:
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 9 `present`, 10 `partial`, 15 `absent`; 25 in this list, of which 1 `must`, 14 `should` and 10 `later`. Per table:
 table 1 holds 22 entries (7 `present`, 5 `partial`, 10 `absent`, so 15 appear below) and table 2
-holds 12 (1 `present`, 6 `partial`, 5 `absent`, so 11 appear below).
+holds 12 (2 `present`, 5 `partial`, 5 `absent`, so 10 appear below).
 
 ## Known limits of this comparison
 
@@ -236,3 +236,18 @@ those claims rest on weaker evidence than the rest.
   further upstream operations task 6 does not touch — catalog-driven model choice (PR 406), upscale
   (PR 396) and audio generation (PR 395) — all still deferred to task 7. Nothing else changed: no
   other row's Linux-side facts moved at this ref.
+- **2026-08-21 re-check (`.kiro/specs/usable-editor` Phase 3, tasks 8–11).** `timeline editing`
+  moves from `partial` to `present`: every operation this row's own linux-components list could
+  not previously reach is now reachable. Task 8 added ripple-delete, ripple-trim and close-gap as
+  selection-gated Edit actions; task 9 made effects addable, removable, reorderable and
+  re-parameterisable from the Inspector; task 10 added a Project Settings surface; task 11 replaced
+  `TimelinePanel`'s `QTreeView` with `ui::TimelineGraphView`, a graphical view rendering tracks as
+  lanes and clips as rectangles against a time ruler, supporting click-to-seek, zoom-keeping-the-
+  playhead-visible, drag-move and drag-edge-trim (both through the Tool_Surface, both refusing and
+  visually reverting an invalid destination), and clip-selection indication — closing every
+  criterion of Requirement 8. The row's own rationale ("No graphical timeline/effects yet") is now
+  false in both halves, so the row carries no remaining gap and its priority, rationale,
+  macos-framework and linux-replacement fields are all `-`, matching every other `present` row.
+  `clips`, `effects` and `project settings` (tool categories) and `multicam` (both tables) already
+  moved to `present`/were re-scored in tasks 8–10, each recorded separately when it happened; this
+  entry covers only the one row task 11 closed. No other row's Linux-side facts moved at this ref.

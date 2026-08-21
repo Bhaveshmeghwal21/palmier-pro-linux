@@ -15,7 +15,7 @@
 // 1. THE REAL DOCUMENTS ARE CHECKED, and the checks are shown to have SEEN them.
 //    `docs/UPSTREAM_PARITY.md` and `docs/PORT_BACKLOG.md` are read from
 //    PALMIER_DOCS_DIR and must yield an empty defect list — but every such case
-//    first asserts what the parser found (34 entries, 22 + 12 per table, 26
+//    first asserts what the parser found (34 entries, 22 + 12 per table, 25
 //    build-order items, ten backlog entries, nine acceptance checks). A parser
 //    that silently understood nothing would produce an empty defect list too, so
 //    "no defects" is only worth asserting beside "this much was parsed".
