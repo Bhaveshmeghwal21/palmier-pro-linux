@@ -127,12 +127,12 @@ dependency and the repository already contains TLS code for the MCP server to mo
 
 ## Phase 3 — Make editing tolerable rather than merely possible
 
-- [ ] 8. Ripple editing and gap management (Requirement 5) — **M**
-  - [ ] 8.1 `RippleDeleteCommand` and `RippleTrimCommand` in the domain core, preserving the ordered,
+- [x] 8. Ripple editing and gap management (Requirement 5) — **M**
+  - [x] 8.1 `RippleDeleteCommand` and `RippleTrimCommand` in the domain core, preserving the ordered,
         non-overlapping track invariant the engine already enforces.
-  - [ ] 8.2 Publish both on the Tool_Surface, and a close-gap operation.
-  - [ ] 8.3 Expose all three in the Editor_Shell, enabled only with a Selection.
-  - [ ] 8.4 Tests: each is one Undo; the invariant holds after every operation; the deferred PR 397
+  - [x] 8.2 Publish both on the Tool_Surface, and a close-gap operation.
+  - [x] 8.3 Expose all three in the Editor_Shell, enabled only with a Selection.
+  - [x] 8.4 Tests: each is one Undo; the invariant holds after every operation; the deferred PR 397
         backlog entry's check passes.
 
 - [ ] 9. Effect lifecycle management (Requirement 6) — **M**
@@ -487,4 +487,104 @@ the shipped behaviour; both were stale test-side accounting that the change had 
 The lesson recorded for later phases: after adding a tool, check every test that enumerates the registry,
 and after re-scoring the parity report, check every test that anchors into it by position.
 
-Phase 3 Tasks 8–11, Phase 4 Tasks 12–15 and Phase 5 Tasks 16–17 remain unstarted.
+---
+
+## Phase 3, Task 8 (ripple editing and gap management) — complete
+
+**Task 8 is CI-verified green on `main` at commit `218620d` (run `32443629009`, completed success):
+CTest reports `100% tests passed, 0 tests failed out of 1285`. The build completed, the headless launch
+smoke test mapped the editor and painted 5031 distinct colours, and the keyboard-driven Add Video Track
+smoke action also passed. The domain core and Tool_Surface first went green at `4f41a01` (run
+`32408799695`, only the CTest suite itself failing — see incident 7); shell wiring and dedicated tests
+landed together at `899090d` (run `32409848021`, 1285/1285) once the scenario fix inside that same commit
+resolved incident 7; the parity re-score and PR 397 backlog update then reopened the suite at `cf77f71`
+(run `32410542571`, 5 failures — incident 8), fixed at `218620d`.
+
+### What was actually built
+
+- **`RippleDeleteCommand`** (`src/core/EditCommands.{hpp,cpp}`) removes a clip and shifts every later
+  clip on its track earlier by exactly the removed clip's duration, atomically reverting on any
+  invariant violation.
+- **`RippleTrimCommand`** mirrors `TrimClipCommand`'s clamping (one-frame minimum, `[0, sourceDuration]`)
+  for a named clip's edge, then — satisfying upstream PR 397 — applies the identical source-time delta to
+  every other member of any `Project.clipGroups` entry naming the clip, on that member's own track,
+  refusing the whole edit if any member cannot absorb it. `Edge::End` shifts followers by the delta;
+  `Edge::Start` leaves the trailing edge, and therefore every follower, fixed.
+- **`CloseGapCommand`** shifts every later clip on a track earlier by the gap following a named clip,
+  refusing when the clip is last on its track or no gap follows. Durations and source ranges are
+  untouched.
+- **Tool_Surface**: `timeline.ripple_delete`, `timeline.ripple_trim` (schema identical to
+  `timeline.trim_clip`) and `timeline.close_gap`, registered beside the clip edits they are variants of,
+  and documented in `docs/TOOLS.md`.
+- **Editor_Shell**: `GuiToolGateway::rippleDelete/rippleTrim/closeGap`, and three `MainWindow` Edit-menu
+  actions (`rippleDeleteAction_`, `rippleTrimAction_`, `closeGapAction_`) enabled only where
+  `InspectorViewModel::hasSelection()` is true, matching the existing delete/split actions'
+  `refreshSelectionActions()` pattern exactly. "Ripple Trim to Playhead" converts the playhead's timeline
+  position to the selected clip's source time before dispatching `RippleTrimCommand::Edge::End`.
+- **Tests** (`tests/core/edit_commands_test.cpp`): one-Undo and invariant-holds coverage for all three
+  commands, an unknown-clip no-op case, and two tests exercising PR 397's own acceptance check directly —
+  `RippleTrimCommand.KeepsGroupedMulticamAnglesSynchronised` (two clips on different tracks in one
+  `clipGroups` entry move by the identical delta, a third ungrouped clip on a third track is untouched,
+  the whole cross-track change undoes in one entry) and
+  `RippleTrimCommand.AGroupedAngleThatCannotAbsorbTheTrimRefusesTheWholeEdit` (a member with no source
+  headroom refuses the entire edit, leaving every track byte-for-byte unchanged).
+- **`docs/PORT_BACKLOG.md`**: PR 397 moved `not-started` → `complete`, `linux-component` updated from
+  speculative future-tense placeholders to the actual `RippleTrimCommand`/`timeline.ripple_trim` names,
+  with a `note:` citing the two tests above.
+- **`docs/UPSTREAM_PARITY.md`**: `clips` (table 1) `partial` → `present` (ripple-delete, ripple-trim and
+  close-gap close the row's own stated gap). `multicam` (both tables) `absent` → `partial` (grouped
+  trim-sync now exists; angle-switching still does not, so the row stops short of `present`). `timeline
+  editing`'s rationale updated to name the three new selection-gated actions and drop the now-false
+  "ripple" half of its remaining-gap claim. `linux-ref` advanced to `899090d` (the commit the re-scored
+  rows were actually read from) and `comparison-date` to `2026-08-21`. Build order re-derived: 28 entries
+  (was 29; `clips` left the list), 2 `must`/16 `should`/10 `later` (was 17 `should`); counts 6
+  `present`/13 `partial`/15 `absent` (was 5/12/17).
+
+### Verification evidence
+
+The final CI log shows the eight new `RippleDeleteCommand`/`RippleTrimCommand`/`CloseGapCommand` unit
+tests passing (1275 → 1285 total), the multicam-sync and multicam-refusal tests specifically among them,
+followed by the explicit CTest summary above. `docs/TOOLS.md`'s consistency checker and both parity/backlog
+falsifiability suites passed against the re-scored documents.
+
+### CI incidents 7 and 8
+
+Both incidents were test-side or documentation-side bookkeeping that the change had invalidated, not
+defects in the shipped domain/tool/shell code — the same category as incidents 5 and 6 in Task 7.
+
+- **Incident 7 — a new tool absent from the documentation scenario's accounting (run `32408799695`,
+  commit `4f41a01`, 1 failure).** `DocumentationConsistency.EveryToolWithARegistryOwnedResultWasActuallyInvoked`
+  asserts that every tool the registry renders a result for was actually invoked by the checker's own
+  scenario, so the separate result-field check (`TheDocumentedResultFieldsAreTheFieldsTheHandlersReturn`)
+  cannot pass vacuously by observing nothing. It failed with `missing = {generation.generate,
+  timeline.close_gap, timeline.export, timeline.ripple_delete, timeline.ripple_trim}` against
+  `expectedMissing = {generation.generate, timeline.export}` — the three new tools were real gaps in the
+  scenario, not defects in the allow-list. Fixed at `899090d` by exercising all three inside
+  `observeRealResults()`: the split clip's own right-hand piece is ripple-trimmed (`end` edge, shortening
+  it), the gap that leaves before the next clip is closed, and the shortened piece is then removed with
+  `timeline.ripple_delete` — chosen specifically because nothing later in the scenario references that
+  piece by id, so the reorder/effect/transition/delete calls immediately after it are undisturbed.
+- **Incident 8 — an over-length rationale and a stale single-row anchor from the parity re-score (run
+  `32410542571`, commit `cf77f71`, 5 failures).** Two failures were direct: the rewritten `multicam`
+  (table 1, 278 characters) and `timeline editing` (285 characters) rationales exceeded
+  `ReportParser.cpp`'s `kMaxRationale = 200` (Requirements 13.3/13.5), which
+  `ParityReportDocument.TheCheckedInReportHasNoDefects` caught directly against the real document, and
+  which cascaded into `ParityReportProperties.EveryWellFormedRevisionPassesTheParityCheck` and
+  `...TheParityCheckDetectsEveryMalformation` (both assert `real.defects.empty()` against the same real
+  document). The other two were literal anchors keyed to `clips` specifically:
+  `ParityCheckFalsifiability.DetectsAStatusOutsideItsValueSet` mutated the literal string `"| clips |
+  partial |"`, which stopped matching the instant `clips` became `present`; and `...DetectsAnOverlongRationale`
+  took `report.entriesIn(ParityTable::ToolCategory).front()` on the assumption that the first tool-category
+  row would always still need a priority, which broke for the same reason. Fixed at `218620d`: both
+  rationales rewritten to fit within the 200-character bound while keeping their factual content: the
+  status anchor retargeted to `timeline` (a row that is genuinely, stably `partial`); and the overlong-
+  rationale test rewritten to locate its subject via `std::find_if(..., requiresPriority())` rather than
+  by table position, so it no longer depends on which row happens to be first.
+
+The lesson recorded for later phases, extending the one above: a positional/literal dependency on a
+*specific named row* is just as fragile as a dependency on *row order* — re-scoring an entry's status is
+enough to break a test keyed to its old status, even without moving anything. And a rationale rewrite
+needs its length checked against the document's own stated bound (`kMaxRationale`) before it is written,
+not after CI reports it.
+
+Phase 3 Tasks 9–11, Phase 4 Tasks 12–15 and Phase 5 Tasks 16–17 remain unstarted.
