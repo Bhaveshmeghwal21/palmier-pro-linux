@@ -899,6 +899,8 @@ TEST_F(TimelineGraphViewTest, DragMoveAndTimelineMoveClipProduceEqualState) {
     // Drag the second clip (midpoint x=120) left by 60px = 1.0s, to timelineStart
     // 500ms — clear of the first clip's [0,1000) span, so this must apply.
     press(graph, QPoint(120, kFirstLaneMidY));
+    ASSERT_EQ(graph->selectedClipId(), seed.secondClipId)
+        << "the press did not select the second clip; hitTestClip likely missed it";
     move(graph, QPoint(60, kFirstLaneMidY));
     release(graph, QPoint(60, kFirstLaneMidY));
 
