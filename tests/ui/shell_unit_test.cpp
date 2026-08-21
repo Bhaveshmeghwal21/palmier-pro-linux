@@ -904,6 +904,12 @@ TEST_F(TimelineGraphViewTest, DragMoveAndTimelineMoveClipProduceEqualState) {
     move(graph, QPoint(60, kFirstLaneMidY));
     release(graph, QPoint(60, kFirstLaneMidY));
 
+    TimelinePanel* timeline = window.findChild<TimelinePanel*>();
+    ASSERT_NE(timeline, nullptr);
+    ADD_FAILURE_AT(__FILE__, __LINE__)
+        << "diagnostic: lastIndication=" << static_cast<int>(timeline->model().viewModel().lastIndication())
+        << " lastMessage=" << timeline->model().viewModel().lastMessage();
+
     const Project viaDrag = composition.timeline().snapshot();
     const auto draggedClip = std::find_if(
         viaDrag.tracks[0].clips.begin(), viaDrag.tracks[0].clips.end(),
