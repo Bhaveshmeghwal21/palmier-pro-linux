@@ -16,7 +16,7 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: 899090d919975a8af6a96375d531828972917474 (branch `main`)
+- linux-ref: c911c5ca94ce308a0b0ac0925e01ec658c73ef3d (branch `main`)
 - comparison-date: 2026-08-21
 
 ## Status definitions (Requirement 13.7)
@@ -69,7 +69,7 @@ every `N. ` line as a build-order item.
 | captions | absent | none | should | core::TrackKind has only Video and Audio; no caption track, burn-in path or sidecar export exists, so captions cannot be authored or delivered. | - | - |
 | transcription | absent | services::TranscriptionService | should | TranscriptionService is unreachable: no tool registers it, the composition root never constructs it and no recognizer backend is bundled. | - | - |
 | color | partial | core::EffectType::ColorGrade, core::ColorSpace, gpu::EffectKernels | should | Only one color_grade effect is reachable via timeline.add_effect; no curve, wheel, scope or LUT operation exists, so a grade cannot be shaped or judged. | - | - |
-| effects | partial | core::EffectType, gpu::EffectKernels, gpu::Compositor, services::ToolRegistry timeline.add_effect, ui::InspectorPanel | should | Six effect types can be appended and the inspector panel is mounted and shows a selected clip's effect chain; no tool removes, reorders or re-parameterises an effect from any mounted UI. | - | - |
+| effects | present | core::EffectType, gpu::EffectKernels, gpu::Compositor, services::ToolRegistry timeline.add_effect/remove_effect/reorder_effects/set_effect_parameter, ui::InspectorPanel | - | - | - | - |
 | denoise | absent | none | later | No denoise effect type and no denoise kernel exist in core::Effect or gpu::EffectKernels, so noise reduction is unavailable on every surface. | - | - |
 | multicam | partial | core::ClipGroup, core::EditCommands::RippleTrimCommand, services::ToolRegistry timeline.ripple_trim | should | A ripple-trim on a grouped clip propagates the same source-time delta to every clipGroups member (PR 397); no angle-switching tool exists, so angles trim in sync but cannot be cut between. | - | - |
 | organize | absent | none | later | The media library is a flat list; no bin, folder, tag, rating or colour-label operation exists, so a project cannot be organised. | - | - |
@@ -94,7 +94,7 @@ every `N. ` line as a build-order item.
 | multicam | partial | core::ClipGroup, core::EditCommands::RippleTrimCommand, services::ToolRegistry timeline.ripple_trim | should | A ripple-trim on a grouped clip propagates in sync to every clipGroups member (PR 397); angle switching is still deferred, so multi-angle footage trims together but cannot be cut between angles. | - | - |
 | transcription and captions | absent | services::TranscriptionService | should | No recognizer backend is bundled and nothing reaches TranscriptionService; there is also no caption track kind, so captions cannot be produced or burned in. | - | - |
 | text and graphics | absent | none | should | No text, title or shape layer exists in the domain core or the renderer, so on-screen graphics cannot be authored at all. | - | - |
-| color and effects | partial | gpu::EffectKernels, gpu::Compositor, core::EffectType, services::ToolRegistry timeline.add_effect | should | Six effects including the ported invert_colors render on both paths; nothing removes, reorders or edits an effect and there is no LUT, scope or denoise. | - | - |
+| color and effects | partial | gpu::EffectKernels, gpu::Compositor, core::EffectType, services::ToolRegistry timeline.add_effect/remove_effect/reorder_effects/set_effect_parameter | should | Six effects including invert_colors render on both paths, and remove/reorder/re-parameterise are all reachable; there is still no curve, wheel, scope, LUT or denoise. | - | - |
 | audio scrub and metering | absent | none | should | The audio pipeline mixes and outputs, but no level meter, waveform or scrub-audio component exists, so levels cannot be monitored while editing. | SwiftUI | Qt 6 Widgets |
 | generation and upscaling | present | services::GenerationModelCatalog, services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::OpenSslGenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator, services::ToolRegistry generation.list_models/generation.generate | - | - | - | - |
 | project browser and search | partial | ui::MediaBrowserViewModel, ui::MediaBrowserPanel | later | The media browser panel is mounted and lists the library as a flat list; no bin, folder or tag structure and no search index exist, so assets cannot be organised or searched. | SwiftUI | Qt 6 Widgets |
@@ -105,12 +105,12 @@ every `N. ` line as a build-order item.
 
 ## Build order (Requirement 13.9)
 
-Exactly the `absent` and `partial` entries of both tables — 28 of the 34 — sorted `must` before
+Exactly the `absent` and `partial` entries of both tables — 27 of the 34 — sorted `must` before
 `should` before `later`. This list is a **projection** of the two tables and carries no
 independent facts: an entry appears here if and only if its status above is `absent` or `partial`,
-with the priority recorded above. The six omitted entries are the six `present` ones — `import`,
-`export`, `projects`, `generate` and `clips` (all table 1), plus `generation and upscaling`
-(capability area, as of task 7).
+with the priority recorded above. The seven omitted entries are the seven `present` ones —
+`import`, `export`, `projects`, `generate`, `clips` and `effects` (all table 1), plus `generation and
+upscaling` (capability area, as of task 7).
 
 Each item is written `<name> (<table>) — <priority>` because `multicam` appears in both tables.
 
@@ -121,30 +121,29 @@ Each item is written `<name> (<table>) — <priority>` because `multicam` appear
 5. captions (tool category) — should
 6. transcription (tool category) — should
 7. color (tool category) — should
-8. effects (tool category) — should
-9. multicam (tool category) — should
-10. media (tool category) — should
-11. project settings (tool category) — should
-12. capture frame (tool category) — should
-13. multicam (capability area) — should
-14. transcription and captions (capability area) — should
-15. text and graphics (capability area) — should
-16. color and effects (capability area) — should
-17. audio scrub and metering (capability area) — should
-18. settings (capability area) — should
-19. denoise (tool category) — later
-20. organize (tool category) — later
-21. layout (tool category) — later
-22. search (tool category) — later
-23. sync (tool category) — later
-24. beats (tool category) — later
-25. words (tool category) — later
-26. project browser and search (capability area) — later
-27. telemetry (capability area) — later
-28. auto-update (capability area) — later
+8. multicam (tool category) — should
+9. media (tool category) — should
+10. project settings (tool category) — should
+11. capture frame (tool category) — should
+12. multicam (capability area) — should
+13. transcription and captions (capability area) — should
+14. text and graphics (capability area) — should
+15. color and effects (capability area) — should
+16. audio scrub and metering (capability area) — should
+17. settings (capability area) — should
+18. denoise (tool category) — later
+19. organize (tool category) — later
+20. layout (tool category) — later
+21. search (tool category) — later
+22. sync (tool category) — later
+23. beats (tool category) — later
+24. words (tool category) — later
+25. project browser and search (capability area) — later
+26. telemetry (capability area) — later
+27. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 6 `present`, 13 `partial`, 15 `absent`; 28 in this list, of which 2 `must`, 16 `should` and 10 `later`. Per table:
-table 1 holds 22 entries (5 `present`, 7 `partial`, 10 `absent`, so 17 appear below) and table 2
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 7 `present`, 12 `partial`, 15 `absent`; 27 in this list, of which 2 `must`, 15 `should` and 10 `later`. Per table:
+table 1 holds 22 entries (6 `present`, 6 `partial`, 10 `absent`, so 16 appear below) and table 2
 holds 12 (1 `present`, 6 `partial`, 5 `absent`, so 11 appear below).
 
 ## Known limits of this comparison
