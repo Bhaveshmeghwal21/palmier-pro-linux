@@ -702,12 +702,16 @@ INSTANTIATE_TEST_SUITE_P(
 // ---------------------------------------------------------------------------
 // Graphical timeline (usable-editor task 11; Requirement 8)
 //
-// Real QMouseEvent/QWheelEvent objects are constructed and dispatched through
-// QCoreApplication::sendEvent(), which is what actually reaches the widget's
-// protected mousePressEvent()/mouseMoveEvent()/mouseReleaseEvent()/wheelEvent()
-// overrides — standard Qt practice for driving a widget's interaction from a
-// test without a real pointing device, and the same technique this file's
-// other tests use to observe a signal path rather than a repaint.
+// Real QMouseEvent/QWheelEvent objects are constructed to drive the widget's
+// interaction from a test without a real pointing device. The wheel event
+// (zoom) is dispatched through QCoreApplication::sendEvent(), the standard Qt
+// mechanism, which reaches the protected wheelEvent() override correctly. The
+// mouse press/move/release sequence (drag) is instead routed directly through
+// TimelineGraphView's own friend accessor: a hand-constructed
+// QEvent::MouseMove has proven unreliable to deliver via sendEvent() under
+// Qt6's QSinglePointEvent internals absent a real platform mouse grab, so the
+// whole drag sequence uses one uniform, deterministic path instead of mixing
+// two different delivery mechanisms across one gesture.
 // ---------------------------------------------------------------------------
 
 class TimelineGraphViewTest : public ShellUnitTest {
@@ -759,26 +763,26 @@ protected:
     // The y coordinate of the middle of the first (only, in these tests) lane.
     static constexpr int kFirstLaneMidY = kRulerHeight + kLaneHeight / 2;
 
-    static void press(QWidget* widget, QPoint pos) {
+    // All three routed through TimelineGraphView's friend accessor rather than
+    // QCoreApplication::sendEvent(): a hand-constructed QEvent::MouseMove has
+    // proven unreliable to deliver that way under Qt6's QSinglePointEvent
+    // internals absent a real platform mouse grab, so the whole press/move/
+    // release sequence uses the same direct, deterministic path rather than
+    // mixing two different delivery mechanisms across one drag gesture.
+    static void press(TimelineGraphView* widget, QPoint pos) {
         QMouseEvent event(QEvent::MouseButtonPress, pos, widget->mapToGlobal(pos),
                           Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-        QCoreApplication::sendEvent(widget, &event);
+        TimelineGraphViewFriendAccess::sendMousePress(widget, &event);
     }
     static void move(TimelineGraphView* widget, QPoint pos) {
         QMouseEvent event(QEvent::MouseMove, pos, widget->mapToGlobal(pos), Qt::NoButton,
                           Qt::LeftButton, Qt::NoModifier);
-        // Called directly rather than through QCoreApplication::sendEvent():
-        // a hand-constructed QEvent::MouseMove has proven unreliable to
-        // deliver that way under Qt6's QSinglePointEvent internals absent a
-        // real platform mouse grab, while mousePressEvent()/mouseReleaseEvent()
-        // (simpler, singular "point" events) are delivered correctly either
-        // way — see the friend declaration on TimelineGraphView.
         TimelineGraphViewFriendAccess::sendMouseMove(widget, &event);
     }
-    static void release(QWidget* widget, QPoint pos) {
+    static void release(TimelineGraphView* widget, QPoint pos) {
         QMouseEvent event(QEvent::MouseButtonRelease, pos, widget->mapToGlobal(pos),
                           Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-        QCoreApplication::sendEvent(widget, &event);
+        TimelineGraphViewFriendAccess::sendMouseRelease(widget, &event);
     }
 };
 

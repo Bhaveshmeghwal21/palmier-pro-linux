@@ -200,10 +200,19 @@ private:
 /// test file, since only a class actually named as a friend can reach across
 /// the access boundary — the test itself does not need to derive from
 /// QWidget or duplicate any Qt event-handling code, only to forward a call.
+/// All three handlers are reached directly rather than through
+/// QCoreApplication::sendEvent(), for one uniform, deterministic delivery path
+/// across the whole press/move/release sequence a drag test drives.
 class TimelineGraphViewFriendAccess {
 public:
+    static void sendMousePress(TimelineGraphView* view, QMouseEvent* event) {
+        view->mousePressEvent(event);
+    }
     static void sendMouseMove(TimelineGraphView* view, QMouseEvent* event) {
         view->mouseMoveEvent(event);
+    }
+    static void sendMouseRelease(TimelineGraphView* view, QMouseEvent* event) {
+        view->mouseReleaseEvent(event);
     }
 };
 
