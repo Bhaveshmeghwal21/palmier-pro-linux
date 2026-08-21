@@ -433,24 +433,26 @@ TEST(ParityCheckFalsifiability, DetectsAMissingProvenanceFieldAndAMalformedDate)
 }
 
 TEST(ParityCheckFalsifiability, DetectsAnUnsortedBuildOrderList) {
-    // Swap the first `should` item ahead of the two `must` items.
+    // Demote the sole `must` item to `later`; the unchanged `should` item that
+    // follows it then has a lower rank than the (mutated) rank already seen,
+    // which is exactly what the ordering check looks for.
     const std::vector<Defect> defects = checkParity(
-        mutated(parityMarkdown(), "1. timeline editing (capability area) \u2014 must",
-                "1. clips (tool category) \u2014 should"));
+        mutated(parityMarkdown(), "1. MCP and agent chat (capability area) \u2014 must",
+                "1. MCP and agent chat (capability area) \u2014 later"));
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::OutOfOrder))
         << testsupport::toString(defects);
 }
 
 TEST(ParityCheckFalsifiability, DetectsAnEntryMissingFromTheBuildOrderList) {
     const std::vector<Defect> defects =
-        checkParity(mutated(parityMarkdown(), "17. denoise (tool category) \u2014 later\n", ""));
+        checkParity(mutated(parityMarkdown(), "16. denoise (tool category) \u2014 later\n", ""));
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::MissingEntry, "denoise"))
         << testsupport::toString(defects);
 }
 
 TEST(ParityCheckFalsifiability, DetectsABuildOrderPriorityThatDisagreesWithItsTable) {
     const std::vector<Defect> defects = checkParity(
-        mutated(parityMarkdown(), "26. auto-update (capability area) \u2014 later",
+        mutated(parityMarkdown(), "25. auto-update (capability area) \u2014 later",
                 "29. auto-update (capability area) \u2014 should"));
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::InvalidPriority, "auto-update"))
         << testsupport::toString(defects);
