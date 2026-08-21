@@ -147,15 +147,15 @@ dependency and the repository already contains TLS code for the MCP server to mo
   - [x] 10.3 Tests: clip positions and source ranges survive a frame-rate change as durations;
         out-of-range values are refused by name; every change is one Undo.
 
-- [ ] 11. A graphical timeline (Requirement 8) — **L**
-  - [ ] 11.1 Replace the `QTreeView` with a custom widget: lanes per track, clip rectangles positioned
+- [x] 11. A graphical timeline (Requirement 8) — **L**
+  - [x] 11.1 Replace the `QTreeView` with a custom widget: lanes per track, clip rectangles positioned
         and sized by timeline start and duration, a time ruler and a playhead marker.
-  - [ ] 11.2 Click-to-seek on the ruler and empty lane areas, honouring Phase 1's frame snapping.
-  - [ ] 11.3 Zoom that keeps the playhead visible across a zoom change.
-  - [ ] 11.4 Drag a clip to move it and drag its edges to trim, both through the Tool_Surface, with a
+  - [x] 11.2 Click-to-seek on the ruler and empty lane areas, honouring Phase 1's frame snapping.
+  - [x] 11.3 Zoom that keeps the playhead visible across a zoom change.
+  - [x] 11.4 Drag a clip to move it and drag its edges to trim, both through the Tool_Surface, with a
         refused drop reverting visually.
-  - [ ] 11.5 Render the Selection consistently with Requirement 1.
-  - [ ] 11.6 Tests: rectangle geometry corresponds to clip timing across zoom levels; a refused drag
+  - [x] 11.5 Render the Selection consistently with Requirement 1.
+  - [x] 11.6 Tests: rectangle geometry corresponds to clip timing across zoom levels; a refused drag
         leaves the project unchanged; drag-move and `timeline.move_clip` produce equal state.
 
 ---
@@ -761,4 +761,145 @@ physical lines is safe for FIELD extraction (which reads the whole joined paragr
 the top-level `*(command result)*` marker (which is checked per physical line before the paragraph is
 joined) — keep the marker on the same line as the word `Result:`.
 
-Phase 3 Task 11, Phase 4 Tasks 12–15 and Phase 5 Tasks 16–17 remain unstarted.
+Phase 4 Tasks 12–15 and Phase 5 Tasks 16–17 remain unstarted.
+
+---
+
+## Phase 3, Task 11 (a graphical timeline) — complete
+
+**Task 11 is CI-verified green on `main` at commit `6f5f261` (run `32455067036`, completed success):
+CTest reports `100% tests passed, 0 tests failed out of 1300`. The build completed, and the headless
+launch smoke test mapped the editor and painted 5300 distinct colours (up from 5031 at Task 10, since
+the tree view's plain rows are replaced by a ruler, lanes, clip rectangles and a playhead marker — a
+strictly more colourful paint than a `QTreeView` ever produced). The implementation itself first went
+green at `03b12db` (run `32453661873`, 1300/1300) after five CI cycles on one stubborn test; the parity
+re-score that follows below went green on its second push, `6f5f261`.
+
+### What was actually built
+
+- **`ui::TimelineGraphView`** (`src/ui/TimelineGraphView.{hpp,cpp}`), a `QWidget` that reads geometry
+  through `TimelineViewModel`'s existing typed API (`trackAt`, `clipAt`, `clipCount`, `locate`) rather
+  than through `QAbstractItemModel` roles, and shares the exact same `TimelineViewModel` instance
+  `TimelineModel` already owned (a new `TimelineModel::viewModel()` accessor exposes it). Every
+  mutating gesture — drag-move, drag-trim — goes through `TimelineViewModel::moveClip`/`trimClipStart`/
+  `trimClipEnd`, the identical `EditCommand` path the MCP endpoint and the agent already use, so a drag
+  and a scripted `timeline.move_clip`/`timeline.trim_clip` call are provably the same edit rather than
+  two independent implementations that merely look alike.
+  - **Rendering** (Requirement 8.1/8.2): each track is a horizontal lane; each clip, a rectangle
+    positioned and sized from its timeline start and duration by a `pixelsPerSecond_`-driven
+    `xForDuration()`; a ruler along the top picks "nice" 1/2/5×10ⁿ-second tick spacing at the current
+    zoom; a playhead marker is drawn at `setPlayhead()`'s position.
+  - **Click-to-seek** (Requirement 8.3): a press that misses every clip (`hitTestClip()` returns
+    `std::nullopt`) emits `seekRequested(ms)`, which `TimelinePanel` forwards to the existing frame-
+    snapping `movePlayheadToMs()` path Phase 1 already built — no new snapping logic, reusing Phase 1's.
+  - **Zoom** (Requirement 8.4): a Ctrl+wheel event scales `pixelsPerSecond_` (clamped
+    `[1.0, 2000.0]`) pivoting on the *playhead's own current pixel position*, not the cursor's, which is
+    what "keeps the playhead visible across a zoom change" concretely means when nothing yet scrolls the
+    view horizontally.
+  - **Drag-move and drag-trim** (Requirement 8.5/8.6): a press inside a clip's rectangle classifies the
+    zone (`DragKind::Move`, or `TrimStart`/`TrimEnd` within `kEdgeGrabPx = 6` of an edge) and records a
+    `DragState`; a move updates a live pixel delta and repaints; a release converts the delta to a
+    `Duration` and calls the matching `TimelineViewModel` method. A refusal (an overlap, or a trim to a
+    non-positive duration) never mutates the model, so the next repaint — from the model's own
+    unchanged state — *is* the visual revert; no separate undo of a rejected edit is needed because none
+    was ever applied.
+  - **Selection** (Requirement 8.7): `selectedClipId()`/`selectTrack()`/`clearSelection()` replace the
+    tree's `QItemSelectionModel`, with the same stale-selection-clearing behaviour Requirement 1.3
+    already required of the tree (proven again below for the graphical replacement).
+- **`ui::TimelinePanel`** now hosts `TimelineGraphView* graph_` in place of `QTreeView* tree_`;
+  `selectedClipId()`/`selectedTrackId()` forward to it directly, and `refreshTransportState()` calls
+  `graph_->setPlayhead(...)` instead of reconciling a tree selection.
+- **Tests** (`tests/ui/shell_unit_test.cpp`, a new `TimelineGraphViewTest` fixture): geometry at the
+  default zoom and after a zoom change; a drag that would overlap leaves `undoDepth()` unchanged (proof
+  that nothing applied, not merely that the visible position is unchanged); a drag-move applied through
+  the widget and the identical move applied through `timeline.move_clip` produce byte-equal project
+  state; a clip deleted while selected reports the selection cleared after `refresh()`. Two pre-existing
+  tests that drove the old tree's `QItemSelectionModel` directly were rewritten to call
+  `TimelineGraphView::selectTrack()` instead.
+
+### Verification evidence
+
+The final CI log (`03b12db`, run `32453661873`) shows all five new `TimelineGraphViewTest` cases
+passing (1295 → 1300 total), the explicit CTest summary above, and the smoke test's "OK: drove
+Edit > Add Video Track via the keyboard" line confirming the shell still drives end to end with the
+tree gone. `docs/UPSTREAM_PARITY.md`'s parity re-score then landed at `6f5f261` (run `32455067036`,
+1300/1300 again, no new failures): `timeline editing` (table 2) moves `partial` → `present` — every
+operation the row's own linux-components list could not previously reach (a graphical view; effect
+removal/reorder, closed in Task 9) is now reachable, so the row's priority/rationale/macos-framework/
+linux-replacement all become `-`. `linux-ref` advanced to `03b12db`. Build order re-derived: 25 entries
+(was 26; `timeline editing` left the list, taking the document's *only remaining* `must`-priority row
+in table 2 down to one — `MCP and agent chat`), 1 `must`/14 `should`/10 `later` (was 2 `must`); counts 9
+`present`/10 `partial`/15 `absent` (was 8/11/15). `docs/PORT_BACKLOG.md` has no entry naming a
+graphical timeline, drag or zoom operation — Requirement 8 is a spec-only requirement, not a deferred
+upstream port, so no backlog update was needed, matching Tasks 9 and 10. Confirmed by diffing
+`src/services/ToolRegistry.cpp`, `tests/services/tool_schema_conformance_property_test.cpp`,
+`tests/docs/documentation_consistency_test.cpp` and `docs/TOOLS.md` against Task 10's completion commit
+(`104ae3f..HEAD`, empty diff on all four): Task 11 adds no new tool — every drag and trim reuses
+`timeline.move_clip`/`timeline.trim_clip`, both already published — so the Class 1/Class 2
+schema-conformance and documentation-consistency checks were never at risk from this task, and the full
+green run above confirms it.
+
+### CI incidents 12–16
+
+Five consecutive CI cycles ran against one stubborn test before the actual root cause surfaced — a
+useful record precisely because four of the five "fixes" were real, necessary corrections to something
+else entirely, and only the fifth was the true cause.
+
+- **Incident 12 — a missing include on the very first push (run `32450698765`, commit `64050ae`, build
+  failure).** `TimelineGraphView.hpp` used `ClipId` without including `core/Clip.hpp` — only
+  `core/Duration.hpp`/`core/Uuid.hpp` had been pulled in while drafting the header, and no earlier
+  header transitively supplied it in this translation unit. Fixed at `d3217b7` by adding the include,
+  plus several other explicit includes (`QColor`/`QPalette`/`QPen`/`QRect` in the `.cpp`,
+  `QPoint`/`QPointF`/`core/Result.hpp`/`services/Json.hpp` in the test file) added defensively while
+  already touching includes, none confirmed to be the actual bug.
+- **Incident 13 — a wrong test assumption about pre-existing undo history (run `32451149588`, commit
+  `d3217b7`, 1 of 2 failures).**
+  `ADragThatWouldOverlapAnotherClipLeavesTheProjectUnchanged` asserted `EXPECT_FALSE(canUndo())` after a
+  refused drag, but the fixture's own seed setup (`AddTrackCommand` + two `AddClipCommand`s) already
+  left undo history behind — `canUndo()` was `true` before the drag ever ran, so the assertion could
+  never have passed regardless of whether the drag itself did anything. Fixed at `6cc29ce` by comparing
+  `TimelineEngine::undoDepth()` before and after instead of asserting an absolute `canUndo()` value.
+- **Incident 14 — `QEvent::MouseMove` is not reliably deliverable through `sendEvent()` (runs
+  `32451149588`, `32451862549` and `32452326313`, commits `d3217b7`→`fe76bed`, 1 failure across three
+  runs).** `DragMoveAndTimelineMoveClipProduceEqualState` constructed a synthetic
+  `QMouseEvent(QEvent::MouseMove, ...)` and dispatched it with `QCoreApplication::sendEvent()` — the
+  standard technique, and the one already used successfully for press/release/wheel events in the same
+  file. It never reached `mouseMoveEvent()`: Qt6's `QSinglePointEvent`-derived move events are
+  documented as unreliable to synthesize this way without a real platform mouse grab. Two escalating
+  fixes were tried: first, a `friend class TimelineGraphViewFriendAccess` calling `mouseMoveEvent()`
+  directly for just the move step (commit `6cc29ce`) — this compiled and one of the two failing tests
+  (`ADragThatWouldOverlapAnotherClipLeavesTheProjectUnchanged`, already separately fixed by incident 13)
+  now passed, but `DragMoveAndTimelineMoveClipProduceEqualState` still failed identically. Second,
+  routing press/move/release *all three* through the same friend accessor (commit `fe76bed`), removing
+  `sendEvent()` from the drag path entirely — this also still failed identically, which was the
+  decisive evidence that event delivery was never the drag test's actual remaining problem.
+- **Incident 15 — a diagnostic detour, not a defect.** With event delivery fully eliminated as a
+  variable and the failure unchanged, two temporary diagnostic commits (`0cdf54b`, `11c3f88`) added an
+  assertion checking `selectedClipId()` after the press (confirmed hit-testing was correct — the press
+  step was never the problem) and then one printing `TimelineViewModel::lastIndication()`/
+  `lastMessage()` after the release. The message read exactly: *"MoveClipCommand: destination overlaps
+  an existing clip on the track; move rejected."* Both diagnostic commits were reverted in the fix that
+  followed rather than left in the shipped test.
+- **Incident 16 — the true cause: the test's own target destination overlapped (run `32452828146`/
+  `32453237352`, fixed at commit `03b12db`).** The test dragged the second clip (seeded at
+  `[1500, 2500)ms`) left by 1000ms to a target `timelineStart` of 500ms — but the *first* clip spans
+  `[0, 1000)ms`, so a clip moved to start at 500ms and lasting 1000ms would span `[500, 1500)ms`,
+  overlapping the first clip for `[500, 1000)`. `MoveClipCommand`'s Requirement 8.5 refusal logic was
+  correctly rejecting a genuinely invalid drag the whole time; nothing in `TimelineGraphView` or its
+  event handling was ever broken by the time incident 14's fixes landed. Fixed by changing the drag
+  distance to move the clip left by only 500ms, to `timelineStart = 1000ms` — landing it exactly at the
+  first clip's end. `MoveClipCommand`'s own overlap check (`previous.timelineEnd() - current.timelineStart`
+  compared against zero, not `<` zero) treats an exact touch as valid, confirmed by reading
+  `trackOrderedAndNonOverlapping()` in `src/core/EditCommands.cpp` before relying on it.
+
+The lesson recorded for later phases: when a test asserts a *positive* outcome (a value must change) and
+a *negative*-outcome sibling test on the same gesture passes, the negative test's pass proves nothing
+about whether the gesture itself works — "nothing happened" and "something happened but was correctly
+refused" are observationally identical to an assertion that only checks state is unchanged. Only the
+positive-outcome test can distinguish them, so when it alone keeps failing after every event-delivery
+fix has been proven to compile and to run (confirmed here by eliminating `sendEvent()` entirely and
+still reproducing the identical failure), the more productive next step is to ask the code itself what
+happened — `lastIndication()`/`lastMessage()` were already public and needed no new instrumentation —
+rather than to keep revising how the input event is delivered.
+
+Phase 4 Tasks 12–15 and Phase 5 Tasks 16–17 remain unstarted.
