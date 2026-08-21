@@ -108,62 +108,8 @@ Result<void> SetClipPropertyCommand::revert(Project& project) {
     return ok();
 }
 
-// ===========================================================================
-// SetEffectParameterCommand
-// ===========================================================================
-
-SetEffectParameterCommand::SetEffectParameterCommand(ClipId clipId, Uuid effectId,
-                                                     std::string parameter, double value)
-    : clipId_(clipId),
-      effectId_(effectId),
-      parameter_(std::move(parameter)),
-      value_(value) {}
-
-Result<void> SetEffectParameterCommand::apply(Project& project) {
-    std::optional<MutableClipLocation> loc = locateClip(project, clipId_);
-    if (!loc) {
-        return err(notFound("SetEffectParameterCommand: clip " + idLabel(clipId_) + " not found"));
-    }
-    std::vector<Effect>& effects = loc->track->clips[loc->index].effects;
-    auto it = std::find_if(effects.begin(), effects.end(),
-                           [&](const Effect& e) { return e.id == effectId_; });
-    if (it == effects.end()) {
-        return err(notFound("SetEffectParameterCommand: effect " + idLabel(effectId_) +
-                            " not found on clip " + idLabel(clipId_)));
-    }
-
-    // Capture the prior value (or its absence) so revert() is an exact inverse.
-    auto param = it->parameters.find(parameter_);
-    hadPrior_ = param != it->parameters.end();
-    prior_ = hadPrior_ ? param->second : 0.0;
-    captured_ = true;
-
-    it->parameters[parameter_] = value_;
-    return ok();
-}
-
-Result<void> SetEffectParameterCommand::revert(Project& project) {
-    if (!captured_) {
-        return err(failedPrecondition("SetEffectParameterCommand: revert before a successful apply"));
-    }
-    std::optional<MutableClipLocation> loc = locateClip(project, clipId_);
-    if (!loc) {
-        return err(notFound("SetEffectParameterCommand: clip " + idLabel(clipId_) + " not found"));
-    }
-    std::vector<Effect>& effects = loc->track->clips[loc->index].effects;
-    auto it = std::find_if(effects.begin(), effects.end(),
-                           [&](const Effect& e) { return e.id == effectId_; });
-    if (it == effects.end()) {
-        return err(notFound("SetEffectParameterCommand: effect " + idLabel(effectId_) +
-                            " not found on clip " + idLabel(clipId_)));
-    }
-    if (hadPrior_) {
-        it->parameters[parameter_] = prior_;
-    } else {
-        it->parameters.erase(parameter_);
-    }
-    return ok();
-}
+// SetEffectParameterCommand moved to core::EditCommands (task 9; Requirement 6.1);
+// see InspectorViewModel::setEffectParameter() below.
 
 // ===========================================================================
 // InspectorViewModel
@@ -252,8 +198,36 @@ CommandResult InspectorViewModel::setEffectParameter(Uuid effectId, std::string 
     if (!selected_) {
         return CommandResult::failed(failedPrecondition("Inspector: no clip is selected"));
     }
+    // Requirement 6.1/6.3: this is now the same route addEffect() takes, since
+    // `timeline.set_effect_parameter` is a published tool the MCP endpoint and the
+    // in-app agent can also reach; there is no longer an Inspector-only command.
+    if (gateway_ != nullptr) {
+        return toCommandResult(
+            gateway_->setEffectParameter(*selected_, effectId, parameter, value));
+    }
     return engine_.apply(std::make_unique<SetEffectParameterCommand>(
         *selected_, effectId, std::move(parameter), value));
+}
+
+CommandResult InspectorViewModel::removeEffect(Uuid effectId) {
+    if (!selected_) {
+        return CommandResult::failed(failedPrecondition("Inspector: no clip is selected"));
+    }
+    if (gateway_ != nullptr) {
+        return toCommandResult(gateway_->removeEffect(*selected_, effectId));
+    }
+    return engine_.apply(std::make_unique<RemoveEffectCommand>(*selected_, effectId));
+}
+
+CommandResult InspectorViewModel::reorderEffects(std::vector<Uuid> newOrder) {
+    if (!selected_) {
+        return CommandResult::failed(failedPrecondition("Inspector: no clip is selected"));
+    }
+    if (gateway_ != nullptr) {
+        return toCommandResult(gateway_->reorderEffects(*selected_, newOrder));
+    }
+    return engine_.apply(
+        std::make_unique<ReorderEffectsCommand>(*selected_, std::move(newOrder)));
 }
 
 CommandResult InspectorViewModel::setOpacity(double opacity) {

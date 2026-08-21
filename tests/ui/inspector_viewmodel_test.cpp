@@ -18,9 +18,12 @@
 //   * the onChanged callback fires on selection changes, on the model's own
 //     edits, and on external edits (undo / other surfaces).
 //
-// The view model and its two extra commands (SetClipPropertyCommand,
-// SetEffectParameterCommand) are compiled directly into this binary alongside
-// Palmier::core, so the tests run without Qt or PALMIER_BUILD_UI.
+// The view model and its own extra command (SetClipPropertyCommand) are compiled
+// directly into this binary alongside Palmier::core, so the tests run without Qt
+// or PALMIER_BUILD_UI. SetEffectParameterCommand, RemoveEffectCommand and
+// ReorderEffectsCommand (task 9) now live in core::EditCommands, since
+// `timeline.set_effect_parameter`/`remove_effect`/`reorder_effects` are published
+// Tool_Surface operations and not Inspector-only.
 
 #include "ui/InspectorViewModel.hpp"
 
@@ -176,6 +179,87 @@ TEST(InspectorViewModel, SetEffectParameterOnMissingEffectFailsAndLeavesProjectU
     EXPECT_TRUE(r.isError());
     EXPECT_EQ(r.error().code(), ErrorCode::NotFound);
     EXPECT_TRUE(engine.clip(clip)->effects.empty());
+}
+
+// --- Remove effect (task 9.2; Requirement 6.1, 6.2, 6.5) --------------------
+
+TEST(InspectorViewModel, RemoveEffectRemovesItAndUndoesExactly) {
+    const ClipId clip = Uuid::generateV4();
+    Project project = makeProjectWithClip(clip);
+    const Effect fx = Effect::brightness(0.1);
+    project.tracks[0].clips[0].effects.push_back(fx);
+    TimelineEngine engine(std::move(project));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    const CommandResult r = model.removeEffect(fx.id);
+    ASSERT_TRUE(r.changed());
+    EXPECT_TRUE(engine.clip(clip)->effects.empty());
+
+    // Requirement 6.2: the removal is one Undo, and it is exact.
+    ASSERT_TRUE(engine.undo().changed());
+    ASSERT_EQ(engine.clip(clip)->effects.size(), 1u);
+    EXPECT_EQ(engine.clip(clip)->effects[0].id, fx.id);
+    EXPECT_FALSE(engine.canUndo());
+}
+
+TEST(InspectorViewModel, RemoveEffectOnMissingEffectFailsAndLeavesProjectUnchanged) {
+    const ClipId clip = Uuid::generateV4();
+    Project project = makeProjectWithClip(clip);
+    project.tracks[0].clips[0].effects.push_back(Effect::brightness(0.1));
+    TimelineEngine engine(std::move(project));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    // Requirement 6.5: naming an effect the clip does not carry is refused.
+    const CommandResult r = model.removeEffect(Uuid::generateV4());
+    EXPECT_TRUE(r.isError());
+    EXPECT_EQ(r.error().code(), ErrorCode::NotFound);
+    EXPECT_EQ(engine.clip(clip)->effects.size(), 1u);
+    EXPECT_FALSE(engine.canUndo());
+}
+
+// --- Reorder effects (task 9.2; Requirement 6.1, 6.4, 6.5) ------------------
+
+TEST(InspectorViewModel, ReorderEffectsChangesOrderAndUndoesExactly) {
+    const ClipId clip = Uuid::generateV4();
+    Project project = makeProjectWithClip(clip);
+    const Effect first = Effect::brightness(0.1);
+    const Effect second = Effect::contrast(0.2);
+    project.tracks[0].clips[0].effects.push_back(first);
+    project.tracks[0].clips[0].effects.push_back(second);
+    TimelineEngine engine(std::move(project));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    const CommandResult r = model.reorderEffects({second.id, first.id});
+    ASSERT_TRUE(r.changed());
+    ASSERT_EQ(engine.clip(clip)->effects.size(), 2u);
+    EXPECT_EQ(engine.clip(clip)->effects[0].id, second.id);
+    EXPECT_EQ(engine.clip(clip)->effects[1].id, first.id);
+
+    // One Undo restores the prior order exactly.
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_EQ(engine.clip(clip)->effects[0].id, first.id);
+    EXPECT_EQ(engine.clip(clip)->effects[1].id, second.id);
+    EXPECT_FALSE(engine.canUndo());
+}
+
+TEST(InspectorViewModel, ReorderEffectsWithAnUnknownIdFailsAndLeavesProjectUnchanged) {
+    const ClipId clip = Uuid::generateV4();
+    Project project = makeProjectWithClip(clip);
+    const Effect fx = Effect::brightness(0.1);
+    project.tracks[0].clips[0].effects.push_back(fx);
+    TimelineEngine engine(std::move(project));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    // Requirement 6.5: an id the clip does not carry is refused, not substituted.
+    const CommandResult r = model.reorderEffects({Uuid::generateV4()});
+    EXPECT_TRUE(r.isError());
+    EXPECT_EQ(engine.clip(clip)->effects.size(), 1u);
+    EXPECT_EQ(engine.clip(clip)->effects[0].id, fx.id);
+    EXPECT_FALSE(engine.canUndo());
 }
 
 // --- Set opacity / gain ----------------------------------------------------

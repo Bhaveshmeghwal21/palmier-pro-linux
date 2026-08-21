@@ -68,6 +68,10 @@ constexpr const char* kRippleDelete   = "timeline.ripple_delete";
 constexpr const char* kRippleTrim     = "timeline.ripple_trim";
 constexpr const char* kCloseGap       = "timeline.close_gap";
 constexpr const char* kAddEffect      = "timeline.add_effect";
+// Effect lifecycle management (usable-editor Phase 3 task 9; Requirement 6).
+constexpr const char* kRemoveEffect        = "timeline.remove_effect";
+constexpr const char* kReorderEffects      = "timeline.reorder_effects";
+constexpr const char* kSetEffectParameter  = "timeline.set_effect_parameter";
 constexpr const char* kAddTransition  = "timeline.add_transition";
 constexpr const char* kGenerate       = "generation.generate";
 constexpr const char* kListModels     = "generation.list_models";
@@ -972,6 +976,123 @@ Tool makeAddEffectTool(ProjectSession* session) {
     return t;
 }
 
+// ---------------------------------------------------------------------------
+// Effect lifecycle management (task 9.2; Requirement 6). These three sit right
+// after the append that AddEffectCommand publishes, covering the rest of a
+// clip's effect chain: remove one by id, reorder the chain, and change an
+// existing effect's parameter. All three refuse (leaving the project untouched)
+// when the clip or the named effect is not found (Requirement 6.5).
+// ---------------------------------------------------------------------------
+
+Tool makeRemoveEffectTool(ProjectSession* session) {
+    Tool t;
+    t.name = kRemoveEffect;
+    t.description = "Remove one effect from a clip's effect chain by id.";
+    t.schema
+        .arg(uuidArg("clipId", true, "UUID of the clip carrying the effect."))
+        .arg(uuidArg("effectId", true, "UUID of the effect to remove."));
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kRemoveEffect));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> clipId = requireUuid(in, "clipId");
+        if (clipId.isError()) return err<Json>(std::move(clipId).error());
+        Result<Uuid> effectId = requireUuid(in, "effectId");
+        if (effectId.isError()) return err<Json>(std::move(effectId).error());
+
+        Json out = Json::object();
+        out.set("clipId", clipId.value().toString());
+        out.set("effectId", effectId.value().toString());
+        return applyCommand(
+            engine, std::make_unique<RemoveEffectCommand>(clipId.value(), effectId.value()),
+            std::move(out));
+    };
+    return t;
+}
+
+Tool makeReorderEffectsTool(ProjectSession* session) {
+    Tool t;
+    t.name = kReorderEffects;
+    t.description = "Reorder a clip's effect chain (preserves effect count).";
+    // NOT expressible: the vocabulary constrains an array's item count but not its
+    // item shape, so "every entry is a canonical UUID string" is checked in the
+    // handler, and "the entries are a permutation of the clip's effects" depends
+    // on project state and stays with ReorderEffectsCommand.
+    t.schema
+        .arg(uuidArg("clipId", true, "UUID of the clip whose effect chain is reordered."))
+        .arg(ArgSpec{.name = "order",
+                     .kind = JsonKind::Array,
+                     .required = true,
+                     .description =
+                         "Effect UUIDs, a permutation of the clip's current effects."});
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kReorderEffects));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> clipId = requireUuid(in, "clipId");
+        if (clipId.isError()) return err<Json>(std::move(clipId).error());
+        const Json* order = in.find("order");
+        if (order == nullptr || !order->isArray()) {
+            return err<Json>(invalidArgument("missing or non-array field 'order'"));
+        }
+        std::vector<Uuid> newOrder;
+        newOrder.reserve(order->asArray().size());
+        for (const Json& entry : order->asArray()) {
+            if (!entry.isString()) {
+                return err<Json>(invalidArgument("field 'order' must contain UUID strings"));
+            }
+            std::optional<Uuid> parsed = Uuid::parse(entry.asString());
+            if (!parsed) {
+                return err<Json>(invalidArgument("field 'order' contains an invalid UUID"));
+            }
+            newOrder.push_back(*parsed);
+        }
+        Json out = Json::object();
+        out.set("clipId", clipId.value().toString());
+        return applyCommand(
+            engine, std::make_unique<ReorderEffectsCommand>(clipId.value(), std::move(newOrder)),
+            std::move(out));
+    };
+    return t;
+}
+
+Tool makeSetEffectParameterTool(ProjectSession* session) {
+    Tool t;
+    t.name = kSetEffectParameter;
+    t.description = "Set (or insert) a named numeric parameter on one of a clip's effects.";
+    t.schema
+        .arg(uuidArg("clipId", true, "UUID of the clip carrying the effect."))
+        .arg(uuidArg("effectId", true, "UUID of the effect to change."))
+        .arg(ArgSpec{.name = "parameter",
+                     .kind = JsonKind::String,
+                     .required = true,
+                     .description = "Name of the parameter to set."})
+        .arg(ArgSpec{.name = "value",
+                     .kind = JsonKind::Number,
+                     .required = true,
+                     .description = "New numeric value for the parameter."});
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kSetEffectParameter));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> clipId = requireUuid(in, "clipId");
+        if (clipId.isError()) return err<Json>(std::move(clipId).error());
+        Result<Uuid> effectId = requireUuid(in, "effectId");
+        if (effectId.isError()) return err<Json>(std::move(effectId).error());
+        Result<std::string> parameter = requireString(in, "parameter");
+        if (parameter.isError()) return err<Json>(std::move(parameter).error());
+        Result<double> value = requireNumber(in, "value");
+        if (value.isError()) return err<Json>(std::move(value).error());
+
+        Json out = Json::object();
+        out.set("clipId", clipId.value().toString());
+        out.set("effectId", effectId.value().toString());
+        return applyCommand(engine,
+                            std::make_unique<SetEffectParameterCommand>(
+                                clipId.value(), effectId.value(), parameter.value(),
+                                value.value()),
+                            std::move(out));
+    };
+    return t;
+}
+
 Tool makeAddTransitionTool(ProjectSession* session) {
     Tool t;
     t.name = kAddTransition;
@@ -1837,6 +1958,10 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(makeRippleTrimTool(session));
     registry.add(makeCloseGapTool(session));
     registry.add(makeAddEffectTool(session));
+    // Effect lifecycle sits right after the append it completes (task 9.2).
+    registry.add(makeRemoveEffectTool(session));
+    registry.add(makeReorderEffectsTool(session));
+    registry.add(makeSetEffectParameterTool(session));
     registry.add(makeAddTransitionTool(session));
     registry.add(makeUndoTool(session));
     registry.add(makeRedoTool(session));

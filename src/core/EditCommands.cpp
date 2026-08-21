@@ -960,4 +960,163 @@ Result<void> CloseGapCommand::revert(Project& project) {
     return ok();
 }
 
+// ===========================================================================
+// RemoveEffectCommand
+// ===========================================================================
+
+RemoveEffectCommand::RemoveEffectCommand(ClipId clipId, Uuid effectId)
+    : clipId_(clipId), effectId_(effectId) {}
+
+Result<void> RemoveEffectCommand::apply(Project& project) {
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("RemoveEffectCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    std::vector<Effect>& effects = loc->track->clips[loc->index].effects;
+    auto it = std::find_if(effects.begin(), effects.end(),
+                           [&](const Effect& e) { return e.id == effectId_; });
+    if (it == effects.end()) {
+        return err(notFound("RemoveEffectCommand: effect " + idLabel(effectId_) +
+                            " not found on clip " + idLabel(clipId_)));
+    }
+    index_ = static_cast<std::size_t>(std::distance(effects.begin(), it));
+    removed_ = *it;
+    effects.erase(it);
+    return ok();
+}
+
+Result<void> RemoveEffectCommand::revert(Project& project) {
+    if (!removed_) {
+        return err(failedPrecondition("RemoveEffectCommand: revert before a successful apply"));
+    }
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("RemoveEffectCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    std::vector<Effect>& effects = loc->track->clips[loc->index].effects;
+    const std::size_t index = std::min(index_, effects.size());
+    effects.insert(effects.begin() + static_cast<std::ptrdiff_t>(index), *removed_);
+    return ok();
+}
+
+// ===========================================================================
+// ReorderEffectsCommand
+// ===========================================================================
+
+ReorderEffectsCommand::ReorderEffectsCommand(ClipId clipId, std::vector<Uuid> newOrder)
+    : clipId_(clipId), newOrder_(std::move(newOrder)) {}
+
+Result<void> ReorderEffectsCommand::apply(Project& project) {
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("ReorderEffectsCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    std::vector<Effect>& effects = loc->track->clips[loc->index].effects;
+
+    // newOrder_ must be a permutation of the clip's current effect ids.
+    if (newOrder_.size() != effects.size()) {
+        return err(invalidArgument(
+            "ReorderEffectsCommand: new order size does not match the clip's effect count"));
+    }
+    std::unordered_map<Uuid, std::size_t> present;
+    present.reserve(effects.size());
+    for (const Effect& effect : effects) {
+        ++present[effect.id];
+    }
+    for (const Uuid& id : newOrder_) {
+        auto it = present.find(id);
+        if (it == present.end() || it->second == 0) {
+            return err(invalidArgument(
+                "ReorderEffectsCommand: new order is not a permutation of the clip's effects"));
+        }
+        --it->second;
+    }
+
+    priorEffects_ = effects;  // capture for an exact revert
+    captured_ = true;
+
+    // A pure permutation: no field of an Effect depends on its position in the
+    // chain, so the new order is simply the requested ids looked up in the prior
+    // list (Requirement 6.4 — rendering, not this command, is what reads the
+    // resulting order and changes output accordingly).
+    std::vector<Effect> reordered;
+    reordered.reserve(newOrder_.size());
+    for (const Uuid& id : newOrder_) {
+        auto it = std::find_if(priorEffects_.begin(), priorEffects_.end(),
+                               [&](const Effect& e) { return e.id == id; });
+        reordered.push_back(*it);
+    }
+    effects = std::move(reordered);
+    return ok();
+}
+
+Result<void> ReorderEffectsCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition("ReorderEffectsCommand: revert before a successful apply"));
+    }
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("ReorderEffectsCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    loc->track->clips[loc->index].effects = priorEffects_;
+    return ok();
+}
+
+// ===========================================================================
+// SetEffectParameterCommand
+// ===========================================================================
+
+SetEffectParameterCommand::SetEffectParameterCommand(ClipId clipId, Uuid effectId,
+                                                     std::string parameter, double value)
+    : clipId_(clipId),
+      effectId_(effectId),
+      parameter_(std::move(parameter)),
+      value_(value) {}
+
+Result<void> SetEffectParameterCommand::apply(Project& project) {
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("SetEffectParameterCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    std::vector<Effect>& effects = loc->track->clips[loc->index].effects;
+    auto it = std::find_if(effects.begin(), effects.end(),
+                           [&](const Effect& e) { return e.id == effectId_; });
+    if (it == effects.end()) {
+        return err(notFound("SetEffectParameterCommand: effect " + idLabel(effectId_) +
+                            " not found on clip " + idLabel(clipId_)));
+    }
+
+    // Capture the prior value (or its absence) so revert() is an exact inverse.
+    auto param = it->parameters.find(parameter_);
+    hadPrior_ = param != it->parameters.end();
+    prior_ = hadPrior_ ? param->second : 0.0;
+    captured_ = true;
+
+    it->parameters[parameter_] = value_;
+    return ok();
+}
+
+Result<void> SetEffectParameterCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition("SetEffectParameterCommand: revert before a successful apply"));
+    }
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("SetEffectParameterCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    std::vector<Effect>& effects = loc->track->clips[loc->index].effects;
+    auto it = std::find_if(effects.begin(), effects.end(),
+                           [&](const Effect& e) { return e.id == effectId_; });
+    if (it == effects.end()) {
+        return err(notFound("SetEffectParameterCommand: effect " + idLabel(effectId_) +
+                            " not found on clip " + idLabel(clipId_)));
+    }
+    if (hadPrior_) {
+        it->parameters[parameter_] = prior_;
+    } else {
+        it->parameters.erase(parameter_);
+    }
+    return ok();
+}
+
 }  // namespace palmier

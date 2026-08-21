@@ -431,7 +431,43 @@ private:
     services::Json parameters = object();
     parameters.set("amount", 0.25);
     effect.set("parameters", std::move(parameters));
-    observer.run("timeline.add_effect", effect);
+    const services::Json firstEffect = observer.run("timeline.add_effect", effect);
+    const std::string firstEffectId = firstEffect.stringOr("effectId");
+
+    // Effect lifecycle management (task 9; Requirement 6), exercised on the same
+    // clip: a parameter change on the effect just added, a second effect to make
+    // the reorder genuine (the reverse of the current two-element order), and then
+    // the second effect removed, so `timeline.remove_effect`'s payload is observed
+    // without leaving `secondClip` without any effect for the reorder to have
+    // acted on in the first place.
+    services::Json setParameter = object();
+    setParameter.set("clipId", secondClip);
+    setParameter.set("effectId", firstEffectId);
+    setParameter.set("parameter", std::string{"amount"});
+    setParameter.set("value", 0.4);
+    observer.run("timeline.set_effect_parameter", setParameter);
+
+    services::Json secondEffectArgs = object();
+    secondEffectArgs.set("clipId", secondClip);
+    secondEffectArgs.set("type", std::string{"contrast"});
+    services::Json secondParameters = object();
+    secondParameters.set("amount", 0.1);
+    secondEffectArgs.set("parameters", std::move(secondParameters));
+    const services::Json secondEffect = observer.run("timeline.add_effect", secondEffectArgs);
+    const std::string secondEffectId = secondEffect.stringOr("effectId");
+
+    services::Json reorderEffects = object();
+    reorderEffects.set("clipId", secondClip);
+    services::Json effectOrder = services::Json::array();
+    effectOrder.push_back(services::Json(secondEffectId));
+    effectOrder.push_back(services::Json(firstEffectId));
+    reorderEffects.set("order", std::move(effectOrder));
+    observer.run("timeline.reorder_effects", reorderEffects);
+
+    services::Json removeEffect = object();
+    removeEffect.set("clipId", secondClip);
+    removeEffect.set("effectId", secondEffectId);
+    observer.run("timeline.remove_effect", removeEffect);
 
     services::Json transition = object();
     transition.set("clipId", secondClip);

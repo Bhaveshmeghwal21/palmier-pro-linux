@@ -106,6 +106,16 @@ public:
     /// timeline.add_effect
     [[nodiscard]] Result<Json> addEffect(ClipId clipId, const Effect& effect);
 
+    /// timeline.remove_effect (task 9.2; Requirement 6.1)
+    [[nodiscard]] Result<Json> removeEffect(ClipId clipId, Uuid effectId);
+
+    /// timeline.reorder_effects (task 9.2; Requirement 6.1, 6.4)
+    [[nodiscard]] Result<Json> reorderEffects(ClipId clipId, std::vector<Uuid> newOrder);
+
+    /// timeline.set_effect_parameter (task 9.2; Requirement 6.1, 6.3)
+    [[nodiscard]] Result<Json> setEffectParameter(ClipId clipId, Uuid effectId,
+                                                  const std::string& parameter, double value);
+
     /// timeline.add_transition
     [[nodiscard]] Result<Json> addTransition(ClipId clipId, TransitionKind kind,
                                              Duration duration);

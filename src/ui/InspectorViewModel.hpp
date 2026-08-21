@@ -23,17 +23,18 @@
 // refreshes the panel through the same onChanged callback.
 //
 // Gateway routing (task 11.4; Requirements 1.7, 9.4, 11.5): addEffect() (and its
-// addBrightnessEffect/addContrastEffect/addBlurEffect convenience wrappers) and
-// trimStart()/trimEnd() are routed through an optional `ui::GuiToolGateway` when
-// one is installed, because `timeline.add_effect` and `timeline.trim_clip` are
-// published tools that the MCP endpoint and the in-app agent already call
-// through the identical EditCommand path. setOpacity(), setGain() and
-// setEffectParameter() have NO tool-surface equivalent — SetClipPropertyCommand
-// and SetEffectParameterCommand are Inspector-only commands not exposed as MCP
-// tools — so they always call TimelineEngine::apply directly; routing them
-// through a nonexistent tool is not an option this task adds. With no gateway
-// installed (the default), every mutation calls the engine directly, exactly as
-// before.
+// addBrightnessEffect/addContrastEffect/addBlurEffect convenience wrappers),
+// trimStart()/trimEnd(), removeEffect(), reorderEffects() and
+// setEffectParameter() (task 9) are routed through an optional
+// `ui::GuiToolGateway` when one is installed, because each has a published tool
+// (`timeline.add_effect`, `timeline.trim_clip`, `timeline.remove_effect`,
+// `timeline.reorder_effects`, `timeline.set_effect_parameter`) that the MCP
+// endpoint and the in-app agent already call through the identical EditCommand
+// path. setOpacity() and setGain() have NO tool-surface equivalent —
+// SetClipPropertyCommand is Inspector-only, not exposed as an MCP tool — so it
+// always calls TimelineEngine::apply directly; routing it through a nonexistent
+// tool is not an option this task adds. With no gateway installed (the default),
+// every mutation calls the engine directly, exactly as before.
 
 #ifndef PALMIER_UI_INSPECTORVIEWMODEL_HPP
 #define PALMIER_UI_INSPECTORVIEWMODEL_HPP
@@ -125,27 +126,10 @@ private:
     bool     captured_ = false;
 };
 
-/// Set (or insert) a named scalar parameter on one effect in a clip's chain.
-/// revert() restores the parameter's prior value, or removes the key entirely if
-/// it did not previously exist.
-class SetEffectParameterCommand final : public EditCommand {
-public:
-    SetEffectParameterCommand(ClipId clipId, Uuid effectId, std::string parameter,
-                              double value);
-
-    [[nodiscard]] std::string_view name() const noexcept override { return "SetEffectParameter"; }
-    [[nodiscard]] Result<void> apply(Project& project) override;
-    [[nodiscard]] Result<void> revert(Project& project) override;
-
-private:
-    ClipId      clipId_;
-    Uuid        effectId_;
-    std::string parameter_;
-    double      value_;
-    bool        hadPrior_ = false;
-    double      prior_ = 0.0;
-    bool        captured_ = false;
-};
+// SetEffectParameterCommand moved to core::EditCommands (usable-editor task 9;
+// Requirement 6.1), since a parameter change is now a Tool_Surface operation
+// (`timeline.set_effect_parameter`) and not Inspector-only. setEffectParameter()
+// below constructs the core:: type.
 
 // ---------------------------------------------------------------------------
 // InspectorViewModel — selection state + read projection + edit -> command map.
@@ -200,6 +184,15 @@ public:
     [[nodiscard]] CommandResult setEffectParameter(Uuid effectId, std::string parameter,
                                                    double value);
 
+    /// Remove an effect from the selected clip's chain by id (RemoveEffectCommand;
+    /// Requirement 6.1, 6.2).
+    [[nodiscard]] CommandResult removeEffect(Uuid effectId);
+
+    /// Reorder the selected clip's effect chain (ReorderEffectsCommand;
+    /// Requirement 6.1, 6.4). `newOrder` must name every effect currently on the
+    /// clip exactly once.
+    [[nodiscard]] CommandResult reorderEffects(std::vector<Uuid> newOrder);
+
     /// Adjust the selected clip's opacity / gain (SetClipPropertyCommand). An
     /// out-of-range value is rejected by the engine and the project left unchanged.
     [[nodiscard]] CommandResult setOpacity(double opacity);
@@ -220,7 +213,8 @@ public:
     void setOnChanged(std::function<void()> callback);
 
     /// Install (or clear, with nullptr) the gateway addEffect()/trimStart()/
-    /// trimEnd() route through.
+    /// trimEnd()/removeEffect()/reorderEffects()/setEffectParameter() route
+    /// through.
     void setGateway(ui::GuiToolGateway* gateway) noexcept { gateway_ = gateway; }
 
     /// The currently installed gateway, or nullptr when those mutations call

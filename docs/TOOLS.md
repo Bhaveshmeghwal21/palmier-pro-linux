@@ -391,6 +391,54 @@ An unknown `type` is rejected rather than silently becoming `custom`.
 
 Result: `effectId` (string), *(command result)*.
 
+## `timeline.remove_effect`
+
+Remove one effect from a clip's effect chain by id (usable-editor Phase 3 task 9; Requirement 6.1).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | |
+| `effectId` | string *uuid* | **yes** | |
+
+Refused, with the project unchanged, when the clip or the named effect is not found.
+
+Result: `clipId` (string), `effectId` (string), *(command result)*.
+
+## `timeline.reorder_effects`
+
+Reorder a clip's effect chain (usable-editor Phase 3 task 9; Requirement 6.1).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | |
+| `order` | array | **yes** | effect UUID strings, a permutation of the clip's current effects |
+
+The schema constrains `order` to an array; that every entry is a UUID string is checked by the
+handler and that the entries are a permutation of the clip's effects by the command. The rendered
+result of the effect chain depends on this order (Requirement 6.4): unlike `timeline.reorder_clips`,
+no field of an effect is recomputed by the reorder itself, since an effect carries no timeline
+geometry of its own.
+
+Result: `clipId` (string), *(command result)*.
+
+## `timeline.set_effect_parameter`
+
+Set, or insert, a named numeric parameter on one of a clip's effects (usable-editor Phase 3 task 9;
+Requirement 6.1).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | |
+| `effectId` | string *uuid* | **yes** | |
+| `parameter` | string | **yes** | |
+| `value` | number | **yes** | |
+
+Refused, with the project unchanged, when the clip or the named effect is not found. A parameter
+that did not previously exist on the effect is created; undoing removes it entirely rather than
+leaving it at `0`.
+
+Result: `clipId` (string), `effectId` (string), *(command result)*.
+
 ## `timeline.add_transition`
 
 Set a clip's incoming transition (crossfade, wipe, slide, fade, ...).

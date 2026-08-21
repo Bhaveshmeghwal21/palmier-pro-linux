@@ -17,12 +17,15 @@
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QString>
 #include <QVBoxLayout>
 
 #include <optional>
+#include <utility>
+#include <vector>
 
 namespace palmier::ui {
 
@@ -68,6 +71,20 @@ InspectorPanel::~InspectorPanel() {
 
 void InspectorPanel::buildEmptyState() {
     header_->setText(QStringLiteral("No clip selected"));
+}
+
+void InspectorPanel::moveEffect(std::size_t from, std::size_t to) {
+    const std::optional<ClipInspectorView> view = model_.selectedClip();
+    if (!view || from >= view->effects.size() || to >= view->effects.size() || from == to) {
+        return;  // the selection or the chain changed since the button was drawn
+    }
+    std::vector<Uuid> order;
+    order.reserve(view->effects.size());
+    for (const EffectView& effect : view->effects) {
+        order.push_back(effect.id);
+    }
+    std::swap(order[from], order[to]);
+    (void)model_.reorderEffects(std::move(order));
 }
 
 void InspectorPanel::rebuild() {
@@ -126,13 +143,49 @@ void InspectorPanel::rebuild() {
     auto* effectsLayout = new QVBoxLayout(effectsContainer_);
     effectsLayout->addWidget(new QLabel(QStringLiteral("Effects"), effectsContainer_));
 
-    for (const EffectView& effect : view->effects) {
+    for (std::size_t position = 0; position < view->effects.size(); ++position) {
+        const EffectView& effect = view->effects[position];
         auto* frame = new QFrame(effectsContainer_);
         frame->setFrameShape(QFrame::StyledPanel);
         auto* form = new QFormLayout(frame);
-        form->addRow(new QLabel(effectTypeName(effect.type), frame));
+
+        // Header row: the effect's type name plus remove/reorder controls
+        // (task 9.2; Requirement 6.1, 6.2).
+        auto* header = new QWidget(frame);
+        auto* headerLayout = new QHBoxLayout(header);
+        headerLayout->setContentsMargins(0, 0, 0, 0);
+        headerLayout->addWidget(new QLabel(effectTypeName(effect.type), header));
+        headerLayout->addStretch(1);
 
         const Uuid effectId = effect.id;
+
+        // Reordering swaps this effect with its neighbour and submits the whole
+        // chain's ids in the new order — the interaction a two-button up/down
+        // control offers, mapped onto ReorderEffectsCommand's full-permutation
+        // argument (Requirement 6.4: order is what changes rendered output).
+        auto* upButton = new QPushButton(QStringLiteral("\u2191"), header);
+        upButton->setEnabled(position > 0);
+        upButton->setToolTip(QStringLiteral("Move up (changes render order)"));
+        QObject::connect(upButton, &QPushButton::clicked, this, [this, position] {
+            moveEffect(position, position - 1);
+        });
+        headerLayout->addWidget(upButton);
+
+        auto* downButton = new QPushButton(QStringLiteral("\u2193"), header);
+        downButton->setEnabled(position + 1 < view->effects.size());
+        downButton->setToolTip(QStringLiteral("Move down (changes render order)"));
+        QObject::connect(downButton, &QPushButton::clicked, this, [this, position] {
+            moveEffect(position, position + 1);
+        });
+        headerLayout->addWidget(downButton);
+
+        auto* removeButton = new QPushButton(QStringLiteral("Remove"), header);
+        QObject::connect(removeButton, &QPushButton::clicked, this,
+                         [this, effectId] { (void)model_.removeEffect(effectId); });
+        headerLayout->addWidget(removeButton);
+
+        form->addRow(header);
+
         for (const EffectParameterView& param : effect.parameters) {
             auto* spin = new QDoubleSpinBox(frame);
             spin->setRange(-1000.0, 1000.0);

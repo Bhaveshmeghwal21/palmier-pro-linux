@@ -277,6 +277,43 @@ TEST(SoftwareEffect, CustomEffectIsPassThrough) {
     EXPECT_EQ(px, before);
 }
 
+// Requirement 6.4 (usable-editor task 9): a clip's rendered output depends on
+// its effect chain's order. applyEffectSoftware transforms one effect at a time
+// in place, so a chain is composited by calling it once per effect in sequence —
+// this is the primitive any order-sensitive chain render is built from, and it is
+// what ReorderEffectsCommand's own contract (core::EditCommands) rests on: the
+// command only ever permutes an Effect list, and it is this repeated application
+// that turns "which permutation" into "which pixels".
+//
+// Brightness is additive (px + amount*255, clamped) and Contrast is affine about
+// mid-gray ((px-128)*(1+amount)+128, clamped); applying them in the two different
+// orders is a textbook non-commutative pair. Hand-computed for starting value 150,
+// Brightness amount 0.1, Contrast amount 0.5, with neither order clamping (so the
+// difference is not an artifact of saturation):
+//   brightness-then-contrast: 150 -> 176 -> 200
+//   contrast-then-brightness: 150 -> 161 -> 186
+TEST(SoftwareEffect, ChainOrderChangesTheRenderedResult) {
+    auto brightnessThenContrast = solid(1, 1, 150, 150, 150, 255);
+    applyEffectSoftware(makeEffect(EffectType::Brightness, {{"amount", 0.1}}),
+                        brightnessThenContrast.data(), 1, 1);
+    applyEffectSoftware(makeEffect(EffectType::Contrast, {{"amount", 0.5}}),
+                        brightnessThenContrast.data(), 1, 1);
+
+    auto contrastThenBrightness = solid(1, 1, 150, 150, 150, 255);
+    applyEffectSoftware(makeEffect(EffectType::Contrast, {{"amount", 0.5}}),
+                        contrastThenBrightness.data(), 1, 1);
+    applyEffectSoftware(makeEffect(EffectType::Brightness, {{"amount", 0.1}}),
+                        contrastThenBrightness.data(), 1, 1);
+
+    EXPECT_NEAR(brightnessThenContrast[0], 200, 1);
+    EXPECT_NEAR(contrastThenBrightness[0], 186, 1);
+    EXPECT_NE(brightnessThenContrast[0], contrastThenBrightness[0])
+        << "the two orders must not collapse to the same rendered value";
+    // Both orders leave alpha untouched, regardless of order.
+    EXPECT_EQ(brightnessThenContrast[3], 255);
+    EXPECT_EQ(contrastThenBrightness[3], 255);
+}
+
 TEST(SoftwareEffect, TransitionCrossDissolvesTwoFrames) {
     auto a = solid(2, 2, 0, 0, 0, 255);
     auto b = solid(2, 2, 255, 255, 255, 255);

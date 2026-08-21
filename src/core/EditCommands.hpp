@@ -60,6 +60,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "core/Clip.hpp"
@@ -554,6 +555,83 @@ private:
     Duration          closedGap_;
     std::vector<Clip> priorClips_;  // captured on apply for an exact revert
     bool              captured_ = false;
+};
+
+// ===========================================================================
+// Effect lifecycle management (usable-editor task 9; Requirement 6)
+//
+// AddEffectCommand already appends an effect; the three commands below cover the
+// rest of a clip's effect chain lifecycle: removing one, reordering the chain (the
+// rendered result depends on effect order, Requirement 6.4), and changing an
+// existing effect's parameter. All three name an effect by its stable Uuid and
+// refuse — leaving the project unchanged — when the clip or the named effect is
+// not found (Requirement 6.5).
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// RemoveEffectCommand — remove one effect from a clip's chain by id.
+// ---------------------------------------------------------------------------
+class RemoveEffectCommand final : public EditCommand {
+public:
+    RemoveEffectCommand(ClipId clipId, Uuid effectId);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "RemoveEffect"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+private:
+    ClipId              clipId_;
+    Uuid                effectId_;
+    std::size_t         index_ = 0;
+    std::optional<Effect> removed_;  // captured on apply for an exact revert
+};
+
+// ---------------------------------------------------------------------------
+// ReorderEffectsCommand — reorder a clip's effect chain (preserves effect count).
+// ---------------------------------------------------------------------------
+//
+// A pure permutation of the chain: unlike ReorderClipsCommand, no positional
+// field needs recomputing, since an effect carries no timeline geometry of its
+// own. `newOrder` must name every effect currently on the clip exactly once;
+// anything else — a wrong count, an unknown id, a repeat — is refused.
+class ReorderEffectsCommand final : public EditCommand {
+public:
+    ReorderEffectsCommand(ClipId clipId, std::vector<Uuid> newOrder);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "ReorderEffects"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+private:
+    ClipId              clipId_;
+    std::vector<Uuid>   newOrder_;
+    std::vector<Effect> priorEffects_;  // captured on apply for an exact revert
+    bool                captured_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// SetEffectParameterCommand — set (or insert) a named parameter on one effect.
+// ---------------------------------------------------------------------------
+//
+// revert() restores the parameter's prior value, or removes the key entirely if
+// it did not previously exist, so a parameter that was absent before apply() is
+// absent again after revert() rather than left at 0.
+class SetEffectParameterCommand final : public EditCommand {
+public:
+    SetEffectParameterCommand(ClipId clipId, Uuid effectId, std::string parameter, double value);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "SetEffectParameter"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+private:
+    ClipId      clipId_;
+    Uuid        effectId_;
+    std::string parameter_;
+    double      value_;
+    bool        hadPrior_ = false;
+    double      prior_ = 0.0;
+    bool        captured_ = false;
 };
 
 }  // namespace palmier

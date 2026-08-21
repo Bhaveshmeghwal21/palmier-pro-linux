@@ -147,6 +147,9 @@ constexpr std::string_view kRippleDelete  = "timeline.ripple_delete";
 constexpr std::string_view kRippleTrim    = "timeline.ripple_trim";
 constexpr std::string_view kCloseGap      = "timeline.close_gap";
 constexpr std::string_view kAddEffect     = "timeline.add_effect";
+constexpr std::string_view kRemoveEffect       = "timeline.remove_effect";
+constexpr std::string_view kReorderEffects     = "timeline.reorder_effects";
+constexpr std::string_view kSetEffectParameter = "timeline.set_effect_parameter";
 constexpr std::string_view kAddTransition = "timeline.add_transition";
 constexpr std::string_view kGenerate      = "generation.generate";
 constexpr std::string_view kListModels    = "generation.list_models";
@@ -271,6 +274,13 @@ constexpr std::int64_t kClipGapMs    = 500;   ///< so an added clip has somewher
             clip.sourceIn = Duration::zero();
             clip.sourceOut = Duration::fromMilliseconds(kClipLengthMs);
             cursorMs += kClipLengthMs + kClipGapMs;
+            // The first clip on track 0 always carries one effect, so tools that
+            // change or remove an existing effect (task 9.2; Requirement 6) have a
+            // stable, guaranteed target to draw a valid invocation against — every
+            // other seed clip is left exactly as before, with none.
+            if (t == 0 && c == 0) {
+                clip.effects.push_back(Effect::brightness(0.1));
+            }
             track.clips.push_back(std::move(clip));
         }
         project.tracks.push_back(std::move(track));
@@ -793,6 +803,29 @@ struct Invocation {
         args.set("durationNs",
                  Json(Duration::fromMilliseconds(*rc::gen::inRange<std::int64_t>(0, 200))
                           .nanoseconds()));
+        return Invocation{name, std::move(args)};
+    }
+    // Effect lifecycle (task 9.2; Requirement 6). drawSeedProject() guarantees the
+    // first clip of track 0 carries exactly one effect, which is what these three
+    // target: track 0 always exists and always has at least one clip, so this does
+    // not depend on which track/clip drawEnumValue or anyClip happened to pick.
+    if (name == kRemoveEffect || name == kReorderEffects || name == kSetEffectParameter) {
+        const Clip& seeded = project.tracks[0].clips[0];
+        const Uuid  effectId = seeded.effects.front().id;
+        args.set("clipId", Json(seeded.id.toString()));
+        if (name == kRemoveEffect) {
+            args.set("effectId", Json(effectId.toString()));
+        } else if (name == kReorderEffects) {
+            // A permutation of exactly the clip's one effect id is the only
+            // permutation there is, and it is trivially valid.
+            Json order = Json::array();
+            order.push_back(Json(effectId.toString()));
+            args.set("order", std::move(order));
+        } else {
+            args.set("effectId", Json(effectId.toString()));
+            args.set("parameter", Json(std::string{"amount"}));
+            args.set("value", Json(static_cast<double>(drawIndex(201)) / 100.0));
+        }
         return Invocation{name, std::move(args)};
     }
 

@@ -22,6 +22,8 @@
 
 #include <QWidget>
 
+#include <cstddef>
+
 #include "ui/InspectorViewModel.hpp"
 
 class QFormLayout;
@@ -44,6 +46,13 @@ public:
 private:
     void rebuild();          ///< Rebuild all controls from the current projection.
     void buildEmptyState();  ///< Show the "no clip selected" placeholder.
+
+    /// Swap the effects at `from` and `to` in the selected clip's chain and
+    /// submit the whole reordered id list (task 9.2; Requirement 6.1, 6.4). Reads
+    /// the model's projection fresh rather than trusting a rebuild()-local
+    /// snapshot, since this runs from a button clicked well after that snapshot
+    /// went out of scope.
+    void moveEffect(std::size_t from, std::size_t to);
 
     InspectorViewModel& model_;
 

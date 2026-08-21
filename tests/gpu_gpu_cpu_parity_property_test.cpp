@@ -409,6 +409,58 @@ TEST(GpuCpuParityExamples, ColorGradeGoldenImageMatchesWithinTolerance) {
     EXPECT_LE(maxChannelDiff(cpu, gpu), kParityTolerance);
 }
 
+// Requirement 6.4 (usable-editor task 9): a clip's rendered result depends on
+// its effect chain's order, and P5's parity holds for a CHAIN, not only for one
+// effect — applying a fixed pair of effects in the two possible orders must
+// disagree with each other on both lanes, and each lane's own result for a given
+// order must still agree with the other lane's for that SAME order, within the
+// usual tolerance. Brightness (additive) and Contrast (affine about mid-gray)
+// are a textbook non-commutative pair; the exact byte values below are hand
+// verified against both lanes' own math (see SoftwareEffect.ChainOrderChangesThe
+// RenderedResult in tests/gpu_effect_kernels_test.cpp for the CPU-lane derivation,
+// which is identical here since both lanes compute the same effective function):
+// starting from 150 with Brightness amount 0.1 then Contrast amount 0.5 gives
+// 200; the reverse order gives 186.
+TEST(GpuCpuParityExamples, EffectChainOrderChangesTheResultOnBothLanes) {
+    const std::uint32_t w = 1, h = 1;
+    const std::vector<std::uint8_t> src = {150, 150, 150, 255};
+    const Effect brighten = makeEffect(EffectType::Brightness, {{"amount", 0.1}});
+    const Effect boost = makeEffect(EffectType::Contrast, {{"amount", 0.5}});
+
+    // CPU lane, both orders (applyEffectSoftware mutates in place, so each order
+    // starts from its own copy of src).
+    std::vector<std::uint8_t> cpuBrightThenContrast = src;
+    applyEffectSoftware(brighten, cpuBrightThenContrast.data(), w, h);
+    applyEffectSoftware(boost, cpuBrightThenContrast.data(), w, h);
+
+    std::vector<std::uint8_t> cpuContrastThenBright = src;
+    applyEffectSoftware(boost, cpuContrastThenBright.data(), w, h);
+    applyEffectSoftware(brighten, cpuContrastThenBright.data(), w, h);
+
+    // GPU lane, both orders (gpuApplyEffect returns a fresh buffer per call, so
+    // each step's output becomes the next step's input).
+    const std::vector<std::uint8_t> gpuBrightThenContrast =
+        gpuApplyEffect(boost, gpuApplyEffect(brighten, src, w, h), w, h);
+    const std::vector<std::uint8_t> gpuContrastThenBright =
+        gpuApplyEffect(brighten, gpuApplyEffect(boost, src, w, h), w, h);
+
+    // Each lane's own two orders disagree with each other (the property this
+    // test exists to prove).
+    EXPECT_NE(cpuBrightThenContrast[0], cpuContrastThenBright[0])
+        << "CPU lane: the two chain orders must not render the same value";
+    EXPECT_NE(gpuBrightThenContrast[0], gpuContrastThenBright[0])
+        << "GPU lane: the two chain orders must not render the same value";
+
+    // Hand-verified exact values (see the derivation above).
+    EXPECT_NEAR(cpuBrightThenContrast[0], 200, 1);
+    EXPECT_NEAR(cpuContrastThenBright[0], 186, 1);
+
+    // P5 parity holds order-by-order: the GPU lane's result for a given order
+    // agrees with the CPU lane's result for that SAME order, not the other one.
+    EXPECT_LE(maxChannelDiff(cpuBrightThenContrast, gpuBrightThenContrast), kParityTolerance);
+    EXPECT_LE(maxChannelDiff(cpuContrastThenBright, gpuContrastThenBright), kParityTolerance);
+}
+
 // The GPU-lane model is tied to the real kernel sources: every effect kind the
 // software reference handles has a corresponding compiled kernel source, so the
 // parity model above is validating against the same kernels the GPU would run.

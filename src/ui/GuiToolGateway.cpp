@@ -174,6 +174,35 @@ Result<Json> GuiToolGateway::addEffect(ClipId clipId, const Effect& effect) {
     return executor_.executeTool("timeline.add_effect", args, services::InvocationSource::Gui);
 }
 
+Result<Json> GuiToolGateway::removeEffect(ClipId clipId, Uuid effectId) {
+    Json args = Json::object();
+    args.set("clipId", clipId.toString());
+    args.set("effectId", effectId.toString());
+    return executor_.executeTool("timeline.remove_effect", args, services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::reorderEffects(ClipId clipId, std::vector<Uuid> newOrder) {
+    Json args = Json::object();
+    args.set("clipId", clipId.toString());
+    Json order = Json::array();
+    for (const Uuid& id : newOrder) {
+        order.push_back(Json(id.toString()));
+    }
+    args.set("order", std::move(order));
+    return executor_.executeTool("timeline.reorder_effects", args, services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::setEffectParameter(ClipId clipId, Uuid effectId,
+                                                const std::string& parameter, double value) {
+    Json args = Json::object();
+    args.set("clipId", clipId.toString());
+    args.set("effectId", effectId.toString());
+    args.set("parameter", parameter);
+    args.set("value", value);
+    return executor_.executeTool("timeline.set_effect_parameter", args,
+                                 services::InvocationSource::Gui);
+}
+
 Result<Json> GuiToolGateway::addTransition(ClipId clipId, TransitionKind kind,
                                            Duration duration) {
     Json args = Json::object();
