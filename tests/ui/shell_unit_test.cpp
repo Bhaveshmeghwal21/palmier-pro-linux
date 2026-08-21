@@ -764,10 +764,16 @@ protected:
                           Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
         QCoreApplication::sendEvent(widget, &event);
     }
-    static void move(QWidget* widget, QPoint pos) {
+    static void move(TimelineGraphView* widget, QPoint pos) {
         QMouseEvent event(QEvent::MouseMove, pos, widget->mapToGlobal(pos), Qt::NoButton,
                           Qt::LeftButton, Qt::NoModifier);
-        QCoreApplication::sendEvent(widget, &event);
+        // Called directly rather than through QCoreApplication::sendEvent():
+        // a hand-constructed QEvent::MouseMove has proven unreliable to
+        // deliver that way under Qt6's QSinglePointEvent internals absent a
+        // real platform mouse grab, while mousePressEvent()/mouseReleaseEvent()
+        // (simpler, singular "point" events) are delivered correctly either
+        // way — see the friend declaration on TimelineGraphView.
+        TimelineGraphViewFriendAccess::sendMouseMove(widget, &event);
     }
     static void release(QWidget* widget, QPoint pos) {
         QMouseEvent event(QEvent::MouseButtonRelease, pos, widget->mapToGlobal(pos),
@@ -850,6 +856,7 @@ TEST_F(TimelineGraphViewTest, ADragThatWouldOverlapAnotherClipLeavesTheProjectUn
     TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
     ASSERT_NE(graph, nullptr);
     const Project before = composition.timeline().snapshot();
+    const std::size_t undoDepthBefore = composition.timeline().undoDepth();
 
     // Drag the FIRST clip (midpoint x=30) far enough right (+100px = +100/60s)
     // to land inside the second clip's [1500,2500)ms span, which must overlap.
@@ -865,7 +872,10 @@ TEST_F(TimelineGraphViewTest, ADragThatWouldOverlapAnotherClipLeavesTheProjectUn
         EXPECT_EQ(after.tracks[0].clips[i].timelineStart,
                   before.tracks[0].clips[i].timelineStart);
     }
-    EXPECT_FALSE(composition.timeline().canUndo());  // the refused drag recorded no history entry
+    // The refused drag recorded no NEW history entry (the seed project's own
+    // track/clip setup already left undo history behind, so canUndo() alone
+    // cannot distinguish "nothing happened" from "something happened earlier").
+    EXPECT_EQ(composition.timeline().undoDepth(), undoDepthBefore);
 }
 
 // Requirement 8.5 (the applying half): a drag-move that does NOT overlap

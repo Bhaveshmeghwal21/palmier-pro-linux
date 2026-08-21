@@ -130,6 +130,15 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private:
+    // Grants the test suite direct access to the protected event handlers
+    // above. QCoreApplication::sendEvent() reliably reaches
+    // mousePressEvent()/mouseReleaseEvent() (both are simple, singular "point"
+    // events), but a hand-constructed QEvent::MouseMove has proven unreliable
+    // to deliver this way under Qt6's QSinglePointEvent internals in a
+    // synthetic (no real platform grab) test — this friendship lets the test
+    // call mouseMoveEvent() directly instead of depending on that delivery
+    // path, without widening the class's own public surface for it.
+    friend class TimelineGraphViewFriendAccess;
     // What a press on a clip rectangle is about to do, decided by where inside
     // the rectangle the press landed.
     enum class DragKind { None, Move, TrimStart, TrimEnd };
@@ -184,6 +193,18 @@ private:
     static constexpr int kEdgeGrabPx = 6;
     static constexpr double kMinPixelsPerSecond = 1.0;
     static constexpr double kMaxPixelsPerSecond = 2000.0;
+};
+
+/// Test-only access to TimelineGraphView's protected event handlers (see the
+/// friend declaration above). Deliberately declared here rather than in the
+/// test file, since only a class actually named as a friend can reach across
+/// the access boundary — the test itself does not need to derive from
+/// QWidget or duplicate any Qt event-handling code, only to forward a call.
+class TimelineGraphViewFriendAccess {
+public:
+    static void sendMouseMove(TimelineGraphView* view, QMouseEvent* event) {
+        view->mouseMoveEvent(event);
+    }
 };
 
 }  // namespace palmier::ui
