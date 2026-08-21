@@ -122,6 +122,7 @@ if(TARGET Qt6::Widgets)
     add_library(palmier_ui_shell STATIC
         MainWindow.cpp
         TimelinePanel.cpp
+        TimelineGraphView.cpp
         ExportDialog.cpp
         ProjectSettingsDialog.cpp)
     add_library(Palmier::ui_shell ALIAS palmier_ui_shell)

@@ -25,16 +25,17 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCoreApplication>
 #include <QDockWidget>
-#include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMouseEvent>
 #include <QSlider>
 #include <QStatusBar>
 #include <QToolButton>
-#include <QTreeView>
+#include <QWheelEvent>
 
 #include <gtest/gtest.h>
 
@@ -51,6 +52,7 @@
 #include "core/TimelineEngine.hpp"
 #include "core/Track.hpp"
 #include "core/Uuid.hpp"
+#include "services/Json.hpp"
 #include "services/McpToolExecutor.hpp"
 #include "services/ProjectSession.hpp"
 #include "services/ToolRegistry.hpp"
@@ -58,7 +60,9 @@
 #include "ui/MediaBrowserPanel.hpp"
 #include "ui/PreviewController.hpp"
 #include "ui/ProjectFileActions.hpp"
+#include "ui/TimelineGraphView.hpp"
 #include "ui/TimelinePanel.hpp"
+#include "ui/TimelineViewModel.hpp"
 
 namespace palmier::ui {
 namespace {
@@ -147,9 +151,10 @@ TEST_F(ShellUnitTest, UndoAndRedoAreDisabledOnAnEmptyHistory) {
 // Prior to this, InspectorViewModel::selectClip() had no caller anywhere in
 // src/, so Delete Clip and Split at Playhead could never be enabled and every
 // Inspector edit was unreachable from the GUI. These tests exercise the real
-// signal path: creating a project with a track and clip, selecting the clip's
-// row through the SAME QItemSelectionModel a mouse click would use, and
-// asserting the two selection-gated Edit actions follow it.
+// signal path: creating a project with a track and clip, selecting the clip
+// through the SAME clipSelected()/selectionCleared() signals a click on its
+// rectangle in the graphical timeline would emit, and asserting the two
+// selection-gated Edit actions follow it.
 
 class ShellSelectionTest : public ShellUnitTest {
 protected:
@@ -339,15 +344,13 @@ TEST_F(ShellPlacementTest, PlaceAtPlayheadIsDisabledUntilBothAnAssetAndATrackAre
 
     TimelinePanel* timeline = window.findChild<TimelinePanel*>();
     ASSERT_NE(timeline, nullptr);
-    // Select the track row directly through the tree's own selection model —
-    // the SAME mechanism a mouse click on the track's row would use — rather
-    // than emitting placementTrackChanged() by hand, so this exercises
-    // selectedTrackId()'s real QModelIndex lookup, not just the notification.
-    QAbstractItemModel& model = timeline->model();
-    const QModelIndex trackIndex = model.index(0, 0, QModelIndex());
-    ASSERT_TRUE(trackIndex.isValid());
-    timeline->findChild<QTreeView*>()->selectionModel()->select(
-        trackIndex, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    // Select the track's lane directly through the graph view — the SAME
+    // effect a mouse click on that lane would have — rather than emitting
+    // placementTrackChanged() by hand, so this exercises selectedTrackId()'s
+    // real lookup through the graph view, not just the notification.
+    TimelineGraphView* graph = timeline->findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+    graph->selectTrack(rawTrack->trackId());
 
     EXPECT_TRUE(placeAction->isEnabled());  // both an asset and a track now
     EXPECT_EQ(timeline->selectedTrackId(), rawTrack->trackId());
@@ -372,10 +375,11 @@ TEST_F(ShellPlacementTest, TriggeringPlaceAtPlayheadAddsExactlyOneClipOnTheSelec
     ASSERT_NE(timeline, nullptr);
     mediaBrowser->viewModel().selectLibraryAsset(asset.assetId);
     emit mediaBrowser->librarySelectionChanged();
-    QAbstractItemModel& model = timeline->model();
-    timeline->findChild<QTreeView*>()->selectionModel()->select(
-        model.index(0, 0, QModelIndex()), QItemSelectionModel::ClearAndSelect |
-                                              QItemSelectionModel::Rows);
+    TimelineGraphView* graph = timeline->findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+    const std::optional<TrackRow> firstTrack = timeline->model().viewModel().trackAt(0);
+    ASSERT_TRUE(firstTrack.has_value());
+    graph->selectTrack(firstTrack->id);
 
     QMenu* editMenu = window.menuBar()->actions()[1]->menu();
     QAction* placeAction = nullptr;
@@ -692,6 +696,244 @@ INSTANTIATE_TEST_SUITE_P(
                       "LocalizationManager", "RemoteAccessGate"));
 
 }  // namespace
+// ---------------------------------------------------------------------------
+// Graphical timeline (usable-editor task 11; Requirement 8)
+//
+// Real QMouseEvent/QWheelEvent objects are constructed and dispatched through
+// QCoreApplication::sendEvent(), which is what actually reaches the widget's
+// protected mousePressEvent()/mouseMoveEvent()/mouseReleaseEvent()/wheelEvent()
+// overrides — standard Qt practice for driving a widget's interaction from a
+// test without a real pointing device, and the same technique this file's
+// other tests use to observe a signal path rather than a repaint.
+// ---------------------------------------------------------------------------
+
+class TimelineGraphViewTest : public ShellUnitTest {
+protected:
+    // One video track with two one-second clips: [0,1000) and [1500,2500),
+    // separated by a 500ms gap — mirroring the property-suite's own seed shape
+    // (Requirement 8.1's geometry and Requirement 8.5's overlap refusal both
+    // need at least two clips to be meaningful).
+    struct Seeded {
+        Uuid trackId;
+        ClipId firstClipId;
+        ClipId secondClipId;
+    };
+
+    static Seeded seedTwoClipProject(app::ApplicationComposition& composition) {
+        TimelineEngine& engine = composition.timeline();
+        auto addTrack = std::make_unique<AddTrackCommand>(TrackKind::Video);
+        AddTrackCommand* rawTrack = addTrack.get();
+        EXPECT_TRUE(engine.apply(std::move(addTrack)).changed());
+
+        const auto makeClip = [](Uuid id, Duration start) {
+            Clip clip;
+            clip.id = id;
+            clip.assetRef = MediaAssetRef(Uuid::generateV4(), "mem://seed.mp4");
+            clip.timelineStart = start;
+            clip.sourceIn = Duration::zero();
+            clip.sourceOut = Duration::fromMilliseconds(1000);
+            return clip;
+        };
+        const ClipId first = Uuid::generateV4();
+        const ClipId second = Uuid::generateV4();
+        EXPECT_TRUE(engine.apply(std::make_unique<AddClipCommand>(
+                                     rawTrack->trackId(), makeClip(first, Duration::zero())))
+                        .changed());
+        EXPECT_TRUE(engine.apply(std::make_unique<AddClipCommand>(
+                                     rawTrack->trackId(),
+                                     makeClip(second, Duration::fromMilliseconds(1500))))
+                        .changed());
+        return Seeded{rawTrack->trackId(), first, second};
+    }
+
+    // TimelineGraphView's own layout constants (kept in sync by hand, since
+    // they are a private implementation detail the widget does not publish —
+    // see src/ui/TimelineGraphView.hpp).
+    static constexpr int kRulerHeight = 24;
+    static constexpr int kLaneHeight = 56;
+    static constexpr double kDefaultPixelsPerSecond = 60.0;
+
+    // The y coordinate of the middle of the first (only, in these tests) lane.
+    static constexpr int kFirstLaneMidY = kRulerHeight + kLaneHeight / 2;
+
+    static void press(QWidget* widget, QPoint pos) {
+        QMouseEvent event(QEvent::MouseButtonPress, pos, widget->mapToGlobal(pos),
+                          Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(widget, &event);
+    }
+    static void move(QWidget* widget, QPoint pos) {
+        QMouseEvent event(QEvent::MouseMove, pos, widget->mapToGlobal(pos), Qt::NoButton,
+                          Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(widget, &event);
+    }
+    static void release(QWidget* widget, QPoint pos) {
+        QMouseEvent event(QEvent::MouseButtonRelease, pos, widget->mapToGlobal(pos),
+                          Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(widget, &event);
+    }
+};
+
+// Requirement 8.1: a clip rectangle's x-position and width correspond to its
+// timelineStart and duration. Asserted through the mouse rather than a private
+// coordinate accessor: clicking the midpoint of where clip N is EXPECTED to be
+// (computed from the same timelineStart/duration the model reports) must hit
+// clip N and select it — if the widget's real geometry disagreed with this
+// computation, the click would land on the gap, the other clip, or nothing.
+TEST_F(TimelineGraphViewTest, ClipRectangleGeometryMatchesItsTimelineStartAndDuration) {
+    app::ApplicationComposition composition;
+    const Seeded seed = seedTwoClipProject(composition);
+    MainWindow window(composition);
+    window.show();
+
+    TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+
+    // The first clip spans [0, 1000)ms; its midpoint at the default zoom
+    // (60 px/s) is at x = 0.5s * 60 = 30px.
+    press(graph, QPoint(30, kFirstLaneMidY));
+    release(graph, QPoint(30, kFirstLaneMidY));
+    EXPECT_EQ(graph->selectedClipId(), seed.firstClipId);
+
+    // The second clip spans [1500, 2500)ms; its midpoint is at
+    // x = 2.0s * 60 = 120px. The 500ms gap between them (x in [60,90)) hits
+    // neither clip.
+    press(graph, QPoint(120, kFirstLaneMidY));
+    release(graph, QPoint(120, kFirstLaneMidY));
+    EXPECT_EQ(graph->selectedClipId(), seed.secondClipId);
+
+    press(graph, QPoint(75, kFirstLaneMidY));  // inside the gap
+    release(graph, QPoint(75, kFirstLaneMidY));
+    EXPECT_FALSE(graph->selectedClipId().has_value());
+}
+
+// Requirement 8.1/8.4: geometry must stay correct after a zoom change, not
+// only at the default zoom — the same midpoint click, after doubling
+// pixelsPerSecond_ via a Ctrl+wheel zoom, must land at DOUBLE the x it did
+// before and still select the same clip.
+TEST_F(TimelineGraphViewTest, ClipRectangleGeometryStaysCorrectAfterAZoomChange) {
+    app::ApplicationComposition composition;
+    const Seeded seed = seedTwoClipProject(composition);
+    MainWindow window(composition);
+    window.show();
+
+    TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+
+    // Requirement 8.4: the playhead (at 0 by default) must still be visible —
+    // pivoting the zoom on x=0 keeps scrollOffset_ at zero, so every
+    // subsequent x computation below stays a simple doubling.
+    QWheelEvent zoomIn(QPointF(0, kFirstLaneMidY), QPointF(0, kFirstLaneMidY),
+                       QPoint(0, 0), QPoint(0, 120), Qt::NoButton, Qt::ControlModifier,
+                       Qt::NoScrollPhase, false);
+    QCoreApplication::sendEvent(graph, &zoomIn);
+
+    // The first clip's midpoint is now at 0.5s * 120px/s = 60px (double the
+    // 30px it was before the zoom).
+    press(graph, QPoint(60, kFirstLaneMidY));
+    release(graph, QPoint(60, kFirstLaneMidY));
+    EXPECT_EQ(graph->selectedClipId(), seed.firstClipId);
+}
+
+// Requirement 8.5: dragging a clip onto a position that would overlap another
+// clip is refused, and the clip is retained at its ORIGINAL position — the
+// engine's project state is exactly what it was before the drag, not merely
+// "visually similar".
+TEST_F(TimelineGraphViewTest, ADragThatWouldOverlapAnotherClipLeavesTheProjectUnchanged) {
+    app::ApplicationComposition composition;
+    const Seeded seed = seedTwoClipProject(composition);
+    MainWindow window(composition);
+    window.show();
+
+    TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+    const Project before = composition.timeline().snapshot();
+
+    // Drag the FIRST clip (midpoint x=30) far enough right (+100px = +100/60s)
+    // to land inside the second clip's [1500,2500)ms span, which must overlap.
+    press(graph, QPoint(30, kFirstLaneMidY));
+    move(graph, QPoint(130, kFirstLaneMidY));
+    release(graph, QPoint(130, kFirstLaneMidY));
+
+    const Project after = composition.timeline().snapshot();
+    ASSERT_EQ(after.tracks.size(), before.tracks.size());
+    ASSERT_EQ(after.tracks[0].clips.size(), before.tracks[0].clips.size());
+    for (std::size_t i = 0; i < after.tracks[0].clips.size(); ++i) {
+        EXPECT_EQ(after.tracks[0].clips[i].id, before.tracks[0].clips[i].id);
+        EXPECT_EQ(after.tracks[0].clips[i].timelineStart,
+                  before.tracks[0].clips[i].timelineStart);
+    }
+    EXPECT_FALSE(composition.timeline().canUndo());  // the refused drag recorded no history entry
+}
+
+// Requirement 8.5 (the applying half): a drag-move that does NOT overlap
+// anything produces the identical engine state timeline.move_clip would (the
+// two are the same GestureResult::Applied path through TimelineViewModel, so
+// this proves the graphical view's own coordinate-to-Duration conversion feeds
+// that path correctly, not just that the path itself works).
+TEST_F(TimelineGraphViewTest, DragMoveAndTimelineMoveClipProduceEqualState) {
+    app::ApplicationComposition composition;
+    const Seeded seed = seedTwoClipProject(composition);
+    MainWindow window(composition);
+    window.show();
+
+    TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+
+    // Drag the second clip (midpoint x=120) left by 60px = 1.0s, to timelineStart
+    // 500ms — clear of the first clip's [0,1000) span, so this must apply.
+    press(graph, QPoint(120, kFirstLaneMidY));
+    move(graph, QPoint(60, kFirstLaneMidY));
+    release(graph, QPoint(60, kFirstLaneMidY));
+
+    const Project viaDrag = composition.timeline().snapshot();
+    const auto draggedClip = std::find_if(
+        viaDrag.tracks[0].clips.begin(), viaDrag.tracks[0].clips.end(),
+        [&](const Clip& c) { return c.id == seed.secondClipId; });
+    ASSERT_NE(draggedClip, viaDrag.tracks[0].clips.end());
+    EXPECT_EQ(draggedClip->timelineStart, Duration::fromMilliseconds(500));
+
+    // Undo the drag, then apply the identical move through timeline.move_clip
+    // (the exact tool a drag ultimately calls through the gateway) and compare.
+    ASSERT_TRUE(composition.timeline().undo().changed());
+    services::Json args = services::Json::object();
+    args.set("clipId", seed.secondClipId.toString());
+    args.set("timelineStartNs", Duration::fromMilliseconds(500).nanoseconds());
+    const Result<services::Json> toolResult = composition.executor().executeTool(
+        "timeline.move_clip", args, services::InvocationSource::Gui);
+    ASSERT_TRUE(toolResult.isOk());
+
+    const Project viaTool = composition.timeline().snapshot();
+    ASSERT_EQ(viaDrag.tracks[0].clips.size(), viaTool.tracks[0].clips.size());
+    for (std::size_t i = 0; i < viaDrag.tracks[0].clips.size(); ++i) {
+        EXPECT_EQ(viaDrag.tracks[0].clips[i].id, viaTool.tracks[0].clips[i].id);
+        EXPECT_EQ(viaDrag.tracks[0].clips[i].timelineStart,
+                  viaTool.tracks[0].clips[i].timelineStart);
+    }
+}
+
+// Requirement 8.7: the graph view indicates which clip is selected, and a
+// clip deleted from any surface (here, directly on the engine — standing in
+// for the MCP endpoint or the agent) is reported as cleared rather than left
+// selected-but-gone (mirroring the tree it replaced).
+TEST_F(TimelineGraphViewTest, ADeletedSelectedClipReportsSelectionClearedAfterRefresh) {
+    app::ApplicationComposition composition;
+    const Seeded seed = seedTwoClipProject(composition);
+    MainWindow window(composition);
+    window.show();
+
+    TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+    press(graph, QPoint(30, kFirstLaneMidY));
+    release(graph, QPoint(30, kFirstLaneMidY));
+    ASSERT_EQ(graph->selectedClipId(), seed.firstClipId);
+
+    ASSERT_TRUE(
+        composition.timeline().apply(std::make_unique<DeleteClipCommand>(seed.firstClipId))
+            .changed());
+
+    EXPECT_FALSE(graph->selectedClipId().has_value());
+}
+
 }  // namespace palmier::ui
 
 #else  // !PALMIER_HAVE_QT

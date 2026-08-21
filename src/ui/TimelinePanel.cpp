@@ -14,7 +14,6 @@
 #include <cstdint>
 
 #include <QHBoxLayout>
-#include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
 #include <QSignalBlocker>
@@ -22,12 +21,12 @@
 #include <QString>
 #include <QStringList>
 #include <QToolButton>
-#include <QTreeView>
 #include <QVBoxLayout>
 
 #include "core/Duration.hpp"
 #include "core/FrameRate.hpp"
 #include "core/Uuid.hpp"
+#include "ui/TimelineGraphView.hpp"
 
 namespace palmier::ui {
 
@@ -40,8 +39,12 @@ TimelinePanel::TimelinePanel(TimelineEngine& engine, PreviewController& transpor
             &TimelinePanel::refreshTransportState);
     connect(&model_, &TimelineModel::modelRefreshed, this,
             &TimelinePanel::onModelRefreshed);
-    connect(tree_->selectionModel(), &QItemSelectionModel::selectionChanged, this,
-            &TimelinePanel::onTreeSelectionChanged);
+    connect(graph_, &TimelineGraphView::clipSelected, this, &TimelinePanel::clipSelected);
+    connect(graph_, &TimelineGraphView::selectionCleared, this, &TimelinePanel::selectionCleared);
+    connect(graph_, &TimelineGraphView::placementTrackChanged, this,
+            &TimelinePanel::onGraphSelectionChanged);
+    connect(graph_, &TimelineGraphView::seekRequested, this,
+            &TimelinePanel::onGraphSeekRequested);
 
     refreshTransportState();
 }
@@ -123,15 +126,11 @@ void TimelinePanel::buildLayout() {
     playheadLayout->addWidget(stepForwardButton_);
     playheadLayout->addWidget(timecodeEdit_);
 
-    tree_ = new QTreeView(this);
-    tree_->setModel(&model_);
-    tree_->setAlternatingRowColors(true);
-    tree_->setUniformRowHeights(true);
-    tree_->setSelectionMode(QAbstractItemView::SingleSelection);
+    graph_ = new TimelineGraphView(model_.viewModel(), this);
 
     rootLayout->addWidget(transportBar);
     rootLayout->addWidget(playheadBar);
-    rootLayout->addWidget(tree_, /*stretch=*/1);
+    rootLayout->addWidget(graph_, /*stretch=*/1);
 }
 
 QString TimelinePanel::formatPlayheadTimecode() const {
@@ -158,6 +157,9 @@ void TimelinePanel::refreshTransportState() {
     }
     if (playheadLabel_ != nullptr) {
         playheadLabel_->setText(formatPlayheadTimecode());
+    }
+    if (graph_ != nullptr) {
+        graph_->setPlayhead(transport_.playhead());
     }
     const qint64 playheadMs = transport_.playhead().milliseconds();
     if (scrubSlider_ != nullptr) {
@@ -286,62 +288,26 @@ void TimelinePanel::onStepForwardClicked() {
 }
 
 std::optional<ClipId> TimelinePanel::selectedClipId() const {
-    if (tree_ == nullptr) {
-        return std::nullopt;
-    }
-    const QModelIndexList selected = tree_->selectionModel()->selectedIndexes();
-    if (selected.isEmpty()) {
-        return std::nullopt;
-    }
-    const QModelIndex& index = selected.first();
-    if (model_.data(index, TimelineModel::IsTrackRole).toBool()) {
-        return std::nullopt;  // a track row is selected, not a clip
-    }
-    const QString clipIdText = model_.data(index, TimelineModel::ClipIdRole).toString();
-    return Uuid::parse(clipIdText.toStdString());
+    return graph_ != nullptr ? graph_->selectedClipId() : std::nullopt;
 }
 
 std::optional<Uuid> TimelinePanel::selectedTrackId() const {
-    if (tree_ == nullptr) {
-        return std::nullopt;
-    }
-    const QModelIndexList selected = tree_->selectionModel()->selectedIndexes();
-    if (selected.isEmpty()) {
-        return std::nullopt;
-    }
-    const QModelIndex& index = selected.first();
-    // A track row names itself; a clip row names its parent track — either way,
-    // this reports "which lane would a placement land in".
-    const QModelIndex trackIndex =
-        model_.data(index, TimelineModel::IsTrackRole).toBool() ? index : model_.parent(index);
-    if (!trackIndex.isValid()) {
-        return std::nullopt;
-    }
-    const QString trackIdText = model_.data(trackIndex, TimelineModel::TrackIdRole).toString();
-    return Uuid::parse(trackIdText.toStdString());
+    return graph_ != nullptr ? graph_->selectedTrackId() : std::nullopt;
 }
 
-void TimelinePanel::onTreeSelectionChanged() {
-    reconcileSelection();
+void TimelinePanel::onGraphSelectionChanged() {
     emit placementTrackChanged();
+}
+
+void TimelinePanel::onGraphSeekRequested(qint64 ms) {
+    movePlayheadToMs(ms);
 }
 
 void TimelinePanel::onModelRefreshed() {
-    reconcileSelection();
+    if (graph_ != nullptr) {
+        graph_->refresh();
+    }
     emit placementTrackChanged();
-}
-
-void TimelinePanel::reconcileSelection() {
-    const std::optional<ClipId> current = selectedClipId();
-    if (current == lastReportedClipId_) {
-        return;  // nothing to (re-)report
-    }
-    lastReportedClipId_ = current;
-    if (current.has_value()) {
-        emit clipSelected(QString::fromStdString(current->toString()));
-    } else {
-        emit selectionCleared();
-    }
 }
 
 }  // namespace palmier::ui

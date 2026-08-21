@@ -134,6 +134,12 @@ public:
     /// since AddTrackCommand enforces its own cap regardless.
     Q_INVOKABLE bool addTrack(const QString& kind);
 
+    /// The Qt-free adapter this model wraps, for a sibling view (the graphical
+    /// timeline, task 11.1) that wants typed geometry access
+    /// (trackAt/clipAt/locate) rather than QVariant roles for every paint.
+    [[nodiscard]] TimelineViewModel& viewModel() noexcept { return vm_; }
+    [[nodiscard]] const TimelineViewModel& viewModel() const noexcept { return vm_; }
+
 signals:
     void modelRefreshed();
     void indicationChanged();

@@ -1,30 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// ui/TimelinePanel.hpp — the Qt 6 timeline dock panel (task 11.3; usable-editor
-// spec Requirement 1).
+// ui/TimelinePanel.hpp — the Qt 6 timeline dock panel (task 11.3, task 11.1;
+// usable-editor spec Requirements 1, 8).
 //
-// A QTreeView over TimelineModel (tracks as top-level rows, clips as their
-// children) plus a small transport bar (play/pause/stop, undo/redo) and a
-// playhead position label. All editing and playback DECISIONS are made
-// elsewhere — TimelineViewModel (via TimelineModel) for edits, PreviewController
-// for transport — so this panel is display/wiring glue: it forwards button
-// presses to the controller/model and reflects their published state (canUndo/
-// canRedo/lastIndication, and the controller's playhead) back into its own
-// widgets.
+// A graphical TimelineGraphView (lanes per track, clip rectangles positioned
+// and sized by timeline start and duration, a time ruler and a playhead
+// marker — Requirement 8) over the same TimelineModel/TimelineViewModel pair
+// the tree it replaced used, plus a small transport bar (play/pause/stop,
+// undo/redo) and a playhead position label. All editing and playback
+// DECISIONS are made elsewhere — TimelineViewModel (via TimelineModel/
+// TimelineGraphView) for edits, PreviewController for transport — so this
+// panel is display/wiring glue: it forwards button presses to the
+// controller/model and reflects their published state (canUndo/canRedo/
+// lastIndication, and the controller's playhead) back into its own widgets.
 //
 // The transport bar drives the SAME PreviewController the preview view's QTimer
 // pumps (both are constructed once, in the composition root, and shared), so
 // pressing Play here is indistinguishable from pressing Play in the preview
 // panel: there is exactly one playback engine per Requirement 1.1.
 //
-// Selection (usable-editor Requirement 1): the panel listens to the tree's own
-// QItemSelectionModel and emits clipSelected()/selectionCleared() so MainWindow
-// can drive InspectorViewModel's selection without this panel depending on
-// InspectorViewModel itself — the panel only reports "what row is selected", it
-// does not decide what selection means to any other panel. Selecting a clip row
-// emits clipSelected(clipId); selecting a track row (or nothing) emits
-// selectionCleared(). A model reset (any engine change) re-validates the
-// selection against the fresh snapshot and emits selectionCleared() if the
+// Selection (usable-editor Requirement 1, 8.7): the panel forwards
+// TimelineGraphView's own clipSelected()/selectionCleared() signals verbatim,
+// so MainWindow can drive InspectorViewModel's selection without this panel
+// (or the graph view) depending on InspectorViewModel itself — the panel only
+// reports "what is selected", it does not decide what selection means to any
+// other panel. The graph view already re-validates its selection against the
+// fresh snapshot on every engine change and reports selectionCleared() if the
 // previously-selected clip is no longer present, so a clip deleted from any
 // surface — the GUI, the MCP endpoint or the agent — cannot leave a stale
 // selection pointed at nothing.
@@ -45,12 +46,11 @@
 #include "core/Uuid.hpp"
 #include "ui/GuiToolGateway.hpp"
 #include "ui/PreviewController.hpp"
+#include "ui/TimelineGraphView.hpp"
 #include "ui/TimelineModel.hpp"
 
-class QTreeView;
 class QToolButton;
 class QLabel;
-class QItemSelection;
 class QSlider;
 class QLineEdit;
 
@@ -114,7 +114,8 @@ private slots:
     void onStopClicked();
     void onUndoClicked();
     void onRedoClicked();
-    void onTreeSelectionChanged();
+    void onGraphSelectionChanged();
+    void onGraphSeekRequested(qint64 ms);
     void onModelRefreshed();
     void onScrubSliderMoved(int valueMs);
     void onTimecodeEdited();
@@ -123,16 +124,11 @@ private slots:
 
 private:
     void buildLayout();
-    // Re-derive and, if it changed, (re-)emit the selection signal for the
-    // tree's CURRENT selection. Called after every user selection change and
-    // after every model reset, so a clip that disappeared from under an active
-    // selection is reported as cleared rather than left stale.
-    void reconcileSelection();
     // Move the playhead to the frame nearest `requestedMs`, clamped to
     // [0, timeline duration] (usable-editor Requirement 4). The single seam
-    // every playhead-moving gesture — the slider, the timecode field, and the
-    // two step actions — funnels through, so all four honour the identical
-    // snap/clamp rule.
+    // every playhead-moving gesture — the slider, the timecode field, the two
+    // step actions, and now the graph view's ruler/empty-lane clicks — funnels
+    // through, so all five honour the identical snap/clamp rule.
     void movePlayheadToMs(qint64 requestedMs);
     // Format `transport_.playhead()` as HH:MM:SS.mmm, matching the label's
     // existing convention (refreshTransportState() computed this inline before;
@@ -142,7 +138,7 @@ private:
     TimelineModel       model_;
     PreviewController&  transport_;
 
-    QTreeView*   tree_ = nullptr;
+    TimelineGraphView* graph_ = nullptr;
     QToolButton* playButton_ = nullptr;
     QToolButton* pauseButton_ = nullptr;
     QToolButton* stopButton_ = nullptr;
@@ -153,13 +149,6 @@ private:
     QLineEdit*   timecodeEdit_ = nullptr;
     QToolButton* stepBackButton_ = nullptr;
     QToolButton* stepForwardButton_ = nullptr;
-
-    // The clip id most recently reported via clipSelected(), or std::nullopt if
-    // the most recent report was selectionCleared(). Tracked so reconcileSelection()
-    // only emits when the reconciled state actually differs from what was last
-    // reported (a model reset that leaves the same clip selected should not
-    // re-fire clipSelected() with the same id every time).
-    std::optional<ClipId> lastReportedClipId_;
 };
 
 }  // namespace palmier::ui
