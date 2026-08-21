@@ -16,7 +16,7 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: c911c5ca94ce308a0b0ac0925e01ec658c73ef3d (branch `main`)
+- linux-ref: f9c92b23ca0bef5f379ff7b5397cb95371ad0df2 (branch `main`)
 - comparison-date: 2026-08-21
 
 ## Status definitions (Requirement 13.7)
@@ -79,7 +79,7 @@ every `N. ` line as a build-order item.
 | export | present | services::ExportCoordinator, media::ExportEngine, media::MediaEncoder, media::EncoderSelector, services::ToolRegistry timeline.export | - | - | - | - |
 | generate | present | services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::OpenSslGenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator, services::ToolRegistry generation.generate | - | - | - | - |
 | projects | present | services::ProjectSession, services::ProjectStore, services::ProjectSaveService, services::ToolRegistry project.create/project.open/project.save/project.info | - | - | - | - |
-| project settings | partial | core::Project, services::ToolRegistry project.create/project.info | should | Frame rate, canvas and colour space are settable only at project.create and readable by project.info; no tool changes them later and no settings panel exists. | - | - |
+| project settings | present | core::Project, core::EditCommands::SetProjectSettingsCommand, services::ToolRegistry project.create/project.info/project.set_settings, ui::ProjectSettingsDialog | - | - | - | - |
 | search | absent | none | later | No search index, search tool or search field exists; assets and clips can only be listed in full, so a project cannot be searched. | - | - |
 | sync | absent | none | later | No synchronisation operation exists on any surface, neither audio-based angle alignment nor project or account sync; this category's upstream meaning is unconfirmed. | - | - |
 | beats | absent | services::KeyMomentDetector, services::KeyMomentMarkers | later | The key-moment components have no bundled analysis backend and no tool or panel reaches them, so no beat or key-moment marker can be produced. | - | - |
@@ -105,12 +105,12 @@ every `N. ` line as a build-order item.
 
 ## Build order (Requirement 13.9)
 
-Exactly the `absent` and `partial` entries of both tables — 27 of the 34 — sorted `must` before
+Exactly the `absent` and `partial` entries of both tables — 26 of the 34 — sorted `must` before
 `should` before `later`. This list is a **projection** of the two tables and carries no
 independent facts: an entry appears here if and only if its status above is `absent` or `partial`,
-with the priority recorded above. The seven omitted entries are the seven `present` ones —
-`import`, `export`, `projects`, `generate`, `clips` and `effects` (all table 1), plus `generation and
-upscaling` (capability area, as of task 7).
+with the priority recorded above. The eight omitted entries are the eight `present` ones —
+`import`, `export`, `projects`, `generate`, `clips`, `effects` and `project settings` (all table 1),
+plus `generation and upscaling` (capability area, as of task 7).
 
 Each item is written `<name> (<table>) — <priority>` because `multicam` appears in both tables.
 
@@ -123,27 +123,26 @@ Each item is written `<name> (<table>) — <priority>` because `multicam` appear
 7. color (tool category) — should
 8. multicam (tool category) — should
 9. media (tool category) — should
-10. project settings (tool category) — should
-11. capture frame (tool category) — should
-12. multicam (capability area) — should
-13. transcription and captions (capability area) — should
-14. text and graphics (capability area) — should
-15. color and effects (capability area) — should
-16. audio scrub and metering (capability area) — should
-17. settings (capability area) — should
-18. denoise (tool category) — later
-19. organize (tool category) — later
-20. layout (tool category) — later
-21. search (tool category) — later
-22. sync (tool category) — later
-23. beats (tool category) — later
-24. words (tool category) — later
-25. project browser and search (capability area) — later
-26. telemetry (capability area) — later
-27. auto-update (capability area) — later
+10. capture frame (tool category) — should
+11. multicam (capability area) — should
+12. transcription and captions (capability area) — should
+13. text and graphics (capability area) — should
+14. color and effects (capability area) — should
+15. audio scrub and metering (capability area) — should
+16. settings (capability area) — should
+17. denoise (tool category) — later
+18. organize (tool category) — later
+19. layout (tool category) — later
+20. search (tool category) — later
+21. sync (tool category) — later
+22. beats (tool category) — later
+23. words (tool category) — later
+24. project browser and search (capability area) — later
+25. telemetry (capability area) — later
+26. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 7 `present`, 12 `partial`, 15 `absent`; 27 in this list, of which 2 `must`, 15 `should` and 10 `later`. Per table:
-table 1 holds 22 entries (6 `present`, 6 `partial`, 10 `absent`, so 16 appear below) and table 2
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 8 `present`, 11 `partial`, 15 `absent`; 26 in this list, of which 2 `must`, 14 `should` and 10 `later`. Per table:
+table 1 holds 22 entries (7 `present`, 5 `partial`, 10 `absent`, so 15 appear below) and table 2
 holds 12 (1 `present`, 6 `partial`, 5 `absent`, so 11 appear below).
 
 ## Known limits of this comparison
