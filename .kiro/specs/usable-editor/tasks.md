@@ -141,10 +141,10 @@ dependency and the repository already contains TLS code for the MCP server to mo
   - [x] 9.3 Tests: reordering changes rendered output on both the GPU and software paths; a parameter
         change re-renders the preview; naming an absent effect is refused with no change.
 
-- [ ] 10. Mutable project settings (Requirement 7) — **S/M**
-  - [ ] 10.1 A settings-change operation on the Tool_Surface accepting `project.create`'s ranges.
-  - [ ] 10.2 A settings surface in the Editor_Shell that reads current values and submits changes.
-  - [ ] 10.3 Tests: clip positions and source ranges survive a frame-rate change as durations;
+- [x] 10. Mutable project settings (Requirement 7) — **S/M**
+  - [x] 10.1 A settings-change operation on the Tool_Surface accepting `project.create`'s ranges.
+  - [x] 10.2 A settings surface in the Editor_Shell that reads current values and submits changes.
+  - [x] 10.3 Tests: clip positions and source ranges survive a frame-rate change as durations;
         out-of-range values are refused by name; every change is one Undo.
 
 - [ ] 11. A graphical timeline (Requirement 8) — **L**
@@ -658,4 +658,107 @@ summary above. `docs/TOOLS.md`'s consistency checker (with the three new tools n
 `documentation_consistency_test.cpp`'s scenario) and both parity falsifiability suites passed against
 the re-scored document.
 
-Phase 3 Tasks 10–11, Phase 4 Tasks 12–15 and Phase 5 Tasks 16–17 remain unstarted.
+---
+
+## Phase 3, Task 10 (mutable project settings) — complete
+
+**Task 10 is CI-verified green on `main` at commit `fbb19a2` (run `32449009007`, completed success):
+CTest reports `100% tests passed, 0 tests failed out of 1295`. The build completed, the headless launch
+smoke test mapped the editor and painted 5031 distinct colours. The domain core and tool surface first
+went green at `f9c92b2` (run `32448565470`, 1295/1295) after three CI incidents, each a genuine gap in
+pre-existing test-side accounting rather than a defect in the shipped code; the shell wiring
+(`ProjectSettingsDialog`) landed together with the domain/tool commit's fix cycle since both were
+committed before the first CI signal arrived. The parity re-score then went green on the first push at
+`fbb19a2`.
+
+### What was actually built
+
+- **`SetProjectSettingsCommand`** (`src/core/EditCommands.{hpp,cpp}`) changes a project's frame rate,
+  canvas and/or colour space. Every parameter is `std::optional`: a field left `std::nullopt` is left
+  exactly as it was, so any combination of the three changes in one undoable edit (Requirement 7.4).
+  core has no dependency on `services::`, so the command validates only that a supplied `FrameRate`/
+  `Resolution` is internally well-formed (`isValid()`); the declared numeric ranges (Requirement 7.1 —
+  "the same ranges `project.create` accepts") are the Tool_Surface's to enforce, mirroring how
+  `project.create` itself splits the same two checks. No clip is touched by an `fps` change: every
+  clip's timeline position and source range is a `Duration` — an absolute nanosecond count with no
+  embedded frame rate — so `checkTimelineInvariants` (which only walks tracks and clips) can never be
+  affected by a settings-only edit (Requirement 7.3).
+- **Tool_Surface**: `project.set_settings`, registered beside `project.info` and documented in
+  `docs/TOOLS.md`. Every argument is optional but at least one of `fps`, `width`+`height` or
+  `colorSpace` must be given; `width` and `height` must be given together or not at all.
+- **Editor_Shell**: a new `ui::ProjectSettingsDialog` (modelled on `ExportDialog`'s
+  read-current-state/submit-through-the-gateway shape, but synchronous — the command applies
+  immediately, so there is no progress-polling timer to own) reads the live project snapshot's fps/
+  canvas/colour space, and submits only the fields the user actually changed through the new
+  `GuiToolGateway::setProjectSettings()`. Reachable from `MainWindow`'s File menu ("Project
+  Settings…"), which opens a fresh dialog against a fresh snapshot each time (Requirement 7.2), rather
+  than reusing a stale instance the way the export dialog persists to keep polling a running job.
+- **Tests** (`tests/core/edit_commands_test.cpp`): `ChangesAllThreeSettingsAndUndoesExactly`,
+  `LeavesAnOmittedSettingUntouched`,
+  `FrameRateChangeLeavesEveryClipsDurationsExactlyAsTheyWere` (Requirement 7.3, asserted directly: a
+  clip's `timelineStart`/`sourceIn`/`sourceOut`/`duration()` are byte-identical before and after an
+  `fps` change), and `AnInvalidFrameRateIsRefusedAndLeavesTheProjectUnchanged`.
+- **`docs/UPSTREAM_PARITY.md`**: `project settings` (table 1) `partial` → `present` (the row's own
+  stated gap — "no tool changes them later and no settings panel exists" — is now closed on both
+  halves). `linux-ref` advanced to `f9c92b2`, `comparison-date` to `2026-08-21`. Build order re-derived:
+  26 entries (was 27; `project settings` left the list), 2 `must`/14 `should`/10 `later` (was 15
+  `should`); counts 8 `present`/11 `partial`/15 `absent` (was 7/12/15).
+
+### Verification evidence
+
+The final CI log shows the four new `SetProjectSettingsCommand` tests passing (1291 → 1295 total),
+followed by the explicit CTest summary above. `docs/TOOLS.md`'s consistency checker (with
+`project.set_settings` actually invoked in `documentation_consistency_test.cpp`'s scenario) and both
+parity falsifiability suites passed against the re-scored document.
+
+### CI incidents 9, 10 and 11
+
+All three were test-side accounting gaps that a genuinely new kind of tool argument (several
+independently-optional fields related by a cross-field rule) or a genuinely new documentation shape
+(a `Result:` paragraph wrapping across two physical lines) exposed for the first time — none was a
+defect in the shipped domain/tool/shell code.
+
+- **Incident 9 — an unregistered cross-field schema/handler gap (run `32447035966`, commit `d8abb44`,
+  1 failure).** `ToolSchemaConformanceProperties.TheAdvertisedSchemaAndTheHandlerAgree` calls every
+  tool with schema-valid-but-otherwise-arbitrary arguments and requires the schema and the handler to
+  agree on acceptance, except for five documented gap classes the `ArgSpec` vocabulary cannot express.
+  `project.set_settings`'s "at least one of fps/width+height/colorSpace" and "width and height together
+  or not at all" rules are both Class 1 (a relation between arguments), the same class
+  `timeline.add_clip`'s `sourceOutNs > sourceInNs` check already occupies, but neither was named in the
+  test's Class 1 matcher — falsifiable on `args {}` (empty), the first case that could expose it.
+  Fixed at `8dcd7fc` by adding both rules to the Class 1 matcher for `kSetProjectSettings`.
+- **Incident 10 — `reorder_effects`'s own array-item-shape gap, unrelated to Task 10, exposed by
+  drawing a *different* tool (run `32447718749`, commit `8dcd7fc`, 1 failure).** The same property test,
+  redrawing tools at random, next produced `args {"order":[3]}` for `timeline.reorder_effects` (task 9)
+  — a non-UUID array item, Class 2 (array item shape), the same class `timeline.reorder_clips` already
+  occupies for its own `order` argument. `reorder_effects` was simply never added to that check when
+  task 9 landed, and — exactly like `generation.list_models` in incident 6 — this was seed-dependent:
+  falsifiable after 86 tests, so it had silently passed on every earlier seed this session. Fixed at
+  `2d34035` by adding `kReorderEffects` alongside `kReorder` in the Class 2 matcher.
+- **Incident 11 — a documentation-checker marker only checked on a paragraph's first physical line (run
+  `32448101711`, commit `2d34035`, 2 failures).** `DocumentationConsistency.EveryDocumentAndTheRunningSystemAgreeOnEveryName`
+  and `...TheDocumentedResultFieldsAreTheFieldsTheHandlersReturn` both reported `status` as an
+  undocumented result field for `project.set_settings`, even though its `Result:` paragraph did carry
+  `*(command result)*` (which auto-declares `status`/`noOp`/`indication` as conditional). Tracing
+  `tests/support/DocumentationChecker.cpp`'s `ToolSectionReader::consume()` found the cause: it checks
+  `contains(line, "*(command result)*")` against each physical line *individually*, immediately before
+  handing the whole multi-line paragraph to `consumeParagraph()` — which then advances past every line
+  of that paragraph in one step, so a line after the first is never independently re-checked for the
+  marker. Every other tool's `Result:` line put the marker on the SAME physical line as `Result:`
+  itself; this was the first tool whose result wrapped across two lines with the marker on the second.
+  Fixed at `f9c92b2` by moving the marker onto the paragraph's first line (`Result: *(command result)*.
+  ⟨field list⟩…`) — a documentation-only change, since `backtickedFieldsWithNotes()` (unlike the marker
+  check) already reads the whole *joined* paragraph, so each field's own "present only when changed"
+  note is still recognised correctly regardless of which physical line it wraps onto.
+
+The lesson recorded for later phases, extending the two above: (1) a NEW kind of argument
+relationship — several independently-optional fields related to each other, not just two comparable
+numeric fields — is still Class 1 and needs its own named case in
+`tool_schema_conformance_property_test.cpp`; (2) adding an array argument to ANY new tool needs a Class
+2 registration alongside the existing `reorder_clips`/`reorder_effects` cases, checked at the time the
+tool is added, not left to a random seed to discover later; (3) a `Result:` paragraph that wraps across
+physical lines is safe for FIELD extraction (which reads the whole joined paragraph) but not safe for
+the top-level `*(command result)*` marker (which is checked per physical line before the paragraph is
+joined) — keep the marker on the same line as the word `Result:`.
+
+Phase 3 Task 11, Phase 4 Tasks 12–15 and Phase 5 Tasks 16–17 remain unstarted.
