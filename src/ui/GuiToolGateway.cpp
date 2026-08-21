@@ -232,6 +232,18 @@ Result<Json> GuiToolGateway::createProject(const std::string& name, double fps,
     return executor_.executeTool("project.create", args, services::InvocationSource::Gui);
 }
 
+Result<Json> GuiToolGateway::setProjectSettings(std::optional<double> fps,
+                                                std::optional<std::uint32_t> width,
+                                                std::optional<std::uint32_t> height,
+                                                std::optional<std::string> colorSpace) {
+    Json args = Json::object();
+    if (fps) args.set("fps", *fps);
+    if (width) args.set("width", static_cast<std::int64_t>(*width));
+    if (height) args.set("height", static_cast<std::int64_t>(*height));
+    if (colorSpace) args.set("colorSpace", *colorSpace);
+    return executor_.executeTool("project.set_settings", args, services::InvocationSource::Gui);
+}
+
 Result<Json> GuiToolGateway::openProject(const std::string& path) {
     Json args = Json::object();
     args.set("path", path);

@@ -43,6 +43,7 @@
 #include "services/KeyMomentMarkers.hpp"
 #include "ui/AgentChatPanel.hpp"
 #include "ui/ExportDialog.hpp"
+#include "ui/ProjectSettingsDialog.hpp"
 #include "ui/InspectorPanel.hpp"
 #include "ui/MediaBrowserPanel.hpp"
 #include "ui/PreviewView.hpp"
@@ -180,6 +181,10 @@ void MainWindow::buildMenus() {
     QAction* saveAsAction = fileMenu->addAction(QStringLiteral("Save &As…"));
     saveAsAction->setShortcut(QKeySequence::SaveAs);
     connect(saveAsAction, &QAction::triggered, this, &MainWindow::onSaveAs);
+
+    fileMenu->addSeparator();
+    QAction* settingsAction = fileMenu->addAction(QStringLiteral("Project &Settings…"));
+    connect(settingsAction, &QAction::triggered, this, &MainWindow::onProjectSettings);
 
     fileMenu->addSeparator();
     QAction* quitAction = fileMenu->addAction(QStringLiteral("&Quit"));
@@ -617,6 +622,22 @@ void MainWindow::onExportVideo() {
 }
 
 void MainWindow::onCancelExport() { composition_.exportCoordinator().cancel(); }
+
+void MainWindow::onProjectSettings() {
+    // A fresh dialog every time (unlike exportDialog_, which persists so a
+    // running export keeps being polled): there is no in-flight state here to
+    // preserve across closes, and a fresh snapshot is exactly Requirement 7.2's
+    // "reads the current values" — reopening always shows what is true now,
+    // including a settings change made from the MCP endpoint or the agent while
+    // the dialog was closed.
+    const Project snapshot = composition_.timeline().snapshot();
+    settingsDialog_ = std::make_unique<ProjectSettingsDialog>(
+        gateway_, snapshot.timelineFps, snapshot.canvas, snapshot.colorSpace, this);
+    settingsDialog_->setAttribute(Qt::WA_DeleteOnClose, false);
+    settingsDialog_->show();
+    settingsDialog_->raise();
+    settingsDialog_->activateWindow();
+}
 
 // ---------------------------------------------------------------------------
 // Help actions

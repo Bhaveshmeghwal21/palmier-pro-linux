@@ -122,7 +122,8 @@ if(TARGET Qt6::Widgets)
     add_library(palmier_ui_shell STATIC
         MainWindow.cpp
         TimelinePanel.cpp
-        ExportDialog.cpp)
+        ExportDialog.cpp
+        ProjectSettingsDialog.cpp)
     add_library(Palmier::ui_shell ALIAS palmier_ui_shell)
 
     set_target_properties(palmier_ui_shell PROPERTIES AUTOMOC ON)
@@ -223,12 +224,14 @@ endif()
 #
 # InspectorViewModel holds the selected-clip state, projects the clip's
 # properties and effect chain from the TimelineEngine snapshot, and maps every
-# Inspector edit (add effect, set an effect parameter, adjust opacity/gain, trim
-# an edge) onto the undoable EditCommand path on the engine. It carries NO Qt
-# dependency, so it builds and is unit-tested everywhere — including hosts where
-# Qt 6 is not installed. The two small EditCommands the Inspector needs beyond the
-# core set (SetClipPropertyCommand, SetEffectParameterCommand) live in the same
-# translation unit. Depends only on Palmier::core.
+# Inspector edit (add effect, remove/reorder an effect, set an effect
+# parameter, adjust opacity/gain, trim an edge) onto the undoable EditCommand
+# path on the engine. It carries NO Qt dependency, so it builds and is
+# unit-tested everywhere — including hosts where Qt 6 is not installed. Only
+# SetClipPropertyCommand is Inspector-only and lives in the same translation
+# unit; RemoveEffectCommand, ReorderEffectsCommand and SetEffectParameterCommand
+# (task 9) are core::EditCommands, since each has its own published tool.
+# Depends only on Palmier::core.
 # ---------------------------------------------------------------------------
 add_library(palmier_ui_inspector_vm STATIC
     InspectorViewModel.cpp)

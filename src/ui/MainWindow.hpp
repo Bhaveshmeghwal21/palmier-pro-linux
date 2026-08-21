@@ -58,6 +58,7 @@ class InspectorPanel;
 class MediaBrowserPanel;
 class AgentChatPanel;
 class ExportDialog;
+class ProjectSettingsDialog;
 
 /// The editor's top-level window: the docked shell over one
 /// app::ApplicationComposition (Requirement 1.1).
@@ -94,6 +95,7 @@ private slots:
     void onGoToStart();
     void onExportVideo();
     void onCancelExport();
+    void onProjectSettings();  // task 10.2; Requirement 7.2
     void onAbout();
     void onDocumentation();
     void onStatusRefreshTick();
@@ -149,6 +151,7 @@ private:
     QLabel* audioNoticeLabel_ = nullptr;
 
     std::unique_ptr<ExportDialog> exportDialog_;
+    std::unique_ptr<ProjectSettingsDialog> settingsDialog_;  // task 10.2
 
     // Lightweight periodic refresh of undo/redo enablement and notices; the
     // timeline panel's own transport-state refresh is driven by its model's

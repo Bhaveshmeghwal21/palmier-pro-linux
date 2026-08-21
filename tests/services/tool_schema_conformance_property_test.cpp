@@ -123,6 +123,7 @@ namespace {
 constexpr const char* kAddClip  = "timeline.add_clip";
 constexpr const char* kReorder  = "timeline.reorder_clips";
 constexpr const char* kGenerate = "generation.generate";
+constexpr const char* kSetProjectSettings = "project.set_settings";
 
 // ---------------------------------------------------------------------------
 // The `ArgSpec` type predicate, mirrored
@@ -580,6 +581,22 @@ enum class SharedRule { None, MissingRequired, WrongTypedRequired, OutOfEnumRequ
     if (tool.name == kGenerate && args.contains("sourceOutTicks") &&
         args.intOr("sourceOutTicks", 0) <= args.intOr("sourceInTicks", 0)) {
         return "class 1: cross-field relation sourceOutTicks > sourceInTicks";
+    }
+    if (tool.name == kSetProjectSettings) {
+        // Every argument is individually optional, so an empty object is
+        // schema-valid on its own — but the handler additionally requires at
+        // least one of fps/width-height/colorSpace, and requires width and
+        // height together or not at all. Neither rule names one argument's own
+        // range; both relate the PRESENCE of several arguments to each other.
+        if (!args.contains("fps") && !args.contains("width") && !args.contains("height") &&
+            !args.contains("colorSpace")) {
+            return "class 1: cross-field relation — at least one of fps/width+height/"
+                   "colorSpace must be present";
+        }
+        if (args.contains("width") != args.contains("height")) {
+            return "class 1: cross-field relation — width and height must be present "
+                   "together";
+        }
     }
 
     // Class 2 — an array's item shape (only its item count is expressible).

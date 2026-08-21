@@ -130,6 +130,14 @@ public:
                                              std::uint32_t width, std::uint32_t height,
                                              const std::string& colorSpace = {});
 
+    /// project.set_settings (task 10.2; Requirement 7). Every parameter left as
+    /// std::nullopt leaves that setting exactly as it was; at least one must be
+    /// supplied.
+    [[nodiscard]] Result<Json> setProjectSettings(std::optional<double> fps,
+                                                  std::optional<std::uint32_t> width,
+                                                  std::optional<std::uint32_t> height,
+                                                  std::optional<std::string> colorSpace);
+
     /// project.open
     [[nodiscard]] Result<Json> openProject(const std::string& path);
 
