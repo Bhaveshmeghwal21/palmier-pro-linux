@@ -135,10 +135,10 @@ dependency and the repository already contains TLS code for the MCP server to mo
   - [x] 8.4 Tests: each is one Undo; the invariant holds after every operation; the deferred PR 397
         backlog entry's check passes.
 
-- [ ] 9. Effect lifecycle management (Requirement 6) — **M**
-  - [ ] 9.1 Remove, reorder and re-parameterise operations in the domain core and on the Tool_Surface.
-  - [ ] 9.2 Wire them into the Inspector's effect list.
-  - [ ] 9.3 Tests: reordering changes rendered output on both the GPU and software paths; a parameter
+- [x] 9. Effect lifecycle management (Requirement 6) — **M**
+  - [x] 9.1 Remove, reorder and re-parameterise operations in the domain core and on the Tool_Surface.
+  - [x] 9.2 Wire them into the Inspector's effect list.
+  - [x] 9.3 Tests: reordering changes rendered output on both the GPU and software paths; a parameter
         change re-renders the preview; naming an absent effect is refused with no change.
 
 - [ ] 10. Mutable project settings (Requirement 7) — **S/M**
@@ -587,4 +587,75 @@ enough to break a test keyed to its old status, even without moving anything. An
 needs its length checked against the document's own stated bound (`kMaxRationale`) before it is written,
 not after CI reports it.
 
-Phase 3 Tasks 9–11, Phase 4 Tasks 12–15 and Phase 5 Tasks 16–17 remain unstarted.
+---
+
+## Phase 3, Task 9 (effect lifecycle management) — complete
+
+**Task 9 is CI-verified green on `main` at commit `684d9d5` (run `32445833462`, completed success):
+CTest reports `100% tests passed, 0 tests failed out of 1291`. The build completed, the headless launch
+smoke test mapped the editor and painted 5031 distinct colours, and the keyboard-driven Add Video Track
+smoke action also passed. Both commits this task landed — the implementation at `c911c5c` (run
+`32445384505`, 1291/1291) and the parity re-score at `684d9d5` — went green on the first push, with no
+CI incident: the lessons recorded for Task 8 (check `documentation_consistency_test.cpp`'s scenario,
+check the rationale length bound before writing, renumber build-order anchors by position) were applied
+before pushing rather than discovered after.
+
+### What was actually built
+
+- **`RemoveEffectCommand`** (`src/core/EditCommands.{hpp,cpp}`) removes one effect from a clip's chain
+  by id, capturing its prior index and value so undo reinserts it exactly where it was.
+- **`ReorderEffectsCommand`** permutes a clip's effect chain. Unlike `ReorderClipsCommand`, no field of
+  an `Effect` depends on its position, so this is a pure permutation with no positional recompute;
+  `newOrder` must name every effect on the clip exactly once, and anything else — wrong count, unknown
+  id, a repeat — is refused with the project unchanged (Requirement 6.5).
+- **`SetEffectParameterCommand`** moved from `ui::InspectorViewModel` into `core::EditCommands`, with
+  identical semantics (revert restores the parameter's prior value, or removes the key entirely if it
+  was previously absent), because a parameter change is now a Tool_Surface operation and not
+  Inspector-only. The old UI-layer class and its implementation were deleted rather than kept alongside
+  the new one, to avoid two copies of the same command diverging.
+- **Tool_Surface**: `timeline.remove_effect`, `timeline.reorder_effects` (schema mirrors
+  `timeline.reorder_clips`'s array-of-UUID convention) and `timeline.set_effect_parameter`, registered
+  beside `timeline.add_effect` and documented in `docs/TOOLS.md`.
+- **Editor_Shell**: `GuiToolGateway::removeEffect/reorderEffects/setEffectParameter`;
+  `InspectorViewModel::removeEffect()`/`reorderEffects()` (new) and `setEffectParameter()` (now routes
+  through the gateway when one is installed, matching `addEffect()`'s existing pattern, rather than
+  always calling `TimelineEngine::apply` directly). `InspectorPanel` gained a Remove button and an
+  up/down reorder control per effect, driven by a `moveEffect(from, to)` helper that reads the model's
+  projection fresh at click time rather than trusting a `rebuild()`-local snapshot.
+- **Tests**:
+  - `tests/core/edit_commands_test.cpp` implicitly covers the moved `SetEffectParameterCommand` (it was
+    already exercised through the Inspector tests below; the class itself is unchanged in behaviour).
+  - `tests/ui/inspector_viewmodel_test.cpp`: four new tests —
+    `RemoveEffectRemovesItAndUndoesExactly`, `RemoveEffectOnMissingEffectFailsAndLeavesProjectUnchanged`,
+    `ReorderEffectsChangesOrderAndUndoesExactly`,
+    `ReorderEffectsWithAnUnknownIdFailsAndLeavesProjectUnchanged` — each proving one Undo and the
+    Requirement 6.5 refusal-leaves-nothing-changed guarantee.
+  - **Requirement 6.4** ("rendered result depends on effect order, on both GPU and software paths") is
+    tested at the primitive the rendering would be built from, since no compositor code currently walks
+    a clip's `effects` vector to render a chain at all (confirmed absent from `src/gpu` — a pre-existing
+    gap outside this task's scope, not something Task 9 was asked to build): `applyEffectSoftware`
+    already transforms one effect in place, so a chain is the repeated application of it in sequence.
+    `tests/gpu_effect_kernels_test.cpp`'s new `SoftwareEffect.ChainOrderChangesTheRenderedResult` and
+    `tests/gpu_gpu_cpu_parity_property_test.cpp`'s new
+    `GpuCpuParityExamples.EffectChainOrderChangesTheResultOnBothLanes` both apply Brightness and
+    Contrast (a hand-verified non-commutative pair: starting pixel 150, amounts 0.1/0.5, gives 200 one
+    order and 186 the other) in both orders on the CPU lane, the GPU lane, or both, proving the two
+    orders disagree with each other and — on the combined test — that GPU/CPU parity (P5) holds
+    order-by-order, not just for a single effect.
+- **`docs/UPSTREAM_PARITY.md`**: `effects` (table 1) `partial` → `present` (append/remove/reorder/
+  re-parameterise are now all reachable). `color and effects` (table 2) stays `partial` — the lifecycle
+  gap this row also cited is closed, but curve/wheel/scope/LUT/denoise are unrelated color-grading gaps
+  Task 9 does not touch — with its rationale rewritten to say so. `linux-ref` advanced to `c911c5c` and
+  `comparison-date` to `2026-08-21`. Build order re-derived: 27 entries (was 28; `effects` left the
+  list), 2 `must`/15 `should`/10 `later` (was 16 `should`); counts 7 `present`/12 `partial`/15 `absent`
+  (was 6/13/15).
+
+### Verification evidence
+
+The final CI log shows the six new tests passing (1285 → 1291 total): the four Inspector remove/reorder
+tests and the two order-sensitivity tests on the CPU and GPU lanes, followed by the explicit CTest
+summary above. `docs/TOOLS.md`'s consistency checker (with the three new tools now actually invoked in
+`documentation_consistency_test.cpp`'s scenario) and both parity falsifiability suites passed against
+the re-scored document.
+
+Phase 3 Tasks 10–11, Phase 4 Tasks 12–15 and Phase 5 Tasks 16–17 remain unstarted.
