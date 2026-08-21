@@ -32,6 +32,8 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMouseEvent>
+#include <QPoint>
+#include <QPointF>
 #include <QSlider>
 #include <QStatusBar>
 #include <QToolButton>
@@ -48,6 +50,7 @@
 #include "core/FrameRate.hpp"
 #include "core/MediaAssetRef.hpp"
 #include "core/Project.hpp"
+#include "core/Result.hpp"
 #include "core/Resolution.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Track.hpp"

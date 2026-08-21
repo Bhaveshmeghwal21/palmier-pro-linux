@@ -13,11 +13,16 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 
+#include <QColor>
 #include <QFontMetrics>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPaintEvent>
+#include <QPalette>
+#include <QPen>
+#include <QRect>
 #include <QResizeEvent>
 #include <QString>
 #include <QWheelEvent>

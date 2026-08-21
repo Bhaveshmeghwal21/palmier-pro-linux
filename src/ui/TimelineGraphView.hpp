@@ -54,6 +54,7 @@
 #include <QPoint>
 #include <QWidget>
 
+#include "core/Clip.hpp"
 #include "core/Duration.hpp"
 #include "core/Uuid.hpp"
 
