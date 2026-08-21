@@ -896,33 +896,28 @@ TEST_F(TimelineGraphViewTest, DragMoveAndTimelineMoveClipProduceEqualState) {
     TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
     ASSERT_NE(graph, nullptr);
 
-    // Drag the second clip (midpoint x=120) left by 60px = 1.0s, to timelineStart
-    // 500ms — clear of the first clip's [0,1000) span, so this must apply.
+    // Drag the second clip (midpoint x=120) left by 30px = 0.5s, to timelineStart
+    // 1000ms — this lands it exactly at the first clip's end (which spans
+    // [0,1000)), touching but not overlapping (MoveClipCommand's own overlap
+    // check treats an exact touch, overlap == 0, as valid), so the move must
+    // apply. (1500ms - 500ms = 1000ms; 30px / 60px-per-second = 0.5s.)
     press(graph, QPoint(120, kFirstLaneMidY));
-    ASSERT_EQ(graph->selectedClipId(), seed.secondClipId)
-        << "the press did not select the second clip; hitTestClip likely missed it";
-    move(graph, QPoint(60, kFirstLaneMidY));
-    release(graph, QPoint(60, kFirstLaneMidY));
-
-    TimelinePanel* timeline = window.findChild<TimelinePanel*>();
-    ASSERT_NE(timeline, nullptr);
-    ADD_FAILURE_AT(__FILE__, __LINE__)
-        << "diagnostic: lastIndication=" << static_cast<int>(timeline->model().viewModel().lastIndication())
-        << " lastMessage=" << timeline->model().viewModel().lastMessage();
+    move(graph, QPoint(90, kFirstLaneMidY));
+    release(graph, QPoint(90, kFirstLaneMidY));
 
     const Project viaDrag = composition.timeline().snapshot();
     const auto draggedClip = std::find_if(
         viaDrag.tracks[0].clips.begin(), viaDrag.tracks[0].clips.end(),
         [&](const Clip& c) { return c.id == seed.secondClipId; });
     ASSERT_NE(draggedClip, viaDrag.tracks[0].clips.end());
-    EXPECT_EQ(draggedClip->timelineStart, Duration::fromMilliseconds(500));
+    EXPECT_EQ(draggedClip->timelineStart, Duration::fromMilliseconds(1000));
 
     // Undo the drag, then apply the identical move through timeline.move_clip
     // (the exact tool a drag ultimately calls through the gateway) and compare.
     ASSERT_TRUE(composition.timeline().undo().changed());
     services::Json args = services::Json::object();
     args.set("clipId", seed.secondClipId.toString());
-    args.set("timelineStartNs", Duration::fromMilliseconds(500).nanoseconds());
+    args.set("timelineStartNs", Duration::fromMilliseconds(1000).nanoseconds());
     const Result<services::Json> toolResult = composition.executor().executeTool(
         "timeline.move_clip", args, services::InvocationSource::Gui);
     ASSERT_TRUE(toolResult.isOk());
