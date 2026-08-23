@@ -1489,7 +1489,8 @@ TEST(MoveClipCommand, MovesATextClipThroughTheIdenticalCommandEveryOtherClipUses
 
     ASSERT_TRUE(engine.apply(std::make_unique<MoveClipCommand>(clipId, ms(5000))).changed());
 
-    const Clip& moved = engine.snapshot().tracks[0].clips[0];
+    const Project snap = engine.snapshot();
+    const Clip& moved = snap.tracks[0].clips[0];
     EXPECT_EQ(moved.timelineStart, ms(5000));
     EXPECT_TRUE(moved.isTextClip());
     EXPECT_EQ(moved.textStyle->content, "Title");  // the move touched nothing else

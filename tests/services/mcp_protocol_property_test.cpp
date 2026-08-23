@@ -103,6 +103,7 @@
 #include "core/Resolution.hpp"
 #include "core/Result.hpp"
 #include "core/SchemaVersion.hpp"
+#include "core/TextStyle.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Track.hpp"
 #include "core/Transition.hpp"
@@ -152,6 +153,10 @@ constexpr std::string_view kRemoveEffect       = "timeline.remove_effect";
 constexpr std::string_view kReorderEffects     = "timeline.reorder_effects";
 constexpr std::string_view kSetEffectParameter = "timeline.set_effect_parameter";
 constexpr std::string_view kAddTransition = "timeline.add_transition";
+// Text and titles (usable-editor task 12; Requirement 9).
+constexpr std::string_view kAddTextClip    = "timeline.add_text_clip";
+constexpr std::string_view kSetTextContent = "timeline.set_text_content";
+constexpr std::string_view kSetTextStyle   = "timeline.set_text_style";
 constexpr std::string_view kGenerate      = "generation.generate";
 constexpr std::string_view kListModels    = "generation.list_models";
 constexpr std::string_view kExport        = "timeline.export";
@@ -285,6 +290,28 @@ constexpr std::int64_t kClipGapMs    = 500;   ///< so an added clip has somewher
             track.clips.push_back(std::move(clip));
         }
         project.tracks.push_back(std::move(track));
+    }
+
+    // A guaranteed text track with a guaranteed text clip (usable-editor task 12;
+    // Requirement 9), mirroring track 0's guaranteed effect above: tools that
+    // target a text clip (timeline.add_text_clip needs a text TRACK;
+    // timeline.set_text_content/set_text_style need an existing text CLIP) need a
+    // stable target that does not depend on which of the randomly-kinded tracks
+    // above happened to be drawn.
+    {
+        Track textTrack;
+        textTrack.id = Uuid::generateV4();
+        textTrack.kind = TrackKind::Text;
+        Clip textClip;
+        textClip.id = Uuid::generateV4();
+        textClip.timelineStart = Duration::zero();
+        textClip.sourceIn = Duration::zero();
+        textClip.sourceOut = Duration::fromMilliseconds(kClipLengthMs);
+        TextStyle style;
+        style.content = "Seed title";
+        textClip.textStyle = std::move(style);
+        textTrack.clips.push_back(std::move(textClip));
+        project.tracks.push_back(std::move(textTrack));
     }
     return project;
 }
@@ -835,6 +862,43 @@ struct Invocation {
             args.set("effectId", Json(effectId.toString()));
             args.set("parameter", Json(std::string{"amount"}));
             args.set("value", Json(static_cast<double>(drawIndex(201)) / 100.0));
+        }
+        return Invocation{name, std::move(args)};
+    }
+
+    // Text and titles (usable-editor task 12; Requirement 9). The seed project's
+    // guaranteed text track/clip (see drawSeedProject()) is the stable target,
+    // exactly like the effect-lifecycle tools above target track 0's guaranteed
+    // effect: these three need a REAL text track/clip, which a random
+    // schema-valid uuid from the generic fallback below would essentially never
+    // draw, and this property's own premise (every non-hook-backed invocation
+    // succeeds) needs that.
+    const Track* textTrack = nullptr;
+    for (const Track& candidate : project.tracks) {
+        if (candidate.kind == TrackKind::Text) {
+            textTrack = &candidate;
+            break;
+        }
+    }
+    RC_ASSERT(textTrack != nullptr);
+
+    if (name == kAddTextClip) {
+        args.set("trackId", Json(textTrack->id.toString()));
+        args.set("timelineStartNs",
+                 Json(projectEndNs(project) +
+                      Duration::fromMilliseconds(kClipGapMs).nanoseconds()));
+        args.set("durationNs",
+                 Json(Duration::fromMilliseconds(kClipLengthMs).nanoseconds()));
+        args.set("content", Json(drawAsciiText(1 + drawIndex(24))));
+        return Invocation{name, std::move(args)};
+    }
+    if (name == kSetTextContent || name == kSetTextStyle) {
+        const Clip& textClip = textTrack->clips.front();
+        args.set("clipId", Json(textClip.id.toString()));
+        if (name == kSetTextContent) {
+            args.set("content", Json(drawAsciiText(1 + drawIndex(24))));
+        } else {
+            args.set("pointSize", Json(static_cast<double>(1 + drawIndex(200))));
         }
         return Invocation{name, std::move(args)};
     }
