@@ -10,12 +10,13 @@
 // supports a stored version iff the major numbers match and the reader's minor is
 // >= the stored minor.
 //
-// The current version is 1.1. Its additions over 1.0 are all *minor*: every field
-// 1.1 introduced (`tracks[].name`, the project-level `clipGroups` array, and the
-// `invert_colors` effect key) is optional on read with a documented default, so a
-// 1.1 build reads every 1.0 document unchanged. In the other direction the rule
-// bites as intended: a 1.0 build rejects a 1.1 document as unsupported rather than
-// silently dropping the fields it does not know about.
+// The current version is 1.2. Its addition over 1.1 is Clip::textStyle and the
+// TrackKind::Text track kind it requires (usable-editor task 12; Requirement 9):
+// a clip carrying no textStyle key at all (every 1.0/1.1 document) is unaffected,
+// so a 1.2 build reads every earlier document unchanged, and a 1.1 build rejects
+// a 1.2 document as unsupported the moment it meets an unrecognised "text" track
+// kind — the same cross-version behaviour 1.1's own additions (`tracks[].name`,
+// `clipGroups`, `invert_colors`) already established for a 1.0 reader.
 
 #ifndef PALMIER_CORE_SCHEMAVERSION_HPP
 #define PALMIER_CORE_SCHEMAVERSION_HPP
@@ -37,7 +38,7 @@ struct SchemaVersion {
 
     /// The schema version this build writes and can fully round-trip.
     [[nodiscard]] static constexpr SchemaVersion current() noexcept {
-        return SchemaVersion{1, 1};
+        return SchemaVersion{1, 2};
     }
 
     /// Can a reader at `reader` load data written at `stored`?

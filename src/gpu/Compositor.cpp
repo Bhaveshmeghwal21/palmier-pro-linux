@@ -355,6 +355,26 @@ std::vector<Compositor::VisibleLayer> Compositor::gatherVisibleClips(const Proje
     return visible;
 }
 
+std::vector<Compositor::VisibleLayer> Compositor::gatherVisibleTextClips(const Project& project,
+                                                                         Duration position) {
+    std::vector<VisibleLayer> visible;
+    // Same z convention as gatherVisibleClips: only non-muted TEXT tracks
+    // contribute, tagged with the track's own index so a title composites in
+    // the identical painter's-order sequence as every video layer (Requirement
+    // 9.4). A text-track clip that somehow carries no TextStyle is skipped
+    // (see the header doc comment) rather than rasterized as an empty title.
+    for (std::size_t i = 0; i < project.tracks.size(); ++i) {
+        const Track& track = project.tracks[i];
+        if (track.kind != TrackKind::Text || track.muted) continue;
+        if (const Clip* clip = clipAt(track, position); clip != nullptr && clip->isTextClip()) {
+            visible.push_back(VisibleLayer{clip, i});
+        }
+    }
+    std::stable_sort(visible.begin(), visible.end(),
+                     [](const VisibleLayer& a, const VisibleLayer& b) { return a.z < b.z; });
+    return visible;
+}
+
 Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration position,
                                            const RenderTarget& target) {
     if (target.width == 0 || target.height == 0) {
@@ -366,11 +386,32 @@ Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration posi
             "Compositor::renderAt: only RGBA8 render targets are supported"));
     }
 
-    const std::vector<VisibleLayer> layers = gatherVisibleClips(project, position);
+    // Video and text layers are gathered separately (Requirement 9.4's title
+    // sits alongside a decoded video frame, but the two have nothing else in
+    // common — a ClipFrameProvider decodes one, a TextRasterizer rasterizes the
+    // other) and then merged into one z-ordered painter's-order sequence, so a
+    // title composites above or below any video track purely by its position in
+    // Project.tracks, exactly like today's multi-video-track compositing.
+    std::vector<VisibleLayer> layers = gatherVisibleClips(project, position);
+    const std::vector<VisibleLayer> textLayers = gatherVisibleTextClips(project, position);
+    layers.insert(layers.end(), textLayers.begin(), textLayers.end());
+    std::stable_sort(layers.begin(), layers.end(),
+                     [](const VisibleLayer& a, const VisibleLayer& b) { return a.z < b.z; });
 
-    if (!layers.empty() && !provider_) {
+    const bool anyVideoLayer =
+        std::any_of(layers.begin(), layers.end(),
+                    [](const VisibleLayer& l) { return !l.clip->isTextClip(); });
+    const bool anyTextLayer =
+        std::any_of(layers.begin(), layers.end(),
+                    [](const VisibleLayer& l) { return l.clip->isTextClip(); });
+    if (anyVideoLayer && !provider_) {
         return err<RenderedFrame>(failedPrecondition(
             "Compositor::renderAt: visible clips present but no frame provider is installed"));
+    }
+    if (anyTextLayer && !textRasterizer_) {
+        return err<RenderedFrame>(failedPrecondition(
+            "Compositor::renderAt: a visible text clip is present but no text rasterizer is "
+            "installed"));
     }
 
     // Acquire the output frame from the pool (bounded by VRAM / host budget).
@@ -394,16 +435,34 @@ Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration posi
 
     // Painter's order: composite each visible clip onto the accumulated result.
     for (const VisibleLayer& layer : layers) {
-        Result<SourceFrame> srcResult = provider_(*layer.clip, position);
-        if (srcResult.isError()) {
-            // Propagate; the lease releases the (discarded) frame on scope exit,
-            // so no partially-composited frame escapes.
-            return err<RenderedFrame>(std::move(srcResult).error());
+        SourceFrame frame;
+        if (layer.clip->isTextClip()) {
+            // A text clip's "source frame" is a full-canvas rasterization of its
+            // TextStyle at the target's own resolution (Requirement 9.4: the
+            // text is placed by TextStyle's own normalized x/y, which needs the
+            // real canvas size to resolve — rasterizing at the clip's own
+            // geometry would need a second, separate placement step this avoids
+            // entirely). Per-clip effects still apply to a text layer exactly
+            // as they do to a video layer: nothing about applyEffectSoftware
+            // assumes decoded video pixels.
+            Result<SourceFrame> textResult =
+                textRasterizer_(*layer.clip->textStyle, target.width, target.height);
+            if (textResult.isError()) {
+                return err<RenderedFrame>(std::move(textResult).error());
+            }
+            frame = std::move(textResult).value();
+        } else {
+            Result<SourceFrame> srcResult = provider_(*layer.clip, position);
+            if (srcResult.isError()) {
+                // Propagate; the lease releases the (discarded) frame on scope
+                // exit, so no partially-composited frame escapes.
+                return err<RenderedFrame>(std::move(srcResult).error());
+            }
+            frame = std::move(srcResult).value();
         }
-        SourceFrame frame = std::move(srcResult).value();
         if (!frame.valid()) {
             return err<RenderedFrame>(makeError(ErrorCode::Internal,
-                "Compositor::renderAt: frame provider returned an invalid source frame"));
+                "Compositor::renderAt: a frame source returned an invalid source frame"));
         }
 
         // Apply the clip's per-clip effects (design "dispatchEffectKernel"),

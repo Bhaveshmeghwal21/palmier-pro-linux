@@ -42,6 +42,7 @@
 #include <QString>
 
 #include "ui/MainWindow.hpp"
+#include "ui/QtTextRasterizer.hpp"
 #endif
 
 namespace {
@@ -184,6 +185,24 @@ int main(int argc, char** argv) {
     // Every non-fatal condition that changed how a component was installed, now
     // that start() has evaluated the remote-access prerequisites too.
     reportStartupErrors(composition);
+
+    // Install the text rasterizer (usable-editor task 12; Requirement 9) on the
+    // single shared Compositor, exactly the way ApplicationComposition's own
+    // constructor installs the decoder-backed ClipFrameProvider on the same
+    // instance: one Compositor, used identically by the live preview and by
+    // export (ExportEngine calls the same renderAt()), so a text clip renders
+    // through the identical path either way and Requirement 9.5 ("export shows
+    // the text identically to the preview") holds by construction rather than
+    // needing a second implementation to keep in sync. Not owned by
+    // ApplicationComposition, because QtTextRasterizer needs Qt and
+    // ApplicationComposition (src/app's own Qt-free composition root, see its
+    // own header comment) deliberately never touches Qt directly — this is the
+    // one place PALMIER_HAVE_QT code installs something onto it from outside.
+    // A plain local, like every other object in this function: it must outlive
+    // window and app.exec() below, and it does, by ordinary C++ scope rules —
+    // main() itself does not return until after both have finished.
+    palmier::ui::QtTextRasterizer textRasterizer;
+    composition.compositor().setTextRasterizer(textRasterizer.asRasterizer());
 
     palmier::ui::MainWindow window(composition);
     window.show();

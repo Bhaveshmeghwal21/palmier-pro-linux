@@ -31,6 +31,7 @@
 #include "core/Project.hpp"
 #include "core/ProjectValidation.hpp"
 #include "core/Resolution.hpp"
+#include "core/TextStyle.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Track.hpp"
 #include "core/Transition.hpp"
@@ -62,6 +63,36 @@ Project makeProjectWithOneTrack(Uuid& trackIdOut) {
     trackIdOut = track.id;
     project.tracks.push_back(std::move(track));
     return project;
+}
+
+// A project with a single empty TEXT track, returning the track id (usable-editor
+// task 12; Requirement 9).
+Project makeProjectWithOneTextTrack(Uuid& trackIdOut) {
+    Project project;
+    project.id = Uuid::generateV4();
+    project.name = "test";
+    Track track;
+    track.id = Uuid::generateV4();
+    track.kind = TrackKind::Text;
+    trackIdOut = track.id;
+    project.tracks.push_back(std::move(track));
+    return project;
+}
+
+// A text clip: no assetRef (default-constructed, nil/"invalid" — exactly what
+// AddClipCommand's own asset-registration step is written to skip), timing like
+// any other clip, and a populated TextStyle.
+Clip makeTextClip(ClipId id, Duration timelineStart, Duration duration,
+                  std::string content) {
+    Clip clip;
+    clip.id = id;
+    clip.timelineStart = timelineStart;
+    clip.sourceIn = Duration::zero();
+    clip.sourceOut = duration;
+    TextStyle style;
+    style.content = std::move(content);
+    clip.textStyle = std::move(style);
+    return clip;
 }
 
 constexpr Duration ms(std::int64_t v) { return Duration::fromMilliseconds(v); }
@@ -1315,6 +1346,208 @@ TEST(SetProjectSettingsCommand, AnInvalidFrameRateIsRefusedAndLeavesTheProjectUn
     EXPECT_FALSE(result.changed());
     EXPECT_EQ(engine.snapshot().timelineFps, FrameRate::fps30());
     EXPECT_FALSE(engine.canUndo());
+}
+
+// ===========================================================================
+// Text and titles (usable-editor task 12; Requirement 9)
+// ===========================================================================
+
+// A text clip is placed through the existing AddClipCommand — no new command —
+// and, because its assetRef is left at its default (nil, "invalid") value,
+// AddClipCommand's own asset-registration step adds nothing to Project.assets,
+// exactly the behaviour that lets a text clip carry no source media at all.
+TEST(AddClipCommand, PlacesATextClipWithoutRegisteringAnyAsset) {
+    Uuid trackId;
+    TimelineEngine engine(makeProjectWithOneTextTrack(trackId));
+
+    const ClipId clipId = Uuid::generateV4();
+    ASSERT_TRUE(engine.apply(std::make_unique<AddClipCommand>(
+                                 trackId, makeTextClip(clipId, ms(0), ms(2000), "Hello")))
+                    .changed());
+
+    const Project snap = engine.snapshot();
+    ASSERT_EQ(snap.tracks[0].clips.size(), 1u);
+    const Clip& clip = snap.tracks[0].clips[0];
+    EXPECT_TRUE(clip.isTextClip());
+    EXPECT_EQ(clip.textStyle->content, "Hello");
+    EXPECT_FALSE(clip.assetRef.isValid());
+    EXPECT_TRUE(snap.assets.empty());
+}
+
+TEST(SetTextContentCommand, ChangesTheStringAndUndoRestoresIt) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTextTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeTextClip(clipId, ms(0), ms(1000), "Original"));
+    TimelineEngine engine(std::move(project));
+
+    ASSERT_TRUE(engine.apply(std::make_unique<SetTextContentCommand>(clipId, "Changed"))
+                    .changed());
+    EXPECT_EQ(engine.snapshot().tracks[0].clips[0].textStyle->content, "Changed");
+
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_EQ(engine.snapshot().tracks[0].clips[0].textStyle->content, "Original");
+}
+
+TEST(SetTextContentCommand, RefusesAClipThatIsNotATextClip) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeClip(clipId, ms(0), ms(0), ms(1000)));
+    TimelineEngine engine(std::move(project));
+
+    const CommandResult result =
+        engine.apply(std::make_unique<SetTextContentCommand>(clipId, "New text"));
+    EXPECT_FALSE(result.changed());
+    EXPECT_FALSE(engine.canUndo());
+}
+
+// Requirement 9.2: any subset of font family, size, colour, alignment and
+// position changes in one undoable edit — mirroring
+// SetProjectSettingsCommand's own optional-field pattern. Only two of the nine
+// possible fields are supplied here; the rest must be left exactly as they were.
+TEST(SetTextStyleCommand, ChangesOnlyTheSuppliedFieldsAndUndoRestoresAll) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTextTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    Clip clip = makeTextClip(clipId, ms(0), ms(1000), "Title");
+    clip.textStyle->fontFamily = "serif";
+    clip.textStyle->pointSize = 18.0;
+    clip.textStyle->colorR = 0.2;
+    clip.textStyle->alignment = TextAlignment::Left;
+    clip.textStyle->x = 0.1;
+    clip.textStyle->y = 0.9;
+    const TextStyle before = *clip.textStyle;
+    project.tracks[0].clips.push_back(std::move(clip));
+    TimelineEngine engine(std::move(project));
+
+    // Only pointSize and alignment are supplied; everything else is std::nullopt.
+    ASSERT_TRUE(engine.apply(std::make_unique<SetTextStyleCommand>(
+                                 clipId, std::nullopt, 36.0, std::nullopt, std::nullopt,
+                                 std::nullopt, std::nullopt, TextAlignment::Right,
+                                 std::nullopt, std::nullopt))
+                    .changed());
+
+    const TextStyle after = *engine.snapshot().tracks[0].clips[0].textStyle;
+    EXPECT_EQ(after.pointSize, 36.0);               // changed
+    EXPECT_EQ(after.alignment, TextAlignment::Right); // changed
+    EXPECT_EQ(after.fontFamily, before.fontFamily);   // untouched
+    EXPECT_EQ(after.colorR, before.colorR);           // untouched
+    EXPECT_EQ(after.x, before.x);                     // untouched
+    EXPECT_EQ(after.y, before.y);                     // untouched
+
+    ASSERT_TRUE(engine.undo().changed());
+    const TextStyle restored = *engine.snapshot().tracks[0].clips[0].textStyle;
+    EXPECT_EQ(restored.pointSize, before.pointSize);
+    EXPECT_EQ(restored.alignment, before.alignment);
+    EXPECT_EQ(restored.fontFamily, before.fontFamily);
+}
+
+// Requirement 9's own numeric bound (point size must be > 0) is enforced by
+// TextStyle::isValid(), and a change that would violate it is refused with the
+// project left exactly as it was — the same own-invariant check
+// SetProjectSettingsCommand already establishes for fps/canvas.
+TEST(SetTextStyleCommand, RefusesAChangeThatWouldMakeTheStyleInvalidAndLeavesItUnchanged) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTextTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeTextClip(clipId, ms(0), ms(1000), "Title"));
+    TimelineEngine engine(std::move(project));
+
+    const CommandResult result = engine.apply(std::make_unique<SetTextStyleCommand>(
+        clipId, std::nullopt, -5.0, std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt));  // pointSize -5 is not > 0
+    EXPECT_FALSE(result.changed());
+    EXPECT_EQ(engine.snapshot().tracks[0].clips[0].textStyle->pointSize, 24.0);  // default, untouched
+    EXPECT_FALSE(engine.canUndo());
+}
+
+TEST(SetTextStyleCommand, RefusesAClipThatIsNotATextClip) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeClip(clipId, ms(0), ms(0), ms(1000)));
+    TimelineEngine engine(std::move(project));
+
+    const CommandResult result = engine.apply(std::make_unique<SetTextStyleCommand>(
+        clipId, std::nullopt, 36.0, std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt));
+    EXPECT_FALSE(result.changed());
+    EXPECT_FALSE(engine.canUndo());
+}
+
+// Requirement 9.1's round-trip half at the domain level: a text clip's own
+// existing operations — move, trim, split — already work through the identical
+// commands every other clip uses, since a text clip is just a Clip whose
+// textStyle happens to be set. Moving one is the simplest of the three to prove.
+TEST(MoveClipCommand, MovesATextClipThroughTheIdenticalCommandEveryOtherClipUses) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTextTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeTextClip(clipId, ms(0), ms(1000), "Title"));
+    TimelineEngine engine(std::move(project));
+
+    ASSERT_TRUE(engine.apply(std::make_unique<MoveClipCommand>(clipId, ms(5000))).changed());
+
+    const Clip& moved = engine.snapshot().tracks[0].clips[0];
+    EXPECT_EQ(moved.timelineStart, ms(5000));
+    EXPECT_TRUE(moved.isTextClip());
+    EXPECT_EQ(moved.textStyle->content, "Title");  // the move touched nothing else
+}
+
+// Project.assets — asset resolution — validation's own well-formedness rules.
+TEST(ProjectValidation, ATextClipIsExemptFromAssetResolutionAndPassesWithNoAssetsAtAll) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTextTrack(trackId);
+    project.timelineFps = FrameRate::fps30();
+    project.canvas = Resolution::hd1080();
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeTextClip(clipId, ms(0), ms(1000), "Title"));
+
+    ASSERT_TRUE(project.assets.empty());
+    EXPECT_TRUE(validateProject(project).isOk());
+}
+
+TEST(ProjectValidation, RejectsATextStyledClipOnAVideoTrack) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);  // TrackKind::Video
+    project.timelineFps = FrameRate::fps30();
+    project.canvas = Resolution::hd1080();
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeTextClip(clipId, ms(0), ms(1000), "Title"));
+
+    const Result<void> result = validateProject(project);
+    EXPECT_FALSE(result.isOk());
+}
+
+TEST(ProjectValidation, RejectsAMediaClipOnATextTrack) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTextTrack(trackId);
+    project.timelineFps = FrameRate::fps30();
+    project.canvas = Resolution::hd1080();
+    const ClipId clipId = Uuid::generateV4();
+    MediaAssetRef asset(Uuid::generateV4(), "mem://asset");
+    project.assets.push_back(asset);
+    Clip clip = makeClip(clipId, ms(0), ms(0), ms(1000));
+    clip.assetRef = asset;
+    project.tracks[0].clips.push_back(std::move(clip));
+
+    const Result<void> result = validateProject(project);
+    EXPECT_FALSE(result.isOk());
+}
+
+TEST(ProjectValidation, RejectsATextClipWhoseStyleIsNotInternallyWellFormed) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTextTrack(trackId);
+    project.timelineFps = FrameRate::fps30();
+    project.canvas = Resolution::hd1080();
+    const ClipId clipId = Uuid::generateV4();
+    Clip clip = makeTextClip(clipId, ms(0), ms(1000), "Title");
+    clip.textStyle->colorR = 2.5;  // outside [0,1]
+    project.tracks[0].clips.push_back(std::move(clip));
+
+    const Result<void> result = validateProject(project);
+    EXPECT_FALSE(result.isOk());
 }
 
 }  // namespace

@@ -73,6 +73,10 @@ constexpr const char* kRemoveEffect        = "timeline.remove_effect";
 constexpr const char* kReorderEffects      = "timeline.reorder_effects";
 constexpr const char* kSetEffectParameter  = "timeline.set_effect_parameter";
 constexpr const char* kAddTransition  = "timeline.add_transition";
+// Text and titles (usable-editor Phase 4 task 12; Requirement 9).
+constexpr const char* kAddTextClip      = "timeline.add_text_clip";
+constexpr const char* kSetTextContent   = "timeline.set_text_content";
+constexpr const char* kSetTextStyle     = "timeline.set_text_style";
 constexpr const char* kGenerate       = "generation.generate";
 constexpr const char* kListModels     = "generation.list_models";
 constexpr const char* kExport         = "timeline.export";
@@ -209,19 +213,26 @@ std::optional<TransitionKind> parseTransitionKind(std::string_view s) {
 }
 
 std::string_view trackKindName(TrackKind kind) {
-    return kind == TrackKind::Audio ? "audio" : "video";
+    switch (kind) {
+        case TrackKind::Audio: return "audio";
+        case TrackKind::Text:  return "text";
+        case TrackKind::Video: return "video";
+    }
+    return "video";
 }
 
 /// The accepted `kind` values of the track tools, declared once so the published
-/// enum and `parseTrackKind`'s accepted set are one list (Requirements 3.3, 3.8).
+/// enum and `parseTrackKind`'s accepted set are one list (Requirements 3.3, 3.8;
+/// `text` added by usable-editor task 12, Requirement 9).
 const std::vector<std::string>& trackKindValues() {
-    static const std::vector<std::string> values = {"video", "audio"};
+    static const std::vector<std::string> values = {"video", "audio", "text"};
     return values;
 }
 
 std::optional<TrackKind> parseTrackKind(std::string_view s) {
     if (s == "video") return TrackKind::Video;
     if (s == "audio") return TrackKind::Audio;
+    if (s == "text") return TrackKind::Text;
     return std::nullopt;
 }
 
@@ -1135,6 +1146,225 @@ Tool makeAddTransitionTool(ProjectSession* session) {
                             std::make_unique<SetTransitionCommand>(clipId.value(),
                                                                    std::move(transition)),
                             std::move(out));
+    };
+    return t;
+}
+
+// ---------------------------------------------------------------------------
+// Text and titles (usable-editor task 12; Requirement 9).
+//
+// Creating a text clip publishes as its own tool (kAddTextClip) rather than
+// overloading timeline.add_clip, because the two shapes barely overlap: a text
+// clip takes no assetId/sourcePath/sourceInNs at all (it has no source media)
+// and instead takes the six TextStyle fields Requirement 9.1 names, so sharing
+// one schema would make most of its arguments meaningless depending on which
+// "mode" a caller picked. The command underneath both tools is the identical
+// AddClipCommand, though: this handler simply constructs a Clip whose
+// textStyle is populated and whose assetRef is left at its default
+// (nil/"invalid") value, and AddClipCommand's own asset-registration step
+// already skips exactly that case — see EditCommands.hpp's "Text and titles"
+// section for why that needed no new command.
+// ---------------------------------------------------------------------------
+
+/// A closed set of alignment values, spelled the way TextAlignment::toStringView
+/// already renders them, so the published enum and the parser share one
+/// vocabulary (mirroring trackKindValues()/parseTrackKind()).
+const std::vector<std::string>& textAlignmentValues() {
+    static const std::vector<std::string> values = {
+        std::string(toStringView(TextAlignment::Left)),
+        std::string(toStringView(TextAlignment::Center)),
+        std::string(toStringView(TextAlignment::Right))};
+    return values;
+}
+
+std::optional<TextAlignment> parseTextAlignment(std::string_view s) {
+    if (s == toStringView(TextAlignment::Left)) return TextAlignment::Left;
+    if (s == toStringView(TextAlignment::Center)) return TextAlignment::Center;
+    if (s == toStringView(TextAlignment::Right)) return TextAlignment::Right;
+    return std::nullopt;
+}
+
+/// A normalized-[0,1] number argument, the convention TextStyle's colour
+/// channels and screen position both use (matching EffectType::CropTransform's
+/// rect, the one other place this domain model already places something in
+/// normalized canvas space).
+ArgSpec unitArg(std::string name, bool required, std::string description,
+                double defaultValue) {
+    return ArgSpec{.name = std::move(name),
+                   .kind = JsonKind::Number,
+                   .required = required,
+                   .description = std::move(description) +
+                                  " In [0,1]; default " + std::to_string(defaultValue) + ".",
+                   .minNum = 0.0,
+                   .maxNum = 1.0};
+}
+
+Tool makeAddTextClipTool(ProjectSession* session) {
+    Tool t;
+    t.name = kAddTextClip;
+    t.description = "Add a text clip (a title/lower third) onto a text track at a timeline "
+                    "position.";
+    t.schema
+        .arg(uuidArg("trackId", true, "UUID of the target TEXT track."))
+        .arg(uuidArg("clipId", false, "Optional explicit clip UUID; generated when omitted."))
+        .arg(intArg("timelineStartNs", false, "Timeline start position in nanoseconds.", 0))
+        .arg(intArg("durationNs", true, "On-screen duration in nanoseconds (> 0).", 1))
+        .arg(stringArg("content", true, "The text to display."))
+        .arg(stringArg("fontFamily", false,
+                       "Requested font family (default 'sans-serif'); substituted with a "
+                       "documented default and reported when unavailable (Requirement 9.6)."))
+        .arg(ArgSpec{.name = "pointSize",
+                     .kind = JsonKind::Number,
+                     .description = "Font size in points, >= 1 (default 24).",
+                     .minNum = 1.0})
+        .arg(unitArg("colorR", false, "Red channel.", 1.0))
+        .arg(unitArg("colorG", false, "Green channel.", 1.0))
+        .arg(unitArg("colorB", false, "Blue channel.", 1.0))
+        .arg(unitArg("colorA", false, "Alpha channel.", 1.0))
+        .arg(ArgSpec{.name = "alignment",
+                     .kind = JsonKind::String,
+                     .description = "Horizontal alignment (default 'center').",
+                     .enumValues = textAlignmentValues()})
+        .arg(unitArg("x", false, "Normalized anchor x.", 0.5))
+        .arg(unitArg("y", false, "Normalized anchor y.", 0.5));
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kAddTextClip));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> trackId = requireUuid(in, "trackId");
+        if (trackId.isError()) return err<Json>(std::move(trackId).error());
+        Result<std::int64_t> durationNs = requireInt(in, "durationNs");
+        if (durationNs.isError()) return err<Json>(std::move(durationNs).error());
+        if (durationNs.value() <= 0) {
+            return err<Json>(invalidArgument("durationNs must be > 0"));
+        }
+        Result<std::string> content = requireString(in, "content");
+        if (content.isError()) return err<Json>(std::move(content).error());
+
+        TextAlignment alignment = TextAlignment::Center;
+        if (const Json* a = in.find("alignment"); a != nullptr && a->isString()) {
+            std::optional<TextAlignment> parsed = parseTextAlignment(a->asString());
+            if (!parsed) return err<Json>(invalidArgument("field 'alignment' is not known"));
+            alignment = *parsed;
+        }
+
+        Clip clip;
+        if (const Json* cid = in.find("clipId"); cid != nullptr && cid->isString()) {
+            std::optional<Uuid> parsed = Uuid::parse(cid->asString());
+            if (!parsed) return err<Json>(invalidArgument("field 'clipId' is not a valid UUID"));
+            clip.id = *parsed;
+        } else {
+            clip.id = Uuid::generateV4();
+        }
+        clip.timelineStart = Duration::fromNanoseconds(in.intOr("timelineStartNs", 0));
+        clip.sourceIn = Duration::zero();
+        clip.sourceOut = Duration::fromNanoseconds(durationNs.value());
+
+        TextStyle style;
+        style.content = content.value();
+        style.fontFamily = in.stringOr("fontFamily", style.fontFamily);
+        style.pointSize = in.doubleOr("pointSize", style.pointSize);
+        style.colorR = in.doubleOr("colorR", style.colorR);
+        style.colorG = in.doubleOr("colorG", style.colorG);
+        style.colorB = in.doubleOr("colorB", style.colorB);
+        style.colorA = in.doubleOr("colorA", style.colorA);
+        style.alignment = alignment;
+        style.x = in.doubleOr("x", style.x);
+        style.y = in.doubleOr("y", style.y);
+        if (!style.isValid()) {
+            return err<Json>(invalidArgument(
+                "the resulting text style is not internally well-formed (pointSize must be "
+                "> 0 and every colour/position value must lie within [0, 1])"));
+        }
+        clip.textStyle = std::move(style);
+
+        Json out = Json::object();
+        out.set("clipId", clip.id.toString());
+        return applyCommand(engine, std::make_unique<AddClipCommand>(trackId.value(),
+                                                                     std::move(clip)),
+                            std::move(out));
+    };
+    return t;
+}
+
+Tool makeSetTextContentTool(ProjectSession* session) {
+    Tool t;
+    t.name = kSetTextContent;
+    t.description = "Change a text clip's displayed string.";
+    t.schema
+        .arg(uuidArg("clipId", true, "UUID of the text clip."))
+        .arg(stringArg("content", true, "The new text to display."));
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kSetTextContent));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> clipId = requireUuid(in, "clipId");
+        if (clipId.isError()) return err<Json>(std::move(clipId).error());
+        Result<std::string> content = requireString(in, "content");
+        if (content.isError()) return err<Json>(std::move(content).error());
+        Json out = Json::object();
+        out.set("clipId", clipId.value().toString());
+        return applyCommand(
+            engine,
+            std::make_unique<SetTextContentCommand>(clipId.value(), content.value()),
+            std::move(out));
+    };
+    return t;
+}
+
+Tool makeSetTextStyleTool(ProjectSession* session) {
+    Tool t;
+    t.name = kSetTextStyle;
+    t.description = "Change a text clip's font, size, colour, alignment and/or screen "
+                    "position. Every argument but clipId is optional; an omitted field is "
+                    "left unchanged.";
+    t.schema
+        .arg(uuidArg("clipId", true, "UUID of the text clip."))
+        .arg(stringArg("fontFamily", false, "New font family."))
+        .arg(ArgSpec{.name = "pointSize",
+                     .kind = JsonKind::Number,
+                     .description = "New font size in points, >= 1.",
+                     .minNum = 1.0})
+        .arg(unitArg("colorR", false, "New red channel.", 1.0))
+        .arg(unitArg("colorG", false, "New green channel.", 1.0))
+        .arg(unitArg("colorB", false, "New blue channel.", 1.0))
+        .arg(unitArg("colorA", false, "New alpha channel.", 1.0))
+        .arg(ArgSpec{.name = "alignment",
+                     .kind = JsonKind::String,
+                     .description = "New horizontal alignment.",
+                     .enumValues = textAlignmentValues()})
+        .arg(unitArg("x", false, "New normalized anchor x.", 0.5))
+        .arg(unitArg("y", false, "New normalized anchor y.", 0.5));
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kSetTextStyle));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> clipId = requireUuid(in, "clipId");
+        if (clipId.isError()) return err<Json>(std::move(clipId).error());
+
+        std::optional<TextAlignment> alignment;
+        if (const Json* a = in.find("alignment"); a != nullptr && a->isString()) {
+            alignment = parseTextAlignment(a->asString());
+            if (!alignment) return err<Json>(invalidArgument("field 'alignment' is not known"));
+        }
+
+        const auto optionalNumber = [&](const char* key) -> std::optional<double> {
+            const Json* v = in.find(key);
+            if (v == nullptr || !v->isNumber()) return std::nullopt;
+            return v->isInt() ? static_cast<double>(v->asInt()) : v->asDouble();
+        };
+        const auto optionalStr = [&](const char* key) -> std::optional<std::string> {
+            const Json* v = in.find(key);
+            if (v == nullptr || !v->isString()) return std::nullopt;
+            return v->asString();
+        };
+
+        Json out = Json::object();
+        out.set("clipId", clipId.value().toString());
+        return applyCommand(
+            engine,
+            std::make_unique<SetTextStyleCommand>(
+                clipId.value(), optionalStr("fontFamily"), optionalNumber("pointSize"),
+                optionalNumber("colorR"), optionalNumber("colorG"), optionalNumber("colorB"),
+                optionalNumber("colorA"), alignment, optionalNumber("x"), optionalNumber("y")),
+            std::move(out));
     };
     return t;
 }
@@ -2089,6 +2319,10 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(makeReorderEffectsTool(session));
     registry.add(makeSetEffectParameterTool(session));
     registry.add(makeAddTransitionTool(session));
+    // Text and titles sits right after transitions (usable-editor task 12.2).
+    registry.add(makeAddTextClipTool(session));
+    registry.add(makeSetTextContentTool(session));
+    registry.add(makeSetTextStyleTool(session));
     registry.add(makeUndoTool(session));
     registry.add(makeRedoTool(session));
     registry.add(makeGenerateTool(session, std::move(hooks.generate)));

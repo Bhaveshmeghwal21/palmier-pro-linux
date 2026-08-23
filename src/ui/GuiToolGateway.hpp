@@ -120,6 +120,30 @@ public:
     [[nodiscard]] Result<Json> addTransition(ClipId clipId, TransitionKind kind,
                                              Duration duration);
 
+    // --- Text and titles (usable-editor task 12; Requirement 9) ------------
+
+    /// timeline.add_text_clip
+    [[nodiscard]] Result<Json> addTextClip(Uuid trackId, Duration timelineStart,
+                                           Duration duration, const std::string& content,
+                                           const std::string& fontFamily, double pointSize,
+                                           double colorR, double colorG, double colorB,
+                                           double colorA, TextAlignment alignment, double x,
+                                           double y);
+
+    /// timeline.set_text_content
+    [[nodiscard]] Result<Json> setTextContent(ClipId clipId, const std::string& content);
+
+    /// timeline.set_text_style. Every parameter but clipId left as
+    /// std::nullopt leaves that field exactly as it was.
+    [[nodiscard]] Result<Json> setTextStyle(ClipId clipId, std::optional<std::string> fontFamily,
+                                            std::optional<double> pointSize,
+                                            std::optional<double> colorR,
+                                            std::optional<double> colorG,
+                                            std::optional<double> colorB,
+                                            std::optional<double> colorA,
+                                            std::optional<TextAlignment> alignment,
+                                            std::optional<double> x, std::optional<double> y);
+
     // --- Media / project gestures ------------------------------------------
 
     /// media.import

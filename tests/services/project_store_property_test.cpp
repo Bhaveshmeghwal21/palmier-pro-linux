@@ -53,6 +53,7 @@
 #include "core/Resolution.hpp"
 #include "core/Result.hpp"
 #include "core/SchemaVersion.hpp"
+#include "core/TextStyle.hpp"
 #include "core/Track.hpp"
 #include "core/Transition.hpp"
 #include "core/Uuid.hpp"
@@ -157,17 +158,66 @@ Clip drawClip(const std::vector<MediaAssetRef>& assets) {
     return clip;
 }
 
+// Draw a text clip (usable-editor task 12; Requirement 9): no assetRef at all
+// (left at its default nil/"invalid" value, mirroring how AddClipCommand's own
+// asset-registration step is written to treat exactly that), the same
+// timeline-position/duration shape as drawClip, and a fully-populated
+// TextStyle whose every field is drawn within TextStyle::isValid()'s own
+// bounds, so the generated project satisfies ProjectValidation's text-clip
+// rules alongside the ordinary media-clip ones drawClip already satisfies.
+Clip drawTextClip() {
+    Clip clip;
+    clip.id = drawUuid();
+
+    constexpr std::int64_t kMaxPosNs = 100'000LL * Duration::kTicksPerSecond;
+    constexpr std::int64_t kMaxLenNs = 3'600LL * Duration::kTicksPerSecond;
+    const std::int64_t lenNs = *rc::gen::inRange<std::int64_t>(1, kMaxLenNs + 1);
+    clip.timelineStart = drawDuration(kMaxPosNs);
+    clip.sourceIn = Duration::zero();
+    clip.sourceOut = Duration::fromNanoseconds(lenNs);
+
+    clip.gain = static_cast<double>(*rc::gen::inRange<int>(0, 1'000'001)) / 1'000.0;
+    clip.opacity = static_cast<double>(*rc::gen::inRange<int>(0, 1'000'001)) / 1'000'000.0;
+
+    TextStyle style;
+    style.content = *rc::gen::arbitrary<std::string>();
+    style.fontFamily = *rc::gen::arbitrary<std::string>();
+    // Point size strictly > 0 (TextStyle::isValid()); built from an integer draw
+    // so the resulting double is finite and round-trips exactly, matching
+    // gain/opacity's own construction above.
+    style.pointSize = static_cast<double>(*rc::gen::inRange<int>(1, 1'000'001)) / 1'000.0;
+    const auto drawUnit = [] {
+        return static_cast<double>(*rc::gen::inRange<int>(0, 1'000'001)) / 1'000'000.0;
+    };
+    style.colorR = drawUnit();
+    style.colorG = drawUnit();
+    style.colorB = drawUnit();
+    style.colorA = drawUnit();
+    style.alignment = *rc::gen::element<TextAlignment>(
+        TextAlignment::Left, TextAlignment::Center, TextAlignment::Right);
+    style.x = drawUnit();
+    style.y = drawUnit();
+    clip.textStyle = std::move(style);
+    return clip;
+}
+
 Track drawTrack(const std::vector<MediaAssetRef>& assets) {
     Track track;
     track.id = drawUuid();
-    track.kind = *rc::gen::element<TrackKind>(TrackKind::Video, TrackKind::Audio);
+    // Schema 1.2: "text" joins "video"/"audio" (usable-editor task 12;
+    // Requirement 9).
+    track.kind =
+        *rc::gen::element<TrackKind>(TrackKind::Video, TrackKind::Audio, TrackKind::Text);
     // Schema 1.1: an arbitrary label (including the empty default) must survive.
     track.name = *rc::gen::arbitrary<std::string>();
     track.muted = *rc::gen::arbitrary<bool>();
     track.locked = *rc::gen::arbitrary<bool>();
     const int clipCount = *rc::gen::inRange<int>(0, 6);
     for (int i = 0; i < clipCount; ++i) {
-        track.clips.push_back(drawClip(assets));
+        // A text track's clips must all carry a TextStyle (and no other track's
+        // clips may); ProjectValidation enforces this both ways.
+        track.clips.push_back(track.kind == TrackKind::Text ? drawTextClip()
+                                                            : drawClip(assets));
     }
     return track;
 }
@@ -251,6 +301,21 @@ void assertSameClip(const Clip& a, const Clip& b) {
         RC_ASSERT(a.transitionIn->id == b.transitionIn->id);
         RC_ASSERT(a.transitionIn->kind == b.transitionIn->kind);
         RC_ASSERT(a.transitionIn->duration.ticks() == b.transitionIn->duration.ticks());
+    }
+
+    // Schema 1.2 (usable-editor task 12; Requirement 9).
+    RC_ASSERT(a.textStyle.has_value() == b.textStyle.has_value());
+    if (a.textStyle.has_value()) {
+        RC_ASSERT(a.textStyle->content == b.textStyle->content);
+        RC_ASSERT(a.textStyle->fontFamily == b.textStyle->fontFamily);
+        RC_ASSERT(a.textStyle->pointSize == b.textStyle->pointSize);
+        RC_ASSERT(a.textStyle->colorR == b.textStyle->colorR);
+        RC_ASSERT(a.textStyle->colorG == b.textStyle->colorG);
+        RC_ASSERT(a.textStyle->colorB == b.textStyle->colorB);
+        RC_ASSERT(a.textStyle->colorA == b.textStyle->colorA);
+        RC_ASSERT(a.textStyle->alignment == b.textStyle->alignment);
+        RC_ASSERT(a.textStyle->x == b.textStyle->x);
+        RC_ASSERT(a.textStyle->y == b.textStyle->y);
     }
 }
 

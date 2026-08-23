@@ -146,3 +146,15 @@ endif()
 if(TARGET palmier-pro)
     target_link_libraries(palmier-pro PRIVATE Palmier::app_composition)
 endif()
+
+# Link the Qt-based text rasterizer (usable-editor task 12; Requirement 9) into
+# the editor executable, for the same forward-reference reason as
+# Palmier::app_composition above: Palmier::ui_text_rasterizer is defined in
+# src/ui/CMakeLists.txt, which — unlike app_composition — IS already processed
+# before this file runs (src/ui precedes src/app in the top-level
+# CMakeLists.txt), but the TARGET guard is kept for the same safety this file
+# already applies everywhere else: configuration stays well-defined even if Qt
+# is somehow absent despite PALMIER_BUILD_UI being requested.
+if(TARGET palmier-pro AND TARGET Palmier::ui_text_rasterizer)
+    target_link_libraries(palmier-pro PRIVATE Palmier::ui_text_rasterizer)
+endif()

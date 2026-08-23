@@ -51,7 +51,12 @@ std::string_view transitionKindName(TransitionKind kind) noexcept {
 
 /// TrackKind -> the string the `add_track` tool declares (trackKindValues()).
 std::string_view trackKindName(TrackKind kind) noexcept {
-    return kind == TrackKind::Video ? "video" : "audio";
+    switch (kind) {
+        case TrackKind::Audio: return "audio";
+        case TrackKind::Text:  return "text";
+        case TrackKind::Video: return "video";
+    }
+    return "video";
 }
 
 std::string_view edgeName(TrimClipCommand::Edge edge) noexcept {
@@ -210,6 +215,58 @@ Result<Json> GuiToolGateway::addTransition(ClipId clipId, TransitionKind kind,
     args.set("kind", std::string(transitionKindName(kind)));
     args.set("durationNs", duration.nanoseconds());
     return executor_.executeTool("timeline.add_transition", args, services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::addTextClip(Uuid trackId, Duration timelineStart, Duration duration,
+                                         const std::string& content, const std::string& fontFamily,
+                                         double pointSize, double colorR, double colorG,
+                                         double colorB, double colorA, TextAlignment alignment,
+                                         double x, double y) {
+    Json args = Json::object();
+    args.set("trackId", trackId.toString());
+    args.set("timelineStartNs", timelineStart.nanoseconds());
+    args.set("durationNs", duration.nanoseconds());
+    args.set("content", content);
+    args.set("fontFamily", fontFamily);
+    args.set("pointSize", pointSize);
+    args.set("colorR", colorR);
+    args.set("colorG", colorG);
+    args.set("colorB", colorB);
+    args.set("colorA", colorA);
+    args.set("alignment", std::string(toStringView(alignment)));
+    args.set("x", x);
+    args.set("y", y);
+    return executor_.executeTool("timeline.add_text_clip", args, services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::setTextContent(ClipId clipId, const std::string& content) {
+    Json args = Json::object();
+    args.set("clipId", clipId.toString());
+    args.set("content", content);
+    return executor_.executeTool("timeline.set_text_content", args,
+                                 services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::setTextStyle(ClipId clipId, std::optional<std::string> fontFamily,
+                                          std::optional<double> pointSize,
+                                          std::optional<double> colorR,
+                                          std::optional<double> colorG,
+                                          std::optional<double> colorB,
+                                          std::optional<double> colorA,
+                                          std::optional<TextAlignment> alignment,
+                                          std::optional<double> x, std::optional<double> y) {
+    Json args = Json::object();
+    args.set("clipId", clipId.toString());
+    if (fontFamily) args.set("fontFamily", *fontFamily);
+    if (pointSize) args.set("pointSize", *pointSize);
+    if (colorR) args.set("colorR", *colorR);
+    if (colorG) args.set("colorG", *colorG);
+    if (colorB) args.set("colorB", *colorB);
+    if (colorA) args.set("colorA", *colorA);
+    if (alignment) args.set("alignment", std::string(toStringView(*alignment)));
+    if (x) args.set("x", *x);
+    if (y) args.set("y", *y);
+    return executor_.executeTool("timeline.set_text_style", args, services::InvocationSource::Gui);
 }
 
 Result<Json> GuiToolGateway::importMedia(const std::string& path) {

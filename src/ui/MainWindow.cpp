@@ -239,6 +239,16 @@ void MainWindow::buildMenus() {
         }
     });
 
+    // Usable-editor task 12; Requirement 9: a text clip must sit on a text
+    // track, so a text track needs the same GUI creation affordance the
+    // video/audio lanes already have.
+    addTextTrackAction_ = editMenu->addAction(QStringLiteral("Add Te&xt Track"));
+    connect(addTextTrackAction_, &QAction::triggered, this, [this]() {
+        if (timelinePanel_ != nullptr) {
+            (void)timelinePanel_->model().addTrack(QStringLiteral("text"));
+        }
+    });
+
     editMenu->addSeparator();
     placeAtPlayheadAction_ = editMenu->addAction(QStringLiteral("&Place at Playhead"));
     placeAtPlayheadAction_->setEnabled(false);  // no asset/track selected at startup
@@ -669,10 +679,11 @@ void MainWindow::onStatusRefreshTick() {
     refreshNotices();
     refreshSelectionActions();
     if (addVideoTrackAction_ != nullptr && addAudioTrackAction_ != nullptr &&
-        timelinePanel_ != nullptr) {
+        addTextTrackAction_ != nullptr && timelinePanel_ != nullptr) {
         const bool canAddTrack = timelinePanel_->model().canAddTrack();
         addVideoTrackAction_->setEnabled(canAddTrack);
         addAudioTrackAction_->setEnabled(canAddTrack);
+        addTextTrackAction_->setEnabled(canAddTrack);
     }
 }
 

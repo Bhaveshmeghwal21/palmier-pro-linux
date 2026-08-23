@@ -22,7 +22,7 @@
 //
 //   {
 //     "format": "palmier-project",   // magic string; identifies the document kind
-//     "version": "1.1",              // SchemaVersion (major.minor) the doc was written at
+//     "version": "1.2",              // SchemaVersion (major.minor) the doc was written at
 //     "project": { ...Project... }   // the serialized Project (see below)
 //   }
 //
@@ -37,15 +37,23 @@
 //   assets      : [ MediaAssetRef, ... ]
 //   clipGroups  : [ ClipGroup, ... ]    (1.1; optional on read, default [])
 //
-//   Track       : { id, kind ("video"|"audio"), name, muted, locked, clips: [Clip,...] }
-//                 (name is 1.1; optional on read, default "")
+//   Track       : { id, kind ("video"|"audio"|"text"), name, muted, locked,
+//                   clips: [Clip,...] }
+//                 (name is 1.1, optional on read, default ""; "text" as a kind
+//                 value is 1.2, Requirement 9)
 //   Clip        : { id, assetRef, timelineStart, sourceIn, sourceOut,
 //                   effects: [Effect,...], transitionIn: Transition|null,
-//                   gain, opacity }
+//                   gain, opacity, textStyle: TextStyle|null }
+//                 (textStyle is 1.2; absent entirely on a 1.1 document, or
+//                 present-but-null on a 1.2 document's own non-text clip — both
+//                 mean "not a text clip")
 //   Effect      : { id, type (stable key), parameters: { name: number, ... } }
 //   Transition  : { id, kind (stable key), duration }
 //   MediaAssetRef : { assetId: string, sourcePath: string }
 //   ClipGroup   : { id: string, clipIds: [string, ...] }
+//   TextStyle   : { content, fontFamily, pointSize, colorR, colorG, colorB,
+//                   colorA, alignment ("left"|"center"|"right"), x, y }
+//                 (1.2; Requirement 9 — see core/TextStyle.hpp)
 //
 // Schema 1.1 additions
 // --------------------
@@ -65,6 +73,19 @@
 // Because 1.1 documents declare version "1.1", a 1.0-era build correctly rejects
 // them as unsupported (same major, older reader minor) rather than loading them
 // with fields silently dropped.
+//
+// Schema 1.2 addition (usable-editor task 12; Requirement 9)
+// ------------------------------------------------------------
+// 1.2 adds Clip::textStyle and the "text" TrackKind value it requires. Unlike
+// 1.1's additions, this one is NOT written unconditionally on every clip: a
+// clip that is not a text clip writes `"textStyle": null`, the same shape a
+// 1.1 clip has for `transitionIn` when absent, and a 1.1 reader never sees this
+// key at all (it did not exist in that schema), so a 1.1 document round-trips
+// through a 1.2 build completely unchanged. A 1.1 build, in the other
+// direction, correctly rejects a 1.2 document the moment it meets a "text"
+// track kind it does not recognise (trackKindFromKey returns std::nullopt,
+// which fails the whole read) — the same cross-version behaviour 1.1's own
+// additions established for a 1.0 reader, just triggered by a different field.
 //
 // All Duration fields (timelineStart, sourceIn, sourceOut, transition duration)
 // are written as integer nanosecond tick counts, matching Duration's internal,

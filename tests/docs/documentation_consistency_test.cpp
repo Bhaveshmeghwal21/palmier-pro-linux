@@ -480,6 +480,41 @@ private:
     transition.set("durationNs", kSecond / 2);
     observer.run("timeline.add_transition", transition);
 
+    // Text and titles (usable-editor Phase 4 task 12; Requirement 9), on a
+    // dedicated text track so `timeline.add_text_clip`'s own "must name a text
+    // track" rule is observed being satisfied, not merely declared.
+    const services::Json textTrack =
+        observer.run("timeline.add_track", with("kind", services::Json(std::string{"text"})));
+    const std::string textTrackId = textTrack.stringOr("trackId");
+
+    services::Json addTextClip = object();
+    addTextClip.set("trackId", textTrackId);
+    addTextClip.set("timelineStartNs", static_cast<std::int64_t>(0));
+    addTextClip.set("durationNs", 2 * kSecond);
+    addTextClip.set("content", std::string{"Palmier Pro"});
+    addTextClip.set("fontFamily", std::string{"sans-serif"});
+    addTextClip.set("pointSize", 32.0);
+    addTextClip.set("colorR", 1.0);
+    addTextClip.set("colorG", 1.0);
+    addTextClip.set("colorB", 1.0);
+    addTextClip.set("colorA", 1.0);
+    addTextClip.set("alignment", std::string{"center"});
+    addTextClip.set("x", 0.5);
+    addTextClip.set("y", 0.9);
+    const services::Json textClipResult = observer.run("timeline.add_text_clip", addTextClip);
+    const std::string textClipId = textClipResult.stringOr("clipId");
+
+    services::Json setTextContent = object();
+    setTextContent.set("clipId", textClipId);
+    setTextContent.set("content", std::string{"Palmier Pro Edition"});
+    observer.run("timeline.set_text_content", setTextContent);
+
+    services::Json setTextStyle = object();
+    setTextStyle.set("clipId", textClipId);
+    setTextStyle.set("pointSize", 40.0);
+    setTextStyle.set("alignment", std::string{"left"});
+    observer.run("timeline.set_text_style", setTextStyle);
+
     observer.run("timeline.delete_clip", with("clipId", services::Json(secondClip)));
     observer.run("edit.undo", object());
     observer.run("edit.redo", object());

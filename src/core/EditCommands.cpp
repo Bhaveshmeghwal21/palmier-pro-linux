@@ -94,7 +94,12 @@ std::string idLabel(const Uuid& id) {
 // The tool-surface spelling of a track kind, used in error messages so a
 // rejected `kind` argument is named the way the caller supplied it.
 std::string_view trackKindLabel(TrackKind kind) {
-    return kind == TrackKind::Audio ? "audio" : "video";
+    switch (kind) {
+        case TrackKind::Audio: return "audio";
+        case TrackKind::Text:  return "text";
+        case TrackKind::Video: return "video";
+    }
+    return "video";
 }
 
 }  // namespace
@@ -1158,6 +1163,112 @@ Result<void> SetProjectSettingsCommand::revert(Project& project) {
     project.timelineFps = priorFps_;
     project.canvas = priorCanvas_;
     project.colorSpace = priorColorSpace_;
+    return ok();
+}
+
+// ===========================================================================
+// Text and titles (usable-editor task 12; Requirement 9)
+// ===========================================================================
+
+SetTextContentCommand::SetTextContentCommand(ClipId clipId, std::string content)
+    : clipId_(clipId), content_(std::move(content)) {}
+
+Result<void> SetTextContentCommand::apply(Project& project) {
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("SetTextContentCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    Clip& clip = loc->track->clips[loc->index];
+    if (!clip.isTextClip()) {
+        return err(failedPrecondition("SetTextContentCommand: clip " + idLabel(clipId_) +
+                                      " is not a text clip"));
+    }
+    prior_ = clip.textStyle->content;
+    captured_ = true;
+    clip.textStyle->content = content_;
+    return ok();
+}
+
+Result<void> SetTextContentCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition("SetTextContentCommand: revert before a successful apply"));
+    }
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("SetTextContentCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    Clip& clip = loc->track->clips[loc->index];
+    if (!clip.isTextClip()) {
+        return err(failedPrecondition("SetTextContentCommand: clip " + idLabel(clipId_) +
+                                      " is not a text clip"));
+    }
+    clip.textStyle->content = prior_;
+    return ok();
+}
+
+SetTextStyleCommand::SetTextStyleCommand(ClipId clipId, std::optional<std::string> fontFamily,
+                                         std::optional<double> pointSize,
+                                         std::optional<double> colorR, std::optional<double> colorG,
+                                         std::optional<double> colorB, std::optional<double> colorA,
+                                         std::optional<TextAlignment> alignment,
+                                         std::optional<double> x, std::optional<double> y)
+    : clipId_(clipId), fontFamily_(std::move(fontFamily)), pointSize_(pointSize),
+      colorR_(colorR), colorG_(colorG), colorB_(colorB), colorA_(colorA),
+      alignment_(alignment), x_(x), y_(y) {}
+
+Result<void> SetTextStyleCommand::apply(Project& project) {
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("SetTextStyleCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    Clip& clip = loc->track->clips[loc->index];
+    if (!clip.isTextClip()) {
+        return err(failedPrecondition("SetTextStyleCommand: clip " + idLabel(clipId_) +
+                                      " is not a text clip"));
+    }
+
+    // Build the candidate style before mutating anything, so a resulting
+    // invalid style is rejected with the project left exactly as it was
+    // (mirroring SetProjectSettingsCommand's own-invariant check — the
+    // declared numeric ranges, if any, beyond internal well-formedness are the
+    // Tool_Surface's to enforce).
+    TextStyle candidate = *clip.textStyle;
+    if (fontFamily_) candidate.fontFamily = *fontFamily_;
+    if (pointSize_) candidate.pointSize = *pointSize_;
+    if (colorR_) candidate.colorR = *colorR_;
+    if (colorG_) candidate.colorG = *colorG_;
+    if (colorB_) candidate.colorB = *colorB_;
+    if (colorA_) candidate.colorA = *colorA_;
+    if (alignment_) candidate.alignment = *alignment_;
+    if (x_) candidate.x = *x_;
+    if (y_) candidate.y = *y_;
+
+    if (!candidate.isValid()) {
+        return err(invalidArgument("SetTextStyleCommand: the resulting style is not internally "
+                                   "well-formed (point size must be > 0 and every colour/position "
+                                   "value must lie within [0, 1])"));
+    }
+
+    prior_ = *clip.textStyle;
+    captured_ = true;
+    *clip.textStyle = candidate;
+    return ok();
+}
+
+Result<void> SetTextStyleCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition("SetTextStyleCommand: revert before a successful apply"));
+    }
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("SetTextStyleCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    Clip& clip = loc->track->clips[loc->index];
+    if (!clip.isTextClip()) {
+        return err(failedPrecondition("SetTextStyleCommand: clip " + idLabel(clipId_) +
+                                      " is not a text clip"));
+    }
+    *clip.textStyle = prior_;
     return ok();
 }
 

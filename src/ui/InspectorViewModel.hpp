@@ -52,6 +52,7 @@
 #include "core/FrameRate.hpp"
 #include "core/Result.hpp"
 #include "core/Subscription.hpp"
+#include "core/TextStyle.hpp"
 #include "core/Uuid.hpp"
 
 namespace palmier {
@@ -80,17 +81,34 @@ struct EffectView {
     std::vector<EffectParameterView> parameters;
 };
 
+/// The read-only projection of a text clip's styling (usable-editor task 12;
+/// Requirement 9), present on ClipInspectorView iff the selected clip is a
+/// text clip (Clip::isTextClip()).
+struct TextStyleView {
+    std::string   content;
+    std::string   fontFamily;
+    double        pointSize = 24.0;
+    double        colorR = 1.0;
+    double        colorG = 1.0;
+    double        colorB = 1.0;
+    double        colorA = 1.0;
+    TextAlignment alignment = TextAlignment::Center;
+    double        x = 0.5;
+    double        y = 0.5;
+};
+
 /// The full read-only projection of the selected clip that the Inspector shows:
 /// its timeline/source geometry, its adjustable properties, and its effect chain.
 struct ClipInspectorView {
-    ClipId                  id;
-    Duration                timelineStart;
-    Duration                sourceIn;
-    Duration                sourceOut;
-    Duration                duration;   ///< sourceOut - sourceIn (timeline extent).
-    double                  gain = 1.0;
-    double                  opacity = 1.0;
-    std::vector<EffectView> effects;
+    ClipId                       id;
+    Duration                     timelineStart;
+    Duration                     sourceIn;
+    Duration                     sourceOut;
+    Duration                     duration;   ///< sourceOut - sourceIn (timeline extent).
+    double                       gain = 1.0;
+    double                       opacity = 1.0;
+    std::vector<EffectView>      effects;
+    std::optional<TextStyleView> textStyle;  ///< Present iff this is a text clip.
 };
 
 // ---------------------------------------------------------------------------
@@ -204,6 +222,25 @@ public:
                                           Duration sourceDuration);
     [[nodiscard]] CommandResult trimEnd(Duration newSourceOut, FrameRate fps,
                                         Duration sourceDuration);
+
+    /// Change the selected text clip's displayed string (SetTextContentCommand,
+    /// via `timeline.set_text_content` when a gateway is installed; usable-editor
+    /// task 12, Requirement 9.2, 9.4). Refused when the selection is not a text
+    /// clip.
+    [[nodiscard]] CommandResult setTextContent(std::string content);
+
+    /// Change the selected text clip's font, size, colour, alignment and/or
+    /// position (SetTextStyleCommand, via `timeline.set_text_style`). Every
+    /// parameter left as std::nullopt leaves that field exactly as it was.
+    /// Refused when the selection is not a text clip.
+    [[nodiscard]] CommandResult setTextStyle(std::optional<std::string> fontFamily,
+                                             std::optional<double> pointSize,
+                                             std::optional<double> colorR,
+                                             std::optional<double> colorG,
+                                             std::optional<double> colorB,
+                                             std::optional<double> colorA,
+                                             std::optional<TextAlignment> alignment,
+                                             std::optional<double> x, std::optional<double> y);
 
     // --- Change notification (for the thin Qt view) ------------------------
 

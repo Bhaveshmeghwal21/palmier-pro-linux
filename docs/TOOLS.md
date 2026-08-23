@@ -472,6 +472,72 @@ Set a clip's incoming transition (crossfade, wipe, slide, fade, ...).
 
 Result: `transitionId` (string), *(command result)*.
 
+## `timeline.add_text_clip`
+
+Add a text clip — a title or lower third — onto a text track at a timeline position
+(usable-editor Phase 4 task 12; Requirement 9). The clip carries no source media: it is placed
+through the same `AddClipCommand` every media clip uses, but with no asset reference, and it must
+land on a `TrackKind::Text` track (create one with `timeline.add_track` and `kind: "text"`).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `trackId` | string *uuid* | **yes** | must name a text track |
+| `clipId` | string *uuid* | no | generated when omitted |
+| `timelineStartNs` | integer | no | ≥ 0; default 0 |
+| `durationNs` | integer | **yes** | ≥ 1 |
+| `content` | string | **yes** | |
+| `fontFamily` | string | no | default `sans-serif`; substituted and reported when unavailable |
+| `pointSize` | number | no | ≥ 1; default 24 |
+| `colorR` | number | no | 0..1; default 1 |
+| `colorG` | number | no | 0..1; default 1 |
+| `colorB` | number | no | 0..1; default 1 |
+| `colorA` | number | no | 0..1; default 1 |
+| `alignment` | string | no | `left`, `center`, `right`; default `center` |
+| `x` | number | no | 0..1 (normalized anchor); default 0.5 |
+| `y` | number | no | 0..1 (normalized anchor); default 0.5 |
+
+Refused, with the project unchanged, when the resulting style is not internally well-formed (a
+non-positive `pointSize`, or a colour/position value outside its declared range would already be
+rejected by the declared bounds above).
+
+Result: `clipId` (string), *(command result)*.
+
+## `timeline.set_text_content`
+
+Change a text clip's displayed string (usable-editor Phase 4 task 12; Requirement 9.2).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | must name a text clip |
+| `content` | string | **yes** | |
+
+Refused, with the project unchanged, when the named clip does not exist or is not a text clip.
+
+Result: `clipId` (string), *(command result)*.
+
+## `timeline.set_text_style`
+
+Change a text clip's font, size, colour, alignment and/or screen position (usable-editor Phase 4
+task 12; Requirement 9.2). Every argument but `clipId` is optional; a field left out is left exactly
+as it was, and any combination that IS supplied changes in one undoable edit.
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | must name a text clip |
+| `fontFamily` | string | no | |
+| `pointSize` | number | no | ≥ 1 |
+| `colorR` | number | no | 0..1 |
+| `colorG` | number | no | 0..1 |
+| `colorB` | number | no | 0..1 |
+| `colorA` | number | no | 0..1 |
+| `alignment` | string | no | `left`, `center`, `right` |
+| `x` | number | no | 0..1 (normalized anchor) |
+| `y` | number | no | 0..1 (normalized anchor) |
+
+Refused, with the project unchanged, when the named clip does not exist or is not a text clip.
+
+Result: `clipId` (string), *(command result)*.
+
 ## `edit.undo`
 
 Revert the most recently applied edit; reports a no-op when the undo history is empty.

@@ -217,9 +217,9 @@ std::string withDeclaredVersion(const Project& p, const std::string& version) {
 }
 
 TEST(ProjectStore, WritesTheCurrentSchemaVersion) {
-    // Schema 1.1 is what this build writes (task 1.5).
-    EXPECT_EQ(SchemaVersion::current(), SchemaVersion(1, 1));
-    EXPECT_NE(serializeProject(makeSampleProject()).find("\"version\": \"1.1\""),
+    // Schema 1.2 is what this build writes (usable-editor task 12; Requirement 9).
+    EXPECT_EQ(SchemaVersion::current(), SchemaVersion(1, 2));
+    EXPECT_NE(serializeProject(makeSampleProject()).find("\"version\": \"1.2\""),
               std::string::npos);
 }
 

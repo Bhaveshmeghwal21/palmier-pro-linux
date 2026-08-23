@@ -22,6 +22,16 @@
 //   result of those k clips in painter's order. blendOver() preserves it: each
 //   step composites layer k+1 "over" the accumulated lower-z result.
 //
+//   Text layers (usable-editor task 12; Requirement 9): a TEXT track's clips
+//   are gathered and blended by the identical z-ordered loop, merged with the
+//   video layers into one combined painter's-order sequence, so a title sits
+//   above or below any video track purely by its position in Project.tracks —
+//   no separate compositing pass exists for text. The one difference is how a
+//   layer's pixels are produced: fetched from a ClipFrameProvider for a video
+//   clip, rasterized from a TextRasterizer for a text clip (see
+//   TextRasterizer's own doc comment for why that is a second, independent
+//   injectable seam rather than a code path inside this module).
+//
 // Guarded build (mirrors GpuContext / FramePool): the compositing math is a
 // vendor-neutral, host-memory RGBA8 reference implementation that runs with no
 // Vulkan loader or GPU (e.g. CI/sandbox). It is *the* reference the GPU path is
@@ -53,6 +63,7 @@
 #include "core/Effect.hpp"
 #include "core/Project.hpp"
 #include "core/Result.hpp"
+#include "core/TextStyle.hpp"
 #include "gpu/FramePool.hpp"
 
 namespace palmier::gpu {
@@ -153,6 +164,23 @@ struct SourceFrame {
 /// synthetic frames. Returning an error aborts the whole render (the compositor
 /// never emits a partially-composited frame).
 using ClipFrameProvider = std::function<Result<SourceFrame>(const Clip&, Duration)>;
+
+/// Rasterizes a text clip's styled content into an RGBA8 buffer of exactly
+/// `width` x `height` pixels (usable-editor task 12; Requirement 9). Glyph
+/// shaping and rendering is Qt's — Qt is the one text-rendering technology
+/// already in this tree (QPainter / QRawFont) and this module builds and tests
+/// with no Vulkan loader, no GPU and, deliberately, no Qt dependency (see the
+/// file header and gpu/CMakeLists.txt), so the rasterizer itself cannot live
+/// here. Precisely like ClipFrameProvider, this is an injectable seam: the
+/// Composition_Root (src/app, which does link Qt when the UI is built) installs
+/// the production implementation via setTextRasterizer(), the exact same way it
+/// installs the decoder-backed ClipFrameProvider; tests inject a synthetic
+/// rasterizer producing a deterministic filled rectangle, so this module keeps
+/// building and testing headlessly with no Qt anywhere in its own translation
+/// units. Returning an error aborts the whole render, matching a
+/// ClipFrameProvider failure.
+using TextRasterizer =
+    std::function<Result<SourceFrame>(const TextStyle&, std::uint32_t width, std::uint32_t height)>;
 
 /// Applies one effect to a mutable RGBA8 image in place. This is the *software*
 /// effect hook — the reference the GPU SPIR-V kernels (task 7.4) are validated
@@ -279,6 +307,14 @@ public:
     void setFrameProvider(ClipFrameProvider provider) { provider_ = std::move(provider); }
     [[nodiscard]] bool hasFrameProvider() const noexcept { return static_cast<bool>(provider_); }
 
+    /// Install the text rasterizer (the Composition_Root's Qt-based
+    /// implementation in production). Required whenever a render position has
+    /// at least one visible text clip (Requirement 9.3).
+    void setTextRasterizer(TextRasterizer rasterizer) { textRasterizer_ = std::move(rasterizer); }
+    [[nodiscard]] bool hasTextRasterizer() const noexcept {
+        return static_cast<bool>(textRasterizer_);
+    }
+
     /// Override the software effect application hook (defaults to
     /// applyEffectSoftware).
     void setSoftwareEffectFn(SoftwareEffectFn fn);
@@ -306,12 +342,24 @@ public:
     [[nodiscard]] static std::vector<VisibleLayer> gatherVisibleClips(const Project& project,
                                                                       Duration position);
 
+    /// Gather the visible text-clip layers at `position` (non-muted TEXT
+    /// tracks only), each tagged with its z = track index, sorted ascending by z
+    /// (Requirement 9.3/9.4 — a title composites in the same painter's-order
+    /// layering every video track already uses, by its position in
+    /// Project.tracks). A clip on a TEXT track that carries no TextStyle (which
+    /// ProjectValidation forbids, but this gathering step is deliberately as
+    /// defensive as gatherVisibleClips is about track kind) is skipped rather
+    /// than treated as an empty title.
+    [[nodiscard]] static std::vector<VisibleLayer> gatherVisibleTextClips(const Project& project,
+                                                                          Duration position);
+
 private:
     GpuContext&                    context_;
     FramePool&                     pool_;
     std::map<EffectId, SpirvModule> effects_{};
     ClipFrameProvider              provider_{};
     SoftwareEffectFn               effectFn_{};
+    TextRasterizer                  textRasterizer_{};
 };
 
 } // namespace palmier::gpu

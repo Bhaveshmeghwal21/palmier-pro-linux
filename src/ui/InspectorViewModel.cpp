@@ -168,6 +168,22 @@ std::optional<ClipInspectorView> InspectorViewModel::selectedClip() const {
         }
         view.effects.push_back(std::move(ev));
     }
+
+    // Requirement 9.4: the Inspector's text-editing surface reads this.
+    if (clip->textStyle.has_value()) {
+        TextStyleView tv;
+        tv.content = clip->textStyle->content;
+        tv.fontFamily = clip->textStyle->fontFamily;
+        tv.pointSize = clip->textStyle->pointSize;
+        tv.colorR = clip->textStyle->colorR;
+        tv.colorG = clip->textStyle->colorG;
+        tv.colorB = clip->textStyle->colorB;
+        tv.colorA = clip->textStyle->colorA;
+        tv.alignment = clip->textStyle->alignment;
+        tv.x = clip->textStyle->x;
+        tv.y = clip->textStyle->y;
+        view.textStyle = std::move(tv);
+    }
     return view;
 }
 
@@ -272,6 +288,32 @@ CommandResult InspectorViewModel::trimEnd(Duration newSourceOut, FrameRate fps,
     }
     return engine_.apply(std::make_unique<TrimClipCommand>(
         *selected_, TrimClipCommand::Edge::End, newSourceOut, fps, sourceDuration));
+}
+
+CommandResult InspectorViewModel::setTextContent(std::string content) {
+    if (!selected_) {
+        return CommandResult::failed(failedPrecondition("Inspector: no clip is selected"));
+    }
+    if (gateway_ != nullptr) {
+        return toCommandResult(gateway_->setTextContent(*selected_, content));
+    }
+    return engine_.apply(std::make_unique<SetTextContentCommand>(*selected_, std::move(content)));
+}
+
+CommandResult InspectorViewModel::setTextStyle(
+    std::optional<std::string> fontFamily, std::optional<double> pointSize,
+    std::optional<double> colorR, std::optional<double> colorG, std::optional<double> colorB,
+    std::optional<double> colorA, std::optional<TextAlignment> alignment,
+    std::optional<double> x, std::optional<double> y) {
+    if (!selected_) {
+        return CommandResult::failed(failedPrecondition("Inspector: no clip is selected"));
+    }
+    if (gateway_ != nullptr) {
+        return toCommandResult(gateway_->setTextStyle(*selected_, fontFamily, pointSize, colorR,
+                                                       colorG, colorB, colorA, alignment, x, y));
+    }
+    return engine_.apply(std::make_unique<SetTextStyleCommand>(
+        *selected_, fontFamily, pointSize, colorR, colorG, colorB, colorA, alignment, x, y));
 }
 
 void InspectorViewModel::setOnChanged(std::function<void()> callback) {

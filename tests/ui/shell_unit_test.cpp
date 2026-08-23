@@ -301,6 +301,35 @@ TEST_F(ShellUnitTest, AddAudioTrackActionAppendsAnAudioTrack) {
     EXPECT_EQ(snapshot.tracks.back().kind, TrackKind::Audio);
 }
 
+// Usable-editor task 12; Requirement 9: a text clip must sit on a text track, so
+// the same GUI creation affordance the video/audio lanes have must exist for it
+// too — mirroring AddVideoTrackActionAppendsATrackAndIsUndoable exactly.
+TEST_F(ShellUnitTest, AddTextTrackActionAppendsATextTrackAndIsUndoable) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+
+    QMenu* editMenu = window.menuBar()->actions()[1]->menu();
+    QAction* addTextTrack = nullptr;
+    for (QAction* action : editMenu->actions()) {
+        if (action->text() == QStringLiteral("Add Te&xt Track")) {
+            addTextTrack = action;
+            break;
+        }
+    }
+    ASSERT_NE(addTextTrack, nullptr);
+    ASSERT_TRUE(addTextTrack->isEnabled());
+
+    const std::size_t tracksBefore = composition.timeline().snapshot().tracks.size();
+    addTextTrack->trigger();
+    const Project afterAdd = composition.timeline().snapshot();
+    ASSERT_EQ(afterAdd.tracks.size(), tracksBefore + 1);
+    EXPECT_EQ(afterAdd.tracks.back().kind, TrackKind::Text);
+
+    ASSERT_TRUE(composition.timeline().canUndo());
+    EXPECT_TRUE(composition.timeline().undo().changed());
+    EXPECT_EQ(composition.timeline().snapshot().tracks.size(), tracksBefore);
+}
+
 // --- Placement (usable-editor Requirement 3) --------------------------------
 //
 // Prior to this, GuiToolGateway::addClip() and TimelineViewModel::addClip()

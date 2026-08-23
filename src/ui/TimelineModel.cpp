@@ -27,7 +27,12 @@ namespace palmier::ui {
 namespace {
 
 QString kindToString(TrackKind kind) {
-    return kind == TrackKind::Audio ? QStringLiteral("audio") : QStringLiteral("video");
+    switch (kind) {
+        case TrackKind::Audio: return QStringLiteral("audio");
+        case TrackKind::Text:  return QStringLiteral("text");
+        case TrackKind::Video: return QStringLiteral("video");
+    }
+    return QStringLiteral("video");
 }
 
 std::optional<Uuid> parseId(const QString& text) {
@@ -247,6 +252,11 @@ bool TimelineModel::addTrack(const QString& kind) {
         parsed = TrackKind::Video;
     } else if (kind == QStringLiteral("audio")) {
         parsed = TrackKind::Audio;
+    } else if (kind == QStringLiteral("text")) {
+        // Usable-editor task 12; Requirement 9: a text clip must sit on a
+        // TrackKind::Text track, so the GUI needs a way to create one, just
+        // like the existing video/audio track-creation actions.
+        parsed = TrackKind::Text;
     } else {
         return false;
     }

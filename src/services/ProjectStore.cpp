@@ -435,12 +435,24 @@ std::optional<ColorSpace> colorSpaceFromKey(std::string_view k) {
 }
 
 std::string_view trackKindKey(TrackKind k) {
-    return k == TrackKind::Audio ? "audio" : "video";
+    switch (k) {
+        case TrackKind::Audio: return "audio";
+        // Schema 1.2 addition (usable-editor task 12; Requirement 9). An older
+        // 1.1 reader sees an unrecognised key here and rejects the whole
+        // document via trackKindFromKey's std::nullopt below (fail("unknown
+        // track kind")), which is the intended cross-version behaviour: a 1.1
+        // build cannot round-trip a text track, so it must not silently accept
+        // one (SchemaVersion.hpp's compatibility rule).
+        case TrackKind::Text:  return "text";
+        case TrackKind::Video: return "video";
+    }
+    return "video";
 }
 
 std::optional<TrackKind> trackKindFromKey(std::string_view k) {
     if (k == "video") return TrackKind::Video;
     if (k == "audio") return TrackKind::Audio;
+    if (k == "text") return TrackKind::Text;
     return std::nullopt;
 }
 
@@ -538,6 +550,45 @@ void writeTransition(JsonWriter& w, const Transition& t) {
     w.endObject();
 }
 
+// TextAlignment keys, spelled the way TextAlignment::toStringView already
+// renders them, so the document and the domain enum share one vocabulary.
+std::string_view textAlignmentKey(TextAlignment a) { return toStringView(a); }
+
+std::optional<TextAlignment> textAlignmentFromKey(std::string_view k) {
+    if (k == toStringView(TextAlignment::Left)) return TextAlignment::Left;
+    if (k == toStringView(TextAlignment::Center)) return TextAlignment::Center;
+    if (k == toStringView(TextAlignment::Right)) return TextAlignment::Right;
+    return std::nullopt;
+}
+
+// Schema 1.2 addition (usable-editor task 12; Requirement 9). Written whenever
+// present; read back only inside readClip's own presence check, so a 1.1
+// document (which never has a "textStyle" key on any clip) is unaffected.
+void writeTextStyle(JsonWriter& w, const TextStyle& style) {
+    w.beginObject();
+    w.key("content");
+    w.valueString(style.content);
+    w.key("fontFamily");
+    w.valueString(style.fontFamily);
+    w.key("pointSize");
+    w.valueDouble(style.pointSize);
+    w.key("colorR");
+    w.valueDouble(style.colorR);
+    w.key("colorG");
+    w.valueDouble(style.colorG);
+    w.key("colorB");
+    w.valueDouble(style.colorB);
+    w.key("colorA");
+    w.valueDouble(style.colorA);
+    w.key("alignment");
+    w.valueString(textAlignmentKey(style.alignment));
+    w.key("x");
+    w.valueDouble(style.x);
+    w.key("y");
+    w.valueDouble(style.y);
+    w.endObject();
+}
+
 void writeClip(JsonWriter& w, const Clip& clip) {
     w.beginObject();
     writeUuid(w, "id", clip.id);
@@ -560,6 +611,13 @@ void writeClip(JsonWriter& w, const Clip& clip) {
     w.valueDouble(clip.gain);
     w.key("opacity");
     w.valueDouble(clip.opacity);
+    // Schema 1.2 (Requirement 9). Present iff this is a text clip.
+    w.key("textStyle");
+    if (clip.textStyle.has_value()) {
+        writeTextStyle(w, *clip.textStyle);
+    } else {
+        w.valueNull();
+    }
     w.endObject();
 }
 
@@ -781,6 +839,30 @@ Transition readTransition(const JsonValue& v) {
     return t;
 }
 
+// Schema 1.2 (Requirement 9); optional on read with no default, unlike a schema
+// 1.1 field — a clip that carries no TextStyle simply has no text-clip identity
+// at all, so "absent" (a 1.1 document, which never wrote this key) and
+// "present but null" (a 1.2 document's own non-text clip) both mean the same
+// thing rather than one being a fallback for the other.
+TextStyle readTextStyle(const JsonValue& v) {
+    requireObject(v, "textStyle");
+    TextStyle style;
+    style.content = requireString(v, "content");
+    style.fontFamily = requireString(v, "fontFamily");
+    style.pointSize = requireDouble(v, "pointSize");
+    style.colorR = requireDouble(v, "colorR");
+    style.colorG = requireDouble(v, "colorG");
+    style.colorB = requireDouble(v, "colorB");
+    style.colorA = requireDouble(v, "colorA");
+    const std::optional<TextAlignment> alignment =
+        textAlignmentFromKey(requireString(v, "alignment"));
+    if (!alignment.has_value()) fail("unknown text alignment");
+    style.alignment = *alignment;
+    style.x = requireDouble(v, "x");
+    style.y = requireDouble(v, "y");
+    return style;
+}
+
 Clip readClip(const JsonValue& v) {
     requireObject(v, "clip");
     Clip clip;
@@ -798,6 +880,14 @@ Clip readClip(const JsonValue& v) {
 
     clip.gain = requireDouble(v, "gain");
     clip.opacity = requireDouble(v, "opacity");
+
+    // Schema 1.2 (Requirement 9): absent entirely on a 1.1 document, or present
+    // but null on a 1.2 document's own non-text clip — both mean "not a text
+    // clip", so no textStyle is set either way.
+    if (const JsonValue* textStyle = v.find("textStyle");
+        textStyle != nullptr && !textStyle->isNull()) {
+        clip.textStyle = readTextStyle(*textStyle);
+    }
     return clip;
 }
 

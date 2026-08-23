@@ -277,6 +277,43 @@ endif()
 
 
 # ---------------------------------------------------------------------------
+# palmier_ui_text_rasterizer — the production gpu::TextRasterizer (usable-editor
+# task 12; Requirement 9).
+#
+# QtTextRasterizer renders a TextStyle via QPainter/QImage into the RGBA8
+# SourceFrame shape gpu::Compositor's TextRasterizer seam expects. It is the one
+# place text glyph rasterization happens, precisely because gpu::Compositor
+# itself is deliberately Qt-free (see gpu/CMakeLists.txt and
+# Compositor.hpp's TextRasterizer doc comment) — this target does not link
+# Palmier::gpu's Vulkan/shaderc dependencies at all, only Palmier::core (for
+# TextStyle) and Qt's Gui module (for QPainter/QImage/QFontDatabase) plus the
+# gpu::SourceFrame/gpu::TextRasterizer TYPES, which live in the header-only
+# parts of gpu/Compositor.hpp already included by Palmier::gpu's public
+# interface — declared PRIVATE below since only the .cpp needs the Vulkan/
+# shaderc link surface transitively, not this target's own consumers. Built
+# only when Qt 6 is present, matching every other Qt-only panel in this file.
+# ---------------------------------------------------------------------------
+if(TARGET Qt6::Widgets)
+    add_library(palmier_ui_text_rasterizer STATIC
+        QtTextRasterizer.cpp)
+    add_library(Palmier::ui_text_rasterizer ALIAS palmier_ui_text_rasterizer)
+
+    target_include_directories(palmier_ui_text_rasterizer PUBLIC
+        "${PROJECT_SOURCE_DIR}/src")
+
+    target_compile_features(palmier_ui_text_rasterizer PUBLIC cxx_std_20)
+
+    target_compile_definitions(palmier_ui_text_rasterizer PUBLIC PALMIER_HAVE_QT=1)
+
+    target_link_libraries(palmier_ui_text_rasterizer PUBLIC
+        Palmier::core
+        Palmier::gpu
+        Qt6::Core
+        Qt6::Gui)
+endif()
+
+
+# ---------------------------------------------------------------------------
 # palmier_ui_timeline_vm — the Qt-free Timeline presentation adapter (task 19.2).
 #
 # TimelineViewModel maps the TimelineEngine's Project into a tracks x clips model

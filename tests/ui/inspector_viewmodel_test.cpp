@@ -39,6 +39,7 @@
 #include "core/Effect.hpp"
 #include "core/FrameRate.hpp"
 #include "core/Project.hpp"
+#include "core/TextStyle.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Track.hpp"
 #include "core/Uuid.hpp"
@@ -340,6 +341,98 @@ TEST(InspectorViewModel, TrimStartShiftsInPointAndTimeline) {
     EXPECT_EQ(engine.clip(clip)->sourceIn, ms(300));
     EXPECT_EQ(engine.clip(clip)->timelineStart, ms(300));
     EXPECT_EQ(engine.clip(clip)->duration(), ms(700));
+}
+
+// --- Text and titles (usable-editor task 12; Requirement 9) ----------------
+
+// A project with one TEXT track holding a single text clip (no assetRef,
+// mirroring how AddClipCommand's own asset-registration step treats one).
+Project makeProjectWithTextClip(ClipId clipId) {
+    Project project;
+    project.id = Uuid::generateV4();
+    project.name = "test";
+    project.timelineFps = FrameRate::fps24();
+    Track track;
+    track.id = Uuid::generateV4();
+    track.kind = TrackKind::Text;
+    Clip clip;
+    clip.id = clipId;
+    clip.timelineStart = ms(0);
+    clip.sourceIn = Duration::zero();
+    clip.sourceOut = ms(1000);
+    TextStyle style;
+    style.content = "Title";
+    clip.textStyle = std::move(style);
+    track.clips.push_back(std::move(clip));
+    project.tracks.push_back(std::move(track));
+    return project;
+}
+
+TEST(InspectorViewModel, ProjectionExposesTextStyleForATextClipAndNotForAMediaClip) {
+    const ClipId textClip = Uuid::generateV4();
+    TimelineEngine textEngine(makeProjectWithTextClip(textClip));
+    InspectorViewModel textModel(textEngine);
+    textModel.selectClip(textClip);
+
+    const std::optional<ClipInspectorView> textView = textModel.selectedClip();
+    ASSERT_TRUE(textView.has_value());
+    ASSERT_TRUE(textView->textStyle.has_value());
+    EXPECT_EQ(textView->textStyle->content, "Title");
+
+    const ClipId mediaClip = Uuid::generateV4();
+    TimelineEngine mediaEngine(makeProjectWithClip(mediaClip));
+    InspectorViewModel mediaModel(mediaEngine);
+    mediaModel.selectClip(mediaClip);
+
+    const std::optional<ClipInspectorView> mediaView = mediaModel.selectedClip();
+    ASSERT_TRUE(mediaView.has_value());
+    EXPECT_FALSE(mediaView->textStyle.has_value());
+}
+
+TEST(InspectorViewModel, SetTextContentChangesTheStringAndUndoesExactly) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithTextClip(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    ASSERT_TRUE(model.setTextContent("Changed").changed());
+    EXPECT_EQ(model.selectedClip()->textStyle->content, "Changed");
+
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_EQ(model.selectedClip()->textStyle->content, "Title");
+}
+
+TEST(InspectorViewModel, SetTextStyleChangesOnlySuppliedFields) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithTextClip(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    const double before = model.selectedClip()->textStyle->pointSize;
+    ASSERT_TRUE(model
+                   .setTextStyle(std::nullopt, 40.0, std::nullopt, std::nullopt, std::nullopt,
+                                std::nullopt, TextAlignment::Right, std::nullopt, std::nullopt)
+                   .changed());
+
+    const std::optional<ClipInspectorView> view = model.selectedClip();
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->textStyle->pointSize, 40.0);
+    EXPECT_NE(view->textStyle->pointSize, before);
+    EXPECT_EQ(view->textStyle->alignment, TextAlignment::Right);
+    EXPECT_EQ(view->textStyle->fontFamily, "sans-serif");  // untouched, default carried through
+}
+
+TEST(InspectorViewModel, SetTextContentAndSetTextStyleRejectAMediaClipSelection) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    EXPECT_FALSE(model.setTextContent("Anything").changed());
+    EXPECT_FALSE(model
+                     .setTextStyle(std::nullopt, 40.0, std::nullopt, std::nullopt, std::nullopt,
+                                  std::nullopt, std::nullopt, std::nullopt, std::nullopt)
+                     .changed());
 }
 
 // --- Change notification ---------------------------------------------------

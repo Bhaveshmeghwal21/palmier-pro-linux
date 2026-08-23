@@ -45,6 +45,12 @@
 //                           services/ToolRegistry.cpp so `timeline.add_transition`
 //                           runs through the same core command path as every
 //                           other edit (audit finding).
+//   * SetTextContentCommand— change a text clip's displayed string (Requirement 9).
+//   * SetTextStyleCommand — change a text clip's font, size, colour, alignment
+//                           and/or screen position (Requirement 9). A text clip
+//                           is itself created through the existing
+//                           AddClipCommand — see the "Text and titles" section
+//                           below for why that needed no new command.
 //
 // Atomicity / invariants: the TimelineEngine snapshots the project before every
 // apply() and rolls back on failure or on any timeline-invariant violation (no
@@ -681,6 +687,79 @@ private:
     Resolution  priorCanvas_;
     ColorSpace  priorColorSpace_ = defaultColorSpace();
     bool        captured_ = false;
+};
+
+// ===========================================================================
+// Text and titles (usable-editor task 12; Requirement 9)
+//
+// Creating a text clip needs no new command: it is an ordinary AddClipCommand
+// whose Clip carries a populated textStyle and an unset (nil, "invalid")
+// assetRef — AddClipCommand's own asset-registration step already skips a
+// clip whose assetRef.isValid() is false, so a text clip is placed, ordered
+// and made undoable by the exact path every other clip already uses, with
+// zero changes to that command. What text needs beyond placement is a way to
+// change its content and its styling after creation — the two commands below.
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// SetTextContentCommand — change a text clip's displayed string.
+// ---------------------------------------------------------------------------
+//
+// Refused, leaving the project unchanged, when the named clip does not exist
+// or is not a text clip (Requirement 9.2's "each undoable in one Undo" only
+// makes sense for a clip that actually carries a TextStyle to change).
+class SetTextContentCommand final : public EditCommand {
+public:
+    SetTextContentCommand(ClipId clipId, std::string content);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "SetTextContent"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+private:
+    ClipId      clipId_;
+    std::string content_;
+    std::string prior_;      // captured on apply for an exact revert
+    bool        captured_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// SetTextStyleCommand — change a text clip's font, size, colour, alignment
+// and/or screen position.
+// ---------------------------------------------------------------------------
+//
+// Every field is std::optional, mirroring SetProjectSettingsCommand: a field
+// left std::nullopt is left exactly as it was, so any subset of font family,
+// point size, colour, alignment and position changes in one undoable edit
+// (Requirement 9.2). core has no services:: dependency, so this command
+// validates only that the resulting TextStyle is internally well-formed
+// (TextStyle::isValid()) — the same core/services split
+// SetProjectSettingsCommand already established. Refused, leaving the project
+// unchanged, when the named clip does not exist or is not a text clip, or when
+// the requested change would make the style invalid.
+class SetTextStyleCommand final : public EditCommand {
+public:
+    SetTextStyleCommand(ClipId clipId, std::optional<std::string> fontFamily,
+                        std::optional<double> pointSize,
+                        std::optional<double> colorR, std::optional<double> colorG,
+                        std::optional<double> colorB, std::optional<double> colorA,
+                        std::optional<TextAlignment> alignment,
+                        std::optional<double> x, std::optional<double> y);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "SetTextStyle"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+private:
+    ClipId clipId_;
+    std::optional<std::string>   fontFamily_;
+    std::optional<double>        pointSize_;
+    std::optional<double>        colorR_, colorG_, colorB_, colorA_;
+    std::optional<TextAlignment> alignment_;
+    std::optional<double>        x_, y_;
+
+    TextStyle prior_;        // captured on apply for an exact revert
+    bool      captured_ = false;
 };
 
 }  // namespace palmier

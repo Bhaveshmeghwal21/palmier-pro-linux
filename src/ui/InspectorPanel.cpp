@@ -15,10 +15,12 @@
 #ifdef PALMIER_HAVE_QT
 
 #include <QDoubleSpinBox>
+#include <QComboBox>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QString>
 #include <QVBoxLayout>
@@ -42,6 +44,21 @@ QString effectTypeName(EffectType type) {
         case EffectType::Custom:        return QStringLiteral("Custom");
     }
     return QStringLiteral("Effect");
+}
+
+/// The three TextAlignment values, in the fixed order textAlignmentCombo_'s
+/// index maps onto (Requirement 9.4). Kept local to this translation unit since
+/// nothing outside the panel needs a Qt-facing ordering of the enum.
+constexpr TextAlignment kAlignmentOrder[] = {TextAlignment::Left, TextAlignment::Center,
+                                             TextAlignment::Right};
+
+QString alignmentLabel(TextAlignment alignment) {
+    switch (alignment) {
+        case TextAlignment::Left:   return QStringLiteral("Left");
+        case TextAlignment::Center: return QStringLiteral("Center");
+        case TextAlignment::Right:  return QStringLiteral("Right");
+    }
+    return QStringLiteral("Center");
 }
 
 } // namespace
@@ -102,6 +119,10 @@ void InspectorPanel::rebuild() {
     opacitySpin_ = nullptr;
     gainSpin_ = nullptr;
     effectsContainer_ = nullptr;
+    textContainer_ = nullptr;
+    textContentEdit_ = nullptr;
+    textPointSizeSpin_ = nullptr;
+    textAlignmentCombo_ = nullptr;
 
     const std::optional<ClipInspectorView> view = model_.selectedClip();
     if (!view) {
@@ -137,6 +158,65 @@ void InspectorPanel::rebuild() {
         }
     });
     propertiesLayout_->addRow(QStringLiteral("Gain"), gainSpin_);
+
+    // --- Text and titles (usable-editor task 12; Requirement 9.4) ----------
+    // Present only while the selected clip carries a TextStyle.
+    if (view->textStyle.has_value()) {
+        const TextStyleView& text = *view->textStyle;
+
+        textContainer_ = new QWidget(this);
+        auto* textForm = new QFormLayout(textContainer_);
+        textForm->addRow(new QLabel(QStringLiteral("Text"), textContainer_));
+
+        textContentEdit_ = new QLineEdit(textContainer_);
+        textContentEdit_->setText(QString::fromStdString(text.content));
+        QObject::connect(textContentEdit_, &QLineEdit::editingFinished, this, [this] {
+            if (textContentEdit_ != nullptr) {
+                (void)model_.setTextContent(textContentEdit_->text().toStdString());
+            }
+        });
+        textForm->addRow(QStringLiteral("Content"), textContentEdit_);
+
+        textPointSizeSpin_ = new QDoubleSpinBox(textContainer_);
+        textPointSizeSpin_->setRange(1.0, 1000.0);
+        textPointSizeSpin_->setSingleStep(1.0);
+        textPointSizeSpin_->setValue(text.pointSize);
+        QObject::connect(textPointSizeSpin_, &QDoubleSpinBox::editingFinished, this, [this] {
+            if (textPointSizeSpin_ != nullptr) {
+                (void)model_.setTextStyle(std::nullopt, textPointSizeSpin_->value(),
+                                          std::nullopt, std::nullopt, std::nullopt,
+                                          std::nullopt, std::nullopt, std::nullopt,
+                                          std::nullopt);
+            }
+        });
+        textForm->addRow(QStringLiteral("Point size"), textPointSizeSpin_);
+
+        textAlignmentCombo_ = new QComboBox(textContainer_);
+        int currentIndex = 1;  // Center, matching TextStyle's own default.
+        for (int i = 0; i < 3; ++i) {
+            textAlignmentCombo_->addItem(alignmentLabel(kAlignmentOrder[i]));
+            if (kAlignmentOrder[i] == text.alignment) {
+                currentIndex = i;
+            }
+        }
+        textAlignmentCombo_->setCurrentIndex(currentIndex);
+        // Qt6's QComboBox::currentIndexChanged has only the int overload (the
+        // QString overload Qt5 also had is gone), so no disambiguating cast is
+        // needed here, unlike some other Qt5-era signal/slot connections.
+        QObject::connect(textAlignmentCombo_, &QComboBox::currentIndexChanged, this,
+                         [this](int index) {
+                             if (index < 0 || index >= 3) {
+                                 return;
+                             }
+                             (void)model_.setTextStyle(std::nullopt, std::nullopt, std::nullopt,
+                                                       std::nullopt, std::nullopt, std::nullopt,
+                                                       kAlignmentOrder[index], std::nullopt,
+                                                       std::nullopt);
+                         });
+        textForm->addRow(QStringLiteral("Alignment"), textAlignmentCombo_);
+
+        rootLayout_->addWidget(textContainer_);
+    }
 
     // --- Effect chain ------------------------------------------------------
     effectsContainer_ = new QWidget(this);

@@ -30,6 +30,8 @@ class QFormLayout;
 class QVBoxLayout;
 class QLabel;
 class QDoubleSpinBox;
+class QLineEdit;
+class QComboBox;
 
 namespace palmier::ui {
 
@@ -62,6 +64,13 @@ private:
     QDoubleSpinBox* opacitySpin_ = nullptr;
     QDoubleSpinBox* gainSpin_ = nullptr;
     QWidget*        effectsContainer_ = nullptr;
+
+    // Text and titles (usable-editor task 12; Requirement 9.4): present only
+    // while the selected clip is a text clip.
+    QWidget*        textContainer_ = nullptr;
+    QLineEdit*      textContentEdit_ = nullptr;
+    QDoubleSpinBox* textPointSizeSpin_ = nullptr;
+    QComboBox*      textAlignmentCombo_ = nullptr;
 
     bool refreshing_ = false;  ///< Guards against feedback while repopulating.
 };
