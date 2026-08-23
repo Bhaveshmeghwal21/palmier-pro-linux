@@ -2315,6 +2315,7 @@ if(TARGET Qt6::Widgets)
         Palmier::ui_gateway
         Palmier::ui_project_file_actions
         Palmier::app_composition
+        Palmier::ui_text_rasterizer
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets

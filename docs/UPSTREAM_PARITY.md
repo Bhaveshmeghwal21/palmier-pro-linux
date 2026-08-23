@@ -16,7 +16,7 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: 03b12db2de7cfd8b32b035ed75cdfbeabee5c174 (branch `main`)
+- linux-ref: 8c814d12603a3e5d7dfc92a3b515dffbad078d05 (branch `main`)
 - comparison-date: 2026-08-21
 
 ## Status definitions (Requirement 13.7)
@@ -65,7 +65,7 @@ every `N. ` line as a build-order item.
 |---|---|---|---|---|---|---|
 | clips | present | core::EditCommands, services::ToolRegistry timeline.add_clip/delete_clip/move_clip/trim_clip/split_clip/reorder_clips/ripple_delete/ripple_trim/close_gap | - | - | - | - |
 | timeline | partial | core::TimelineEngine, services::ToolRegistry timeline.read/add_track/remove_track/set_track_muted, edit.undo, edit.redo, ui::TimelinePanel | should | Read, track add/remove/mute, undo/redo, a scrub/step/timecode playhead control and Add Video/Audio Track menu actions are reachable from the mounted TimelinePanel; no marker or zoom tool exists yet. | - | - |
-| texts | absent | none | should | No text or title clip type, tool or text renderer exists anywhere in the tree, so titles and lower thirds cannot be created on Linux. | - | - |
+| texts | present | core::TextStyle, core::Clip::textStyle, services::ToolRegistry timeline.add_text_clip/set_text_content/set_text_style, gpu::Compositor, ui::QtTextRasterizer | - | - | - | - |
 | captions | absent | none | should | core::TrackKind has only Video and Audio; no caption track, burn-in path or sidecar export exists, so captions cannot be authored or delivered. | - | - |
 | transcription | absent | services::TranscriptionService | should | TranscriptionService is unreachable: no tool registers it, the composition root never constructs it and no recognizer backend is bundled. | - | - |
 | color | partial | core::EffectType::ColorGrade, core::ColorSpace, gpu::EffectKernels | should | Only one color_grade effect is reachable via timeline.add_effect; no curve, wheel, scope or LUT operation exists, so a grade cannot be shaped or judged. | - | - |
@@ -93,7 +93,7 @@ every `N. ` line as a build-order item.
 | timeline editing | present | core::TimelineEngine, core::EditCommands, services::ToolRegistry, ui::TimelineViewModel, ui::TimelineModel, ui::TimelinePanel, ui::TimelineGraphView, ui::MainWindow, ui::InspectorViewModel, ui::MediaBrowserViewModel | - | - | - | - |
 | multicam | partial | core::ClipGroup, core::EditCommands::RippleTrimCommand, services::ToolRegistry timeline.ripple_trim | should | A ripple-trim on a grouped clip propagates in sync to every clipGroups member (PR 397); angle switching is still deferred, so multi-angle footage trims together but cannot be cut between angles. | - | - |
 | transcription and captions | absent | services::TranscriptionService | should | No recognizer backend is bundled and nothing reaches TranscriptionService; there is also no caption track kind, so captions cannot be produced or burned in. | - | - |
-| text and graphics | absent | none | should | No text, title or shape layer exists in the domain core or the renderer, so on-screen graphics cannot be authored at all. | - | - |
+| text and graphics | partial | core::TextStyle, core::Clip::textStyle, services::ToolRegistry timeline.add_text_clip/set_text_content/set_text_style, gpu::Compositor, ui::QtTextRasterizer, ui::InspectorPanel | should | A title/lower-third text clip type, three creation/edit/style tools and a QPainter-backed renderer shared by preview and export now exist; no shape layer does. | - | - |
 | color and effects | partial | gpu::EffectKernels, gpu::Compositor, core::EffectType, services::ToolRegistry timeline.add_effect/remove_effect/reorder_effects/set_effect_parameter | should | Six effects including invert_colors render on both paths, and remove/reorder/re-parameterise are all reachable; there is still no curve, wheel, scope, LUT or denoise. | - | - |
 | audio scrub and metering | absent | none | should | The audio pipeline mixes and outputs, but no level meter, waveform or scrub-audio component exists, so levels cannot be monitored while editing. | SwiftUI | Qt 6 Widgets |
 | generation and upscaling | present | services::GenerationModelCatalog, services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::OpenSslGenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator, services::ToolRegistry generation.list_models/generation.generate | - | - | - | - |
@@ -105,45 +105,44 @@ every `N. ` line as a build-order item.
 
 ## Build order (Requirement 13.9)
 
-Exactly the `absent` and `partial` entries of both tables — 25 of the 34 — sorted `must` before
+Exactly the `absent` and `partial` entries of both tables — 24 of the 34 — sorted `must` before
 `should` before `later`. This list is a **projection** of the two tables and carries no
 independent facts: an entry appears here if and only if its status above is `absent` or `partial`,
-with the priority recorded above. The nine omitted entries are the nine `present` ones —
-`import`, `export`, `projects`, `generate`, `clips`, `effects` and `project settings` (all table 1),
-plus `generation and upscaling` and `timeline editing` (both capability areas, the latter as of
-usable-editor task 11).
+with the priority recorded above. The ten omitted entries are the ten `present` ones —
+`import`, `export`, `projects`, `generate`, `clips`, `effects`, `project settings` and `texts`
+(all table 1, the last as of usable-editor task 12), plus `generation and upscaling` and
+`timeline editing` (both capability areas, the latter as of usable-editor task 11).
 
 Each item is written `<name> (<table>) — <priority>` because `multicam` appears in both tables.
 
 1. MCP and agent chat (capability area) — must
 2. timeline (tool category) — should
-3. texts (tool category) — should
-4. captions (tool category) — should
-5. transcription (tool category) — should
-6. color (tool category) — should
-7. multicam (tool category) — should
-8. media (tool category) — should
-9. capture frame (tool category) — should
-10. multicam (capability area) — should
-11. transcription and captions (capability area) — should
-12. text and graphics (capability area) — should
-13. color and effects (capability area) — should
-14. audio scrub and metering (capability area) — should
-15. settings (capability area) — should
-16. denoise (tool category) — later
-17. organize (tool category) — later
-18. layout (tool category) — later
-19. search (tool category) — later
-20. sync (tool category) — later
-21. beats (tool category) — later
-22. words (tool category) — later
-23. project browser and search (capability area) — later
-24. telemetry (capability area) — later
-25. auto-update (capability area) — later
+3. captions (tool category) — should
+4. transcription (tool category) — should
+5. color (tool category) — should
+6. multicam (tool category) — should
+7. media (tool category) — should
+8. capture frame (tool category) — should
+9. multicam (capability area) — should
+10. transcription and captions (capability area) — should
+11. text and graphics (capability area) — should
+12. color and effects (capability area) — should
+13. audio scrub and metering (capability area) — should
+14. settings (capability area) — should
+15. denoise (tool category) — later
+16. organize (tool category) — later
+17. layout (tool category) — later
+18. search (tool category) — later
+19. sync (tool category) — later
+20. beats (tool category) — later
+21. words (tool category) — later
+22. project browser and search (capability area) — later
+23. telemetry (capability area) — later
+24. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 9 `present`, 10 `partial`, 15 `absent`; 25 in this list, of which 1 `must`, 14 `should` and 10 `later`. Per table:
-table 1 holds 22 entries (7 `present`, 5 `partial`, 10 `absent`, so 15 appear below) and table 2
-holds 12 (2 `present`, 5 `partial`, 5 `absent`, so 10 appear below).
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 10 `present`, 11 `partial`, 13 `absent`; 24 in this list, of which 1 `must`, 13 `should` and 10 `later`. Per table:
+table 1 holds 22 entries (8 `present`, 5 `partial`, 9 `absent`, so 14 appear below) and table 2
+holds 12 (2 `present`, 6 `partial`, 4 `absent`, so 10 appear below).
 
 ## Known limits of this comparison
 
@@ -251,3 +250,15 @@ those claims rest on weaker evidence than the rest.
   `clips`, `effects` and `project settings` (tool categories) and `multicam` (both tables) already
   moved to `present`/were re-scored in tasks 8–10, each recorded separately when it happened; this
   entry covers only the one row task 11 closed. No other row's Linux-side facts moved at this ref.
+- **2026-08-23 re-check (`.kiro/specs/usable-editor` Phase 4, task 12).** `texts` (tool category)
+  moves from `absent` to `present`: `core::TextStyle` and `Clip::textStyle` are the text clip type
+  Requirement 9.1 names; `timeline.add_text_clip`, `timeline.set_text_content` and
+  `timeline.set_text_style` are the create/edit/style operations Requirement 9.2 names; and
+  `gpu::Compositor`'s new `TextRasterizer` seam, installed with the Qt-based `ui::QtTextRasterizer`
+  from the one Composition_Root shared by preview and export, is the renderer the row's own
+  rationale said did not exist. `text and graphics` (capability area) moves from `absent` to
+  `partial`, not `present`, because that row's own stated gap named a **shape layer** alongside
+  text/titles, and Requirement 9 is text-only — no rectangle, line or other generic on-screen
+  graphic exists on either render path — so the row's rationale is rewritten to name exactly that
+  one remaining gap rather than the now-closed text half. No other row's Linux-side facts moved at
+  this ref.

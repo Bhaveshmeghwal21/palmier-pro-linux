@@ -27,6 +27,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDockWidget>
+#include <QFontDatabase>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -36,6 +37,7 @@
 #include <QPointF>
 #include <QSlider>
 #include <QStatusBar>
+#include <QStringList>
 #include <QToolButton>
 #include <QWheelEvent>
 
@@ -52,6 +54,7 @@
 #include "core/Project.hpp"
 #include "core/Result.hpp"
 #include "core/Resolution.hpp"
+#include "core/TextStyle.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Track.hpp"
 #include "core/Uuid.hpp"
@@ -63,6 +66,7 @@
 #include "ui/MediaBrowserPanel.hpp"
 #include "ui/PreviewController.hpp"
 #include "ui/ProjectFileActions.hpp"
+#include "ui/QtTextRasterizer.hpp"
 #include "ui/TimelineGraphView.hpp"
 #include "ui/TimelinePanel.hpp"
 #include "ui/TimelineViewModel.hpp"
@@ -981,6 +985,88 @@ TEST_F(TimelineGraphViewTest, ADeletedSelectedClipReportsSelectionClearedAfterRe
             .changed());
 
     EXPECT_FALSE(graph->selectedClipId().has_value());
+}
+
+// ---------------------------------------------------------------------------
+// QtTextRasterizer (usable-editor task 12; Requirement 9) — the production
+// gpu::TextRasterizer implementation. These exercise it directly, independent
+// of the graphical timeline above: it needs Qt (QPainter/QImage/QFontDatabase),
+// so — like TimelineGraphView — it is tested here rather than in the Qt-free
+// core/gpu suites, per its own header comment explaining why the rasterizer
+// itself cannot live in gpu::Compositor's own (deliberately Qt-free) module.
+// ---------------------------------------------------------------------------
+
+TEST(QtTextRasterizerTest, ProducesAFrameOfExactlyTheRequestedDimensions) {
+    QtTextRasterizer rasterizer;
+    TextStyle style;
+    style.content = "Hello";
+
+    const Result<gpu::SourceFrame> result = rasterizer.rasterize(style, 320, 180);
+    ASSERT_TRUE(result.isOk());
+    const gpu::SourceFrame& frame = result.value();
+    EXPECT_EQ(frame.width, 320u);
+    EXPECT_EQ(frame.height, 180u);
+    EXPECT_EQ(frame.rgba.size(), static_cast<std::size_t>(320) * 180 * 4);
+    EXPECT_TRUE(frame.valid());
+}
+
+TEST(QtTextRasterizerTest, RefusesAZeroSizedTarget) {
+    QtTextRasterizer rasterizer;
+    TextStyle style;
+    style.content = "Hello";
+
+    EXPECT_TRUE(rasterizer.rasterize(style, 0, 100).isError());
+    EXPECT_TRUE(rasterizer.rasterize(style, 100, 0).isError());
+}
+
+// Requirement 9.6: a requested family this host does not carry is substituted
+// with the documented default and reported, rather than failing the render.
+// "definitely-not-a-real-font-family" cannot be a real installed family name,
+// so this is true regardless of which fonts happen to be installed on the CI
+// runner or any other host.
+TEST(QtTextRasterizerTest, SubstitutesAndReportsAnUnavailableFontFamily) {
+    QtTextRasterizer rasterizer;
+    TextStyle style;
+    style.content = "Hello";
+    style.fontFamily = "definitely-not-a-real-font-family";
+
+    EXPECT_FALSE(rasterizer.lastSubstitution().has_value());  // nothing rasterized yet
+
+    const Result<gpu::SourceFrame> result = rasterizer.rasterize(style, 64, 64);
+    ASSERT_TRUE(result.isOk());
+
+    const std::optional<FontSubstitution> substitution = rasterizer.lastSubstitution();
+    ASSERT_TRUE(substitution.has_value());
+    EXPECT_EQ(substitution->requested, "definitely-not-a-real-font-family");
+    EXPECT_EQ(substitution->substituted, QtTextRasterizer::kDefaultFontFamily);
+}
+
+// The complementary half: TextStyle's own default family ("sans-serif") must
+// not be reported as a substitution on a host where nothing is installed under
+// that literal name either — QFontDatabase always resolves SOME family for any
+// request (Qt's font matching falls back rather than failing), so this asserts
+// specifically that the SUBSTITUTION-REPORTING path stays quiet for the
+// family that already IS the documented default, rather than asserting
+// anything about which real family Qt ultimately rasterizes with.
+TEST(QtTextRasterizerTest, LastSubstitutionResetsOnANextCallThatNeedsNone) {
+    QtTextRasterizer rasterizer;
+    TextStyle unavailable;
+    unavailable.content = "Hello";
+    unavailable.fontFamily = "definitely-not-a-real-font-family-either";
+    ASSERT_TRUE(rasterizer.rasterize(unavailable, 32, 32).isOk());
+    ASSERT_TRUE(rasterizer.lastSubstitution().has_value());
+
+    // A family QFontDatabase::families() is asked whether it contains: pick the
+    // FIRST one the host actually reports, so this does not depend on any
+    // specific family being installed.
+    const QStringList installed = QFontDatabase::families();
+    ASSERT_FALSE(installed.isEmpty()) << "the test host reports no fonts at all";
+    TextStyle available;
+    available.content = "Hello";
+    available.fontFamily = installed.front().toStdString();
+
+    ASSERT_TRUE(rasterizer.rasterize(available, 32, 32).isOk());
+    EXPECT_FALSE(rasterizer.lastSubstitution().has_value());
 }
 
 }  // namespace palmier::ui
