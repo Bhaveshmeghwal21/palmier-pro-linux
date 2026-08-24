@@ -1466,6 +1466,16 @@ add_executable(palmier_app_composition_tests
     # The decode/encode sides they call are already supplied by Palmier::media.
     "${PROJECT_SOURCE_DIR}/src/services/ExportCoordinator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/MediaImportService.cpp"
+    # Usable-editor task 13: ApplicationComposition.cpp now constructs one
+    # services::TranscriptionService unconditionally (Requirement 10.4), and
+    # ExportCoordinator.cpp now calls services::projectHasCaptions/renderSrt
+    # unconditionally (Requirement 10.3's sidecar mode) — both join the
+    # compiled-in list for the identical reason OpenSslGenerativeHttpTransport.cpp
+    # does above: wherever the calling .cpp is compiled as a standalone source, as
+    # it is in this target, the callee's own source must join it or the link fails
+    # with undefined references.
+    "${PROJECT_SOURCE_DIR}/src/services/TranscriptionService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/CaptionExport.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/LocalizationManager.cpp")
 target_include_directories(palmier_app_composition_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -3050,6 +3060,12 @@ palmier_register_test(palmier_services_export_hw_sw_comparison_tests)
 add_executable(palmier_services_offline_mode_tests
     services/offline_mode_availability_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/ExportCoordinator.cpp"
+    # Usable-editor task 13: ExportCoordinator.cpp now calls
+    # services::projectHasCaptions/renderSrt unconditionally (Requirement
+    # 10.3's sidecar mode), so CaptionExport.cpp joins the compiled-in list
+    # wherever ExportCoordinator.cpp is compiled as a standalone source, as it
+    # is in this target.
+    "${PROJECT_SOURCE_DIR}/src/services/CaptionExport.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeBackendRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeHttpTransport.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
@@ -3204,6 +3220,13 @@ add_executable(palmier_e2e_tests
     "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ExportCoordinator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/MediaImportService.cpp"
+    # Usable-editor task 13 — see the identical comment on
+    # palmier_app_composition_tests above: ApplicationComposition.cpp constructs
+    # a services::TranscriptionService unconditionally and ExportCoordinator.cpp
+    # calls services::projectHasCaptions/renderSrt unconditionally, so both
+    # sources join the compiled-in list here too.
+    "${PROJECT_SOURCE_DIR}/src/services/TranscriptionService.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/CaptionExport.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/LocalizationManager.cpp")
 target_include_directories(palmier_e2e_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src"
