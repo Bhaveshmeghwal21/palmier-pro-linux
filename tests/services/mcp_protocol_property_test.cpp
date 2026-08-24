@@ -157,18 +157,31 @@ constexpr std::string_view kAddTransition = "timeline.add_transition";
 constexpr std::string_view kAddTextClip    = "timeline.add_text_clip";
 constexpr std::string_view kSetTextContent = "timeline.set_text_content";
 constexpr std::string_view kSetTextStyle   = "timeline.set_text_style";
+// Captions and transcription (usable-editor task 13; Requirement 10).
+constexpr std::string_view kAddCaptionCue        = "timeline.add_caption_cue";
+constexpr std::string_view kSetCaptionText       = "timeline.set_caption_text";
+constexpr std::string_view kRetimeCaptionCue     = "timeline.retime_caption_cue";
+constexpr std::string_view kRemoveCaptionCue     = "timeline.remove_caption_cue";
+constexpr std::string_view kTranscribeToCaptions = "timeline.transcribe_to_captions";
 constexpr std::string_view kGenerate      = "generation.generate";
 constexpr std::string_view kListModels    = "generation.list_models";
 constexpr std::string_view kExport        = "timeline.export";
 
-/// The four tools whose capability is supplied by the composition root. In a test
+/// The five tools whose capability is supplied by the composition root. In a test
 /// binary no hook is wired, so they answer `Unsupported` — accounted for, not
 /// treated as a failure. `generation.list_models` (usable-editor Phase 2 task 7;
 /// PR 406) belongs here for the same reason as `generation.generate`: its handler
 /// is a guarded hook, and the model catalog is supplied by `ApplicationComposition`,
 /// so without that hook it reports that no catalog is configured.
+/// `timeline.transcribe_to_captions` (usable-editor task 13; Requirement 10.4/
+/// 10.5) belongs here for the identical reason: its handler is a guarded hook
+/// too, and even in a REAL build the hook is bound to
+/// `UnavailableTranscriptionBackend` (no recognizer is bundled), so it answers
+/// `Unsupported` by name whether or not a hook is wired at all — a stronger
+/// version of the same "capability not configured" shape the other four have.
 [[nodiscard]] bool isHookBacked(std::string_view tool) {
-    return tool == kGenerate || tool == kListModels || tool == kExport || tool == kMediaImport;
+    return tool == kGenerate || tool == kListModels || tool == kExport ||
+           tool == kMediaImport || tool == kTranscribeToCaptions;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +325,30 @@ constexpr std::int64_t kClipGapMs    = 500;   ///< so an added clip has somewher
         textClip.textStyle = std::move(style);
         textTrack.clips.push_back(std::move(textClip));
         project.tracks.push_back(std::move(textTrack));
+    }
+
+    // A guaranteed caption track with a guaranteed caption cue (usable-editor
+    // task 13; Requirement 10), mirroring the guaranteed text track above for
+    // the identical reason: tools that target a caption cue
+    // (timeline.add_caption_cue needs a caption TRACK;
+    // timeline.set_caption_text/retime_caption_cue/remove_caption_cue need an
+    // existing caption CUE; timeline.transcribe_to_captions needs both a
+    // caption track to place cues on AND a source clip to transcribe from,
+    // the latter already guaranteed by track 0's clips above) need a stable
+    // target that does not depend on which of the randomly-kinded tracks
+    // happened to be drawn.
+    {
+        Track captionTrack;
+        captionTrack.id = Uuid::generateV4();
+        captionTrack.kind = TrackKind::Caption;
+        Clip captionCue;
+        captionCue.id = Uuid::generateV4();
+        captionCue.timelineStart = Duration::zero();
+        captionCue.sourceIn = Duration::zero();
+        captionCue.sourceOut = Duration::fromMilliseconds(kClipLengthMs);
+        captionCue.captionText = "Seed caption";
+        captionTrack.clips.push_back(std::move(captionCue));
+        project.tracks.push_back(std::move(captionTrack));
     }
     return project;
 }
@@ -900,6 +937,53 @@ struct Invocation {
         } else {
             args.set("pointSize", Json(static_cast<double>(1 + drawIndex(200))));
         }
+        return Invocation{name, std::move(args)};
+    }
+
+    // Captions (usable-editor task 13; Requirement 10.2). The seed project's
+    // guaranteed caption track/cue (see drawSeedProject()) is the stable
+    // target, for the identical reason the text track/clip above is: these
+    // four need a REAL caption track/cue, which a random schema-valid uuid
+    // from the generic fallback would essentially never draw.
+    // timeline.transcribe_to_captions is NOT handled here — it is
+    // isHookBacked() (see that function's own doc comment): even in a real
+    // build no recognizer backend is bundled, so it always reports
+    // Unsupported by name regardless of its arguments, exactly like
+    // generation.generate/list_models/timeline.export/media.import, and
+    // ToolsCallSuccessShape's isHookBacked() branch is what actually checks
+    // its result shape.
+    const Track* captionTrack = nullptr;
+    for (const Track& candidate : project.tracks) {
+        if (candidate.kind == TrackKind::Caption) {
+            captionTrack = &candidate;
+            break;
+        }
+    }
+    RC_ASSERT(captionTrack != nullptr);
+
+    if (name == kAddCaptionCue) {
+        args.set("trackId", Json(captionTrack->id.toString()));
+        args.set("timelineStartNs",
+                 Json(projectEndNs(project) +
+                      Duration::fromMilliseconds(kClipGapMs).nanoseconds()));
+        args.set("durationNs",
+                 Json(Duration::fromMilliseconds(kClipLengthMs).nanoseconds()));
+        args.set("text", Json(drawAsciiText(1 + drawIndex(24))));
+        return Invocation{name, std::move(args)};
+    }
+    if (name == kSetCaptionText || name == kRetimeCaptionCue || name == kRemoveCaptionCue) {
+        const Clip& captionCue = captionTrack->clips.front();
+        args.set("clipId", Json(captionCue.id.toString()));
+        if (name == kSetCaptionText) {
+            args.set("text", Json(drawAsciiText(1 + drawIndex(24))));
+        } else if (name == kRetimeCaptionCue) {
+            // At least one of timelineStartNs/durationNs is required; supply
+            // durationNs only, mirroring setTextStyle's own "supply one field"
+            // pattern above.
+            args.set("durationNs",
+                     Json(Duration::fromMilliseconds(kClipLengthMs / 2).nanoseconds()));
+        }
+        // kRemoveCaptionCue needs only clipId, already set above.
         return Invocation{name, std::move(args)};
     }
 
