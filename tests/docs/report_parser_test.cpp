@@ -446,14 +446,14 @@ TEST(ParityCheckFalsifiability, DetectsAnUnsortedBuildOrderList) {
 
 TEST(ParityCheckFalsifiability, DetectsAnEntryMissingFromTheBuildOrderList) {
     const std::vector<Defect> defects =
-        checkParity(mutated(parityMarkdown(), "15. denoise (tool category) \u2014 later\n", ""));
+        checkParity(mutated(parityMarkdown(), "14. denoise (tool category) \u2014 later\n", ""));
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::MissingEntry, "denoise"))
         << testsupport::toString(defects);
 }
 
 TEST(ParityCheckFalsifiability, DetectsABuildOrderPriorityThatDisagreesWithItsTable) {
     const std::vector<Defect> defects = checkParity(
-        mutated(parityMarkdown(), "24. auto-update (capability area) \u2014 later",
+        mutated(parityMarkdown(), "23. auto-update (capability area) \u2014 later",
                 "29. auto-update (capability area) \u2014 should"));
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::InvalidPriority, "auto-update"))
         << testsupport::toString(defects);

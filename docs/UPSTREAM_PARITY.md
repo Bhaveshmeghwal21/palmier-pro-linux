@@ -16,7 +16,7 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: 7d1a83513f05cd6b500119814f09ff09995ce292 (branch `main`)
+- linux-ref: dce602318f0f866996455f5559d6d16c3304ec6d (branch `main`)
 - comparison-date: 2026-08-21
 
 ## Status definitions (Requirement 13.7)
@@ -83,7 +83,7 @@ every `N. ` line as a build-order item.
 | search | absent | none | later | No search index, search tool or search field exists; assets and clips can only be listed in full, so a project cannot be searched. | - | - |
 | sync | absent | none | later | No synchronisation operation exists on any surface, neither audio-based angle alignment nor project or account sync; this category's upstream meaning is unconfirmed. | - | - |
 | beats | absent | services::KeyMomentDetector, services::KeyMomentMarkers | later | The key-moment components have no bundled analysis backend and no tool or panel reaches them, so no beat or key-moment marker can be produced. | - | - |
-| capture frame | absent | none | should | No still-frame capture exists: ExportCoordinator writes only timeline video, and nothing saves the presented preview frame to an image file. | - | - |
+| capture frame | present | services::StillFrameCapture, services::ToolRegistry timeline.capture_frame, ui::QtImageEncoder, ui::MainWindow | - | - | - | - |
 | words | absent | none | later | Word-level transcript editing has no component: no transcript is reachable at the product surface and no word-addressed trim operation exists. | - | - |
 
 ## Table 2 — upstream user-facing capability areas (12 entries, Requirement 13.2)
@@ -105,13 +105,14 @@ every `N. ` line as a build-order item.
 
 ## Build order (Requirement 13.9)
 
-Exactly the `absent` and `partial` entries of both tables — 24 of the 34 — sorted `must` before
+Exactly the `absent` and `partial` entries of both tables — 23 of the 34 — sorted `must` before
 `should` before `later`. This list is a **projection** of the two tables and carries no
 independent facts: an entry appears here if and only if its status above is `absent` or `partial`,
-with the priority recorded above. The ten omitted entries are the ten `present` ones —
-`import`, `export`, `projects`, `generate`, `clips`, `effects`, `project settings` and `texts`
-(all table 1, the last as of usable-editor task 12), plus `generation and upscaling` and
-`timeline editing` (both capability areas, the latter as of usable-editor task 11).
+with the priority recorded above. The eleven omitted entries are the eleven `present` ones —
+`import`, `export`, `projects`, `generate`, `clips`, `effects`, `project settings`, `texts` and
+`capture frame` (all table 1, the last two as of usable-editor tasks 12 and 14 respectively), plus
+`generation and upscaling` and `timeline editing` (both capability areas, the latter as of
+usable-editor task 11).
 
 Each item is written `<name> (<table>) — <priority>` because `multicam` appears in both tables.
 
@@ -122,26 +123,25 @@ Each item is written `<name> (<table>) — <priority>` because `multicam` appear
 5. color (tool category) — should
 6. multicam (tool category) — should
 7. media (tool category) — should
-8. capture frame (tool category) — should
-9. multicam (capability area) — should
-10. transcription and captions (capability area) — should
-11. text and graphics (capability area) — should
-12. color and effects (capability area) — should
-13. audio scrub and metering (capability area) — should
-14. settings (capability area) — should
-15. denoise (tool category) — later
-16. organize (tool category) — later
-17. layout (tool category) — later
-18. search (tool category) — later
-19. sync (tool category) — later
-20. beats (tool category) — later
-21. words (tool category) — later
-22. project browser and search (capability area) — later
-23. telemetry (capability area) — later
-24. auto-update (capability area) — later
+8. multicam (capability area) — should
+9. transcription and captions (capability area) — should
+10. text and graphics (capability area) — should
+11. color and effects (capability area) — should
+12. audio scrub and metering (capability area) — should
+13. settings (capability area) — should
+14. denoise (tool category) — later
+15. organize (tool category) — later
+16. layout (tool category) — later
+17. search (tool category) — later
+18. sync (tool category) — later
+19. beats (tool category) — later
+20. words (tool category) — later
+21. project browser and search (capability area) — later
+22. telemetry (capability area) — later
+23. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 10 `present`, 14 `partial`, 10 `absent`; 24 in this list, of which 1 `must`, 13 `should` and 10 `later`. Per table:
-table 1 holds 22 entries (8 `present`, 7 `partial`, 7 `absent`, so 14 appear below) and table 2
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 11 `present`, 14 `partial`, 9 `absent`; 23 in this list, of which 1 `must`, 12 `should` and 10 `later`. Per table:
+table 1 holds 22 entries (9 `present`, 7 `partial`, 6 `absent`, so 13 appear below) and table 2
 holds 12 (2 `present`, 7 `partial`, 3 `absent`, so 10 appear below).
 
 ## Known limits of this comparison
@@ -282,3 +282,13 @@ those claims rest on weaker evidence than the rest.
   tools is unaffected either way, which is exactly what keeps this at `partial` rather than
   `absent`: the mechanism is real and wired, not merely declared, but no recognizer can be
   configured to make it produce a cue yet. No other row's Linux-side facts moved at this ref.
+- **2026-08-24 re-check (`.kiro/specs/usable-editor` Phase 4, task 14).** `capture frame` (tool
+  category) moves from `absent` to `present`, the first row this document moves all the way to
+  `present` since `texts` in task 12: `services::captureFrame()` renders any given timeline
+  position through the SAME live `gpu::Compositor` instance the preview surface renders through
+  (not a second, separately-behaving path), hands the pixels to `ui::QtImageEncoder`, and
+  `timeline.capture_frame` publishes this on the Tool_Surface; the Export menu's new "Capture
+  Frame…" action drives it from the current playhead. Because task 14 (unlike tasks 8-13) carries
+  no numbered Requirement of its own, this row's own two tasks.md subtasks — the operation and its
+  test, both delivered in full — are what "present" is scored against here. No other row's
+  Linux-side facts moved at this ref.
