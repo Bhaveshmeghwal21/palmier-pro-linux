@@ -1223,5 +1223,72 @@ could theoretically exist. And `docs/UPSTREAM_PARITY.md`'s rationale cells have 
 readability guideline — check the actual length against that number, not merely against "seems
 reasonable," before every future re-score's first push.
 
-Phase 4 Task 14 (still-frame capture) and Task 15 (media organisation), and Phase 5 Tasks 16–17,
-remain unstarted.
+## Task 14 — still-frame capture
+
+**Status: complete.** Final commit `90427cd` (run `32736113858`): **"100% tests passed, 0 tests
+failed out of 1360"**, 5300 distinct colours. Unlike tasks 8–13, task 14 carries no numbered
+Requirement of its own in `requirements.md` — its acceptance criteria are exactly its own two
+tasks.md subtasks: an operation that writes the frame at the playhead to an image file, plus an
+Editor_Shell action for it, and a test proving the written image matches the preview frame within
+the existing GPU/CPU parity tolerance.
+
+- **`services::StillFrameCapture`** (`captureFrame()`) is deliberately Qt-free, mirroring
+  `core::TextStyle`/`gpu::TextRasterizer`'s own split from task 12: it renders `position` through
+  an injected `gpu::Compositor&` — the SAME live instance the preview surface renders through, not
+  a second, separately-behaving one — and hands the resulting RGBA8 pixels to an injected
+  `services::ImageEncoder` function.
+- **`ui::QtImageEncoder`** (new CMake target `palmier_ui_image_encoder`, linking only
+  `Palmier::core`+`Palmier::gpu`+Qt Gui, mirroring `palmier_ui_text_rasterizer`'s own minimal
+  dependency shape) is the production encoder: `QImage`'s raw-data constructor over the RGBA8
+  buffer, `QImage::save()` choosing PNG unless the destination path's own extension names a
+  format Qt's writer registry recognizes.
+- **`timeline.capture_frame`** (`outputPath`, `positionNs`) in `services::ToolRegistry.cpp`,
+  hook-backed like `generation.generate`/`timeline.export`/`media.import`: absent a configured
+  encoder it reports Unsupported by name, and returns `outputPath` on success.
+- **`app::AppConfig::imageEncoder`** (mirroring `exportOptions.textRasterizer`'s own pattern from
+  task 13's fix) is read once at `ApplicationComposition` construction; `app::main.cpp` constructs
+  one `ui::QtImageEncoder` before the composition root and binds it into `config.imageEncoder`,
+  since `QtImageEncoder` needs Qt and the composition root itself deliberately never touches Qt.
+- **Editor_Shell**: a new "Capture &Frame…" action in the `&Export` menu, alongside "Export
+  &Video…" and "&Cancel Export" — it shares the same render path, so it belongs beside them rather
+  than under a separate menu. Prompts for a destination via `QFileDialog::getSaveFileName` and
+  captures at the current `PreviewController::playhead()`, reporting success or the underlying
+  error on the status bar.
+- **Tests**: `tests/services/still_frame_capture_test.cpp` (4 cases: renders through the injected
+  Compositor and hands pixels to the encoder; propagates a render failure without ever calling the
+  encoder; propagates an encoder failure; and — task 14.2's own premise directly — two captures of
+  the identical position through the identical Compositor produce byte-identical pixels, which is
+  what "matches the preview frame" reduces to once burn-in and capture share one render call).
+  `tool_registry_schema_test.cpp` gained the new tool's expected argument list;
+  `mcp_protocol_property_test.cpp` added `timeline.capture_frame` to `isHookBacked()` (this test
+  binary never wires the hook, so it always reports Unsupported here, the identical "not
+  configured in THIS build" shape `generation.generate` already has — a stronger backend
+  genuinely exists in a real build, unlike incident 22's `transcribe_to_captions`);
+  `documentation_consistency_test.cpp` stubbed `hooks.captureFrame` and added an `observer.run()`
+  call, cross-checking the tool's argument names and `outputPath` result field against
+  `docs/TOOLS.md`.
+
+### Verification evidence
+
+CI run `32734705882` (commit `dce6023`, the implementation): **"100% tests passed, 0 tests failed
+out of 1360"** — the FIRST push, with no incident, the first task since task 8 to reach CI green
+without a single fix cycle. CI run `32736113858` (commit `90427cd`, the parity re-score): the same
+**1360/1360**, confirming the doc-only change introduced no regression.
+
+### CI incidents: none
+
+Every proactive pre-push check from the standing doctrine (Class-1 cross-field rule check — none
+applied, since `capture_frame`'s two arguments have no cross-field relation; confirmed current
+tool count via `buildDefaultToolRegistry` before writing `expectedSurface()`'s new entry;
+`isHookBacked()` registration decided correctly on the first attempt, by asking exactly the
+question incident 22's own lesson names — "is a working backend wired in a REAL build" (yes, via
+`ui::QtImageEncoder`) rather than "is one wired in THIS test binary" (no); the standalone-compiling
+target sweep — `palmier_app_composition_tests` and `palmier_e2e_tests`, both of which compile
+`ApplicationComposition.cpp` and therefore need `StillFrameCapture.cpp` joined to their source
+lists; `palmier_services_offline_mode_tests` correctly excluded, since it compiles
+`ExportCoordinator.cpp` only, which never calls `services::captureFrame` at all; both fragile
+parity-doc anchor classes checked and the two stale numbered build-order anchors fixed in the same
+commit as the re-score) held on the first attempt this time, closing out the run of at least one
+CI incident per task that had held since task 8.
+
+Phase 4 Task 15 (media organisation) and Phase 5 Tasks 16–17 remain unstarted.
