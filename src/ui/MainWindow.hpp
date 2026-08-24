@@ -86,6 +86,8 @@ private slots:
     void onRedo();
     void onDeleteClip();
     void onSplitAtPlayhead();
+    // Still-frame capture (usable-editor tasks.md task 14).
+    void onCaptureFrame();
     // Ripple editing and gap management (task 8.3; Requirement 5).
     void onRippleDelete();
     void onRippleTrimToPlayhead();

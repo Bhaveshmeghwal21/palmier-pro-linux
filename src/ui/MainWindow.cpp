@@ -278,6 +278,12 @@ void MainWindow::buildMenus() {
     QAction* exportVideoAction = exportMenu->addAction(QStringLiteral("Export &Video…"));
     connect(exportVideoAction, &QAction::triggered, this, &MainWindow::onExportVideo);
 
+    // Still-frame capture (usable-editor tasks.md task 14): a single-file
+    // capture of the currently presented frame, sitting alongside the video
+    // export it shares its render path with.
+    QAction* captureFrameAction = exportMenu->addAction(QStringLiteral("Capture &Frame…"));
+    connect(captureFrameAction, &QAction::triggered, this, &MainWindow::onCaptureFrame);
+
     QAction* cancelExportAction = exportMenu->addAction(QStringLiteral("&Cancel Export"));
     connect(cancelExportAction, &QAction::triggered, this, &MainWindow::onCancelExport);
 
@@ -449,6 +455,28 @@ void MainWindow::onSplitAtPlayhead() {
     }
     const Duration playhead = previewView_->controller().playhead();
     (void)gateway_.splitClip(*inspectorViewModel_.selectedClipId(), playhead);
+}
+
+void MainWindow::onCaptureFrame() {
+    if (previewView_ == nullptr) {
+        return;
+    }
+    const QString path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("Capture Frame"), QString(),
+        QStringLiteral("PNG Image (*.png)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    const Duration playhead = previewView_->controller().playhead();
+    const Result<services::Json> result = gateway_.captureFrame(path.toStdString(), playhead);
+    if (result.isError()) {
+        statusBar()->showMessage(
+            QStringLiteral("Capture failed: %1")
+                .arg(QString::fromStdString(result.error().message())),
+            8000);
+        return;
+    }
+    statusBar()->showMessage(QStringLiteral("Frame captured to %1").arg(path), 5000);
 }
 
 void MainWindow::onRippleDelete() {

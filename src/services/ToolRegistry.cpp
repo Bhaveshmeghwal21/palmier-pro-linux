@@ -86,6 +86,8 @@ constexpr const char* kTranscribeToCaptions = "timeline.transcribe_to_captions";
 constexpr const char* kGenerate       = "generation.generate";
 constexpr const char* kListModels     = "generation.list_models";
 constexpr const char* kExport         = "timeline.export";
+// Still-frame capture (usable-editor tasks.md task 14; no dedicated Requirement).
+constexpr const char* kCaptureFrame   = "timeline.capture_frame";
 
 // Session, media-library and track tools (tasks 4.3-4.5; Requirement 3.1).
 constexpr const char* kProjectCreate  = "project.create";
@@ -1664,6 +1666,26 @@ Tool makeTranscribeToCaptionsTool(ProjectSession* session, Tool::Handler hook) {
     return t;
 }
 
+Tool makeCaptureFrameTool(ProjectSession* session, Tool::Handler hook) {
+    Tool t;
+    t.name = kCaptureFrame;
+    t.description = "Write the frame at a given timeline position to an image file "
+                    "(usable-editor tasks.md task 14).";
+    // NOT expressible: "the parent directory exists and is writable" is a
+    // filesystem-state rule the schema cannot see; the hook (an adapter over
+    // services::captureFrame) reports it as whatever the underlying encoder
+    // reports.
+    t.schema
+        .arg(stringArg("outputPath", true, "Destination image file path."))
+        .arg(intArg("positionNs", true, "Timeline position to capture, in nanoseconds.", 0));
+    // Absent the hook (no image encoder configured), this reports that
+    // precondition by name; every OTHER tool is unaffected either way.
+    t.handler = guardedHookHandler(
+        session, kCaptureFrame, std::move(hook),
+        "timeline.capture_frame is not available: no image encoder is configured");
+    return t;
+}
+
 Tool makeExportTool(ProjectSession* session, Tool::Handler hook) {
     Tool t;
     t.name = kExport;
@@ -2523,6 +2545,7 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(makeListModelsTool(session, std::move(hooks.listModels)));
     registry.add(
         makeTranscribeToCaptionsTool(session, std::move(hooks.transcribeToCaptions)));
+    registry.add(makeCaptureFrameTool(session, std::move(hooks.captureFrame)));
     registry.add(makeExportTool(session, std::move(hooks.exportTimeline)));
     return registry;
 }

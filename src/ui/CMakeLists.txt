@@ -314,6 +314,39 @@ endif()
 
 
 # ---------------------------------------------------------------------------
+# palmier_ui_image_encoder — the production services::ImageEncoder
+# (usable-editor tasks.md task 14; still-frame capture).
+#
+# QtImageEncoder writes RGBA8 pixels via QImage::save into whatever format the
+# destination path's extension names, mirroring palmier_ui_text_rasterizer's
+# own minimal-dependency shape exactly: services::captureFrame() (and the
+# services::ImageEncoder type alias it depends on) is header-only from this
+# target's point of view — QtImageEncoder.hpp includes
+# services/StillFrameCapture.hpp only for that type and core::Result, neither
+# of which needs the full Palmier::services link surface (libsecret, lcms2).
+# Built only when Qt 6 is present, matching every other Qt-only panel here.
+# ---------------------------------------------------------------------------
+if(TARGET Qt6::Widgets)
+    add_library(palmier_ui_image_encoder STATIC
+        QtImageEncoder.cpp)
+    add_library(Palmier::ui_image_encoder ALIAS palmier_ui_image_encoder)
+
+    target_include_directories(palmier_ui_image_encoder PUBLIC
+        "${PROJECT_SOURCE_DIR}/src")
+
+    target_compile_features(palmier_ui_image_encoder PUBLIC cxx_std_20)
+
+    target_compile_definitions(palmier_ui_image_encoder PUBLIC PALMIER_HAVE_QT=1)
+
+    target_link_libraries(palmier_ui_image_encoder PUBLIC
+        Palmier::core
+        Palmier::gpu
+        Qt6::Core
+        Qt6::Gui)
+endif()
+
+
+# ---------------------------------------------------------------------------
 # palmier_ui_timeline_vm — the Qt-free Timeline presentation adapter (task 19.2).
 #
 # TimelineViewModel maps the TimelineEngine's Project into a tracks x clips model

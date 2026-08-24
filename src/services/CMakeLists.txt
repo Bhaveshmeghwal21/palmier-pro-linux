@@ -21,6 +21,7 @@ add_library(palmier_services
     ProjectSaveService.cpp
     ProjectStore.cpp
     SecretStore.cpp
+    StillFrameCapture.cpp
     TranscriptionService.cpp)
 add_library(Palmier::services ALIAS palmier_services)
 

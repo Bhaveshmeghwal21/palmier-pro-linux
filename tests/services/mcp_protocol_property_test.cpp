@@ -163,6 +163,7 @@ constexpr std::string_view kSetCaptionText       = "timeline.set_caption_text";
 constexpr std::string_view kRetimeCaptionCue     = "timeline.retime_caption_cue";
 constexpr std::string_view kRemoveCaptionCue     = "timeline.remove_caption_cue";
 constexpr std::string_view kTranscribeToCaptions = "timeline.transcribe_to_captions";
+constexpr std::string_view kCaptureFrame  = "timeline.capture_frame";
 constexpr std::string_view kGenerate      = "generation.generate";
 constexpr std::string_view kListModels    = "generation.list_models";
 constexpr std::string_view kExport        = "timeline.export";
@@ -179,9 +180,14 @@ constexpr std::string_view kExport        = "timeline.export";
 /// `UnavailableTranscriptionBackend` (no recognizer is bundled), so it answers
 /// `Unsupported` by name whether or not a hook is wired at all — a stronger
 /// version of the same "capability not configured" shape the other four have.
+/// `timeline.capture_frame` (usable-editor tasks.md task 14) belongs here too,
+/// but for the ORIGINAL reason `generation.generate` does: in a real build its
+/// hook IS wired to a working `ui::QtImageEncoder`, but this test binary's
+/// `Stack` never supplies one, so it answers `Unsupported` for exactly the
+/// "not configured in this build" reason the other four already have.
 [[nodiscard]] bool isHookBacked(std::string_view tool) {
     return tool == kGenerate || tool == kListModels || tool == kExport ||
-           tool == kMediaImport || tool == kTranscribeToCaptions;
+           tool == kMediaImport || tool == kTranscribeToCaptions || tool == kCaptureFrame;
 }
 
 // ---------------------------------------------------------------------------

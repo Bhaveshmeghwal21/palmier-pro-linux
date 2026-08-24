@@ -315,6 +315,13 @@ Result<Json> GuiToolGateway::transcribeToCaptions(ClipId sourceClipId, Uuid capt
                                  services::InvocationSource::Gui);
 }
 
+Result<Json> GuiToolGateway::captureFrame(const std::string& outputPath, Duration position) {
+    Json args = Json::object();
+    args.set("outputPath", outputPath);
+    args.set("positionNs", position.nanoseconds());
+    return executor_.executeTool("timeline.capture_frame", args, services::InvocationSource::Gui);
+}
+
 Result<Json> GuiToolGateway::importMedia(const std::string& path) {
     Json args = Json::object();
     args.set("path", path);

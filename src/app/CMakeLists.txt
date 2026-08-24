@@ -158,3 +158,10 @@ endif()
 if(TARGET palmier-pro AND TARGET Palmier::ui_text_rasterizer)
     target_link_libraries(palmier-pro PRIVATE Palmier::ui_text_rasterizer)
 endif()
+
+# Link the Qt-based image encoder (usable-editor tasks.md task 14; still-frame
+# capture) into the editor executable, for the identical forward-reference
+# reason as Palmier::ui_text_rasterizer immediately above.
+if(TARGET palmier-pro AND TARGET Palmier::ui_image_encoder)
+    target_link_libraries(palmier-pro PRIVATE Palmier::ui_image_encoder)
+endif()

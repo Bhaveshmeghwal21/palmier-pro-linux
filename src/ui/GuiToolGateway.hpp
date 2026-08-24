@@ -165,6 +165,9 @@ public:
     /// timeline.transcribe_to_captions
     [[nodiscard]] Result<Json> transcribeToCaptions(ClipId sourceClipId, Uuid captionTrackId);
 
+    /// timeline.capture_frame (usable-editor tasks.md task 14).
+    [[nodiscard]] Result<Json> captureFrame(const std::string& outputPath, Duration position);
+
     // --- Media / project gestures ------------------------------------------
 
     /// media.import

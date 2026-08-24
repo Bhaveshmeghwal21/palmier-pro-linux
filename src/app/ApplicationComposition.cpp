@@ -358,6 +358,43 @@ public:
     };
 }
 
+/// `timeline.capture_frame`'s hook (usable-editor tasks.md task 14): render
+/// the timeline at a given position through the live `gpu::Compositor` (the
+/// SAME instance the preview surface renders through — this is what makes the
+/// written image match the preview frame rather than merely resemble it) and
+/// hand the pixels to the configured `services::ImageEncoder`.
+[[nodiscard]] services::Tool::Handler makeCaptureFrameHook(gpu::Compositor& compositor,
+                                                           services::ProjectSession& session,
+                                                           services::ImageEncoder encoder) {
+    return [&compositor, &session, encoder = std::move(encoder)](
+               const services::Json& in) -> Result<services::Json> {
+        using namespace palmier::services;
+
+        const Json* outputPathArg = in.find("outputPath");
+        if (outputPathArg == nullptr || !outputPathArg->isString() ||
+            outputPathArg->asString().empty()) {
+            return err<Json>(invalidArgument("missing or empty field 'outputPath'"));
+        }
+        const Json* positionArg = in.find("positionNs");
+        if (positionArg == nullptr || !positionArg->isNumber()) {
+            return err<Json>(invalidArgument("missing or non-numeric field 'positionNs'"));
+        }
+        const Duration position =
+            Duration::fromNanoseconds(static_cast<std::int64_t>(positionArg->asDouble()));
+
+        const Project project = session.engine().snapshot();
+        const std::filesystem::path outputPath(outputPathArg->asString());
+        Result<void> captured = captureFrame(compositor, project, position, outputPath, encoder);
+        if (captured.isError()) {
+            return err<Json>(std::move(captured).error());
+        }
+
+        Json out = Json::object();
+        out.set("outputPath", outputPath.string());
+        return out;
+    };
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -648,6 +685,7 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     hooks.listModels = makeListModelsHook(*genCatalog_);
     hooks.transcribeToCaptions =
         makeTranscribeToCaptionsHook(*transcriptionService_, *session_);
+    hooks.captureFrame = makeCaptureFrameHook(*compositor_, *session_, config.imageEncoder);
     hooks.exportTimeline = services::makeExportToolHandler(*exportCoordinator_, *session_,
                                                            config.exportToolOptions);
     hooks.importMedia = [service = mediaImportService_.get()](const std::filesystem::path& path) {

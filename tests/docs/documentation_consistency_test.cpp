@@ -248,6 +248,16 @@ public:
             out.set("cuesAdded", static_cast<std::int64_t>(1));
             return out;
         };
+        // timeline.capture_frame's real hook needs a Qt image encoder (this
+        // binary links no Qt), so it is stubbed here for the identical reason
+        // listModels/transcribeToCaptions are stubbed above: this fixture
+        // observes the REGISTRY'S OWN rendering of a result shape, not whether
+        // a real image is actually written to disk.
+        hooks.captureFrame = [](const services::Json& in) -> Result<services::Json> {
+            services::Json out = services::Json::object();
+            out.set("outputPath", in.stringOr("outputPath"));
+            return out;
+        };
         registry_ = services::buildDefaultToolRegistry(session_, std::move(hooks));
     }
 
@@ -566,6 +576,14 @@ private:
     observer.run("timeline.transcribe_to_captions", transcribeToCaptions);
 
     observer.run("timeline.remove_caption_cue", with("clipId", services::Json(captionCueId)));
+
+    // Still-frame capture (usable-editor tasks.md task 14; no dedicated
+    // Requirement).
+    services::Json captureFrame = object();
+    captureFrame.set("outputPath",
+                     (scratchDirectory / "documentation-check-frame.png").string());
+    captureFrame.set("positionNs", static_cast<std::int64_t>(0));
+    observer.run("timeline.capture_frame", captureFrame);
 
     observer.run("timeline.delete_clip", with("clipId", services::Json(secondClip)));
     observer.run("edit.undo", object());

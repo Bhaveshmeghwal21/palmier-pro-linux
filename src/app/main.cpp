@@ -42,6 +42,7 @@
 #include <QString>
 
 #include "ui/MainWindow.hpp"
+#include "ui/QtImageEncoder.hpp"
 #include "ui/QtTextRasterizer.hpp"
 #endif
 
@@ -165,8 +166,14 @@ int main(int argc, char** argv) {
     // and ApplicationComposition (src/app's own Qt-free composition root, see
     // its own header comment) deliberately never touches Qt directly.
     palmier::ui::QtTextRasterizer textRasterizer;
+    // The image encoder (usable-editor tasks.md task 14; still-frame capture)
+    // is constructed here for the identical reason: QtImageEncoder needs Qt,
+    // and it must outlive both composition and app.exec() below since
+    // `timeline.capture_frame`'s hook is bound to it for the whole run.
+    palmier::ui::QtImageEncoder imageEncoder;
     AppConfig config = settings.config();
     config.exportOptions.textRasterizer = textRasterizer.asRasterizer();
+    config.imageEncoder = imageEncoder.asEncoder();
     try {
         compositionPtr = std::make_unique<ApplicationComposition>(std::move(config));
     } catch (const palmier::app::ComponentConstructionError& ex) {

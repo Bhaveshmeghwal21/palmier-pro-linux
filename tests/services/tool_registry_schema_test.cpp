@@ -286,6 +286,10 @@ std::vector<ToolExpectation> expectedSurface() {
         // makeTranscribeToCaptionsTool's schema declaration exactly.
         {"timeline.transcribe_to_captions",
          {{"sourceClipId", "string", true}, {"captionTrackId", "string", true}}},
+        // Usable-editor tasks.md task 14 — still-frame capture. Argument order
+        // matches makeCaptureFrameTool's schema declaration exactly.
+        {"timeline.capture_frame",
+         {{"outputPath", "string", true}, {"positionNs", "integer", true}}},
         // Task 9.7 — `timeline.export` is now wired to services::ExportCoordinator,
         // and Requirement 7.2 lists what a caller may ask for: "an output path,
         // container format, video codec, resolution, frame rate and bit rate".

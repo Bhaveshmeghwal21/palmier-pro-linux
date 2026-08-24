@@ -1476,6 +1476,12 @@ add_executable(palmier_app_composition_tests
     # with undefined references.
     "${PROJECT_SOURCE_DIR}/src/services/TranscriptionService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/CaptionExport.cpp"
+    # Usable-editor tasks.md task 14: ApplicationComposition.cpp's
+    # makeCaptureFrameHook calls services::captureFrame unconditionally
+    # (timeline.capture_frame is always registered, even with an empty hook —
+    # the hook's OWN construction still calls captureFrame's declaration, so
+    # its definition must link), for the identical standalone-source reason.
+    "${PROJECT_SOURCE_DIR}/src/services/StillFrameCapture.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/LocalizationManager.cpp")
 target_include_directories(palmier_app_composition_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -2714,6 +2720,22 @@ palmier_register_test(palmier_services_caption_export_tests)
 
 
 
+# ---------------------------------------------------------------------------
+# Still-frame capture tests (usable-editor tasks.md task 14; no dedicated
+# Requirement) — services::captureFrame's pure orchestration over an injected
+# gpu::Compositor + services::ImageEncoder. No Qt, no real image file: the
+# encoder records what it was asked to write.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_still_frame_capture_tests
+    services/still_frame_capture_test.cpp)
+target_link_libraries(palmier_services_still_frame_capture_tests PRIVATE
+    Palmier::services
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_still_frame_capture_tests)
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -3227,6 +3249,8 @@ add_executable(palmier_e2e_tests
     # sources join the compiled-in list here too.
     "${PROJECT_SOURCE_DIR}/src/services/TranscriptionService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/CaptionExport.cpp"
+    # Usable-editor tasks.md task 14, for the identical reason.
+    "${PROJECT_SOURCE_DIR}/src/services/StillFrameCapture.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/LocalizationManager.cpp")
 target_include_directories(palmier_e2e_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src"

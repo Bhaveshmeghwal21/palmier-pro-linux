@@ -86,6 +86,7 @@
 #include "services/McpServer.hpp"                // kDefaultHost/kDefaultPort
 #include "services/RemoteAccessGate.hpp"         // RemoteAccessConfig (task 6.1)
 #include "services/SecretStore.hpp"              // SecretStore
+#include "services/StillFrameCapture.hpp"        // ImageEncoder (tasks.md task 14)
 
 // Forward declarations for the concrete components the composition root owns by
 // unique_ptr (their headers are pulled in only by the .cpp, keeping this header
@@ -248,6 +249,14 @@ struct AppConfig {
     /// cancelling it and reporting a timeout (Requirement 7.2's synchronous tool
     /// contract). Defaults to 55 s, inside the executor's 60 s budget.
     services::ExportToolOptions exportToolOptions;
+
+    /// The image encoder `timeline.capture_frame` (usable-editor tasks.md task
+    /// 14) writes through. Empty ⇒ the tool reports Unsupported ("no image
+    /// encoder is configured"). Set from `main.cpp` to `ui::QtImageEncoder`
+    /// (Qt-only, so it cannot live inside this Qt-free composition root
+    /// itself — the same reason `exportOptions.textRasterizer` is set from
+    /// there too).
+    services::ImageEncoder imageEncoder;
 
     /// The probe backend the one Media_Import_Service validates imports through
     /// (Requirements 1.1, 2.2). Empty means `media::ffmpegProbeBackend()`. A test

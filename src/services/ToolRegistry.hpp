@@ -159,6 +159,13 @@ struct ToolRegistryHooks {
     /// editing (the other three caption tools, none of which need this hook)
     /// unaffected.
     Tool::Handler transcribeToCaptions;
+
+    /// Handles `timeline.capture_frame` (usable-editor tasks.md task 14):
+    /// render the timeline at a given position and write it to an image file.
+    /// Typically an adapter over `services::captureFrame()` bound to the one
+    /// live `gpu::Compositor` and an image encoder. Empty ⇒ the tool reports
+    /// Unsupported ("no image encoder is configured").
+    Tool::Handler captureFrame;
 };
 
 // ---------------------------------------------------------------------------

@@ -677,6 +677,21 @@ track with nothing to transcribe is a normal outcome, not a failure.
 
 Result: `status` (string — `"transcribed"` or `"no_audio_found"`), `cuesAdded` (integer).
 
+## `timeline.capture_frame`
+
+Write the frame at a given timeline position to an image file (usable-editor tasks.md task 14; no
+dedicated Requirement). Hook-backed: requires a configured image encoder.
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `outputPath` | string | **yes** | at least 1 character |
+| `positionNs` | integer | **yes** | ≥ 0 |
+
+The written image is rendered through the SAME `gpu::Compositor` instance the live preview renders
+through, so it matches the preview frame at that position rather than merely resembling it.
+
+Result: `outputPath` (string).
+
 ## `timeline.export`
 
 Render the timeline to an output file at a selected container, codec, resolution, frame rate and bit
