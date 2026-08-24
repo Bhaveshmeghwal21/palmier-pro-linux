@@ -16,7 +16,7 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: 8c814d12603a3e5d7dfc92a3b515dffbad078d05 (branch `main`)
+- linux-ref: 7d1a83513f05cd6b500119814f09ff09995ce292 (branch `main`)
 - comparison-date: 2026-08-21
 
 ## Status definitions (Requirement 13.7)
@@ -66,8 +66,8 @@ every `N. ` line as a build-order item.
 | clips | present | core::EditCommands, services::ToolRegistry timeline.add_clip/delete_clip/move_clip/trim_clip/split_clip/reorder_clips/ripple_delete/ripple_trim/close_gap | - | - | - | - |
 | timeline | partial | core::TimelineEngine, services::ToolRegistry timeline.read/add_track/remove_track/set_track_muted, edit.undo, edit.redo, ui::TimelinePanel | should | Read, track add/remove/mute, undo/redo, a scrub/step/timecode playhead control and Add Video/Audio Track menu actions are reachable from the mounted TimelinePanel; no marker or zoom tool exists yet. | - | - |
 | texts | present | core::TextStyle, core::Clip::textStyle, services::ToolRegistry timeline.add_text_clip/set_text_content/set_text_style, gpu::Compositor, ui::QtTextRasterizer | - | - | - | - |
-| captions | absent | none | should | core::TrackKind has only Video and Audio; no caption track, burn-in path or sidecar export exists, so captions cannot be authored or delivered. | - | - |
-| transcription | absent | services::TranscriptionService | should | TranscriptionService is unreachable: no tool registers it, the composition root never constructs it and no recognizer backend is bundled. | - | - |
+| captions | partial | core::TrackKind::Caption, core::Clip::captionText, services::ToolRegistry timeline.add_caption_cue/set_caption_text/retime_caption_cue/remove_caption_cue/transcribe_to_captions, gpu::Compositor, services::CaptionExport | should | core::TrackKind::Caption, Clip::captionText and four cue tools plus burn-in and sidecar SRT export all work; timeline.transcribe_to_captions always reports Unsupported, since no recognizer backend is bundled or pluggable yet. | - | - |
+| transcription | partial | services::TranscriptionService, services::ToolRegistry timeline.transcribe_to_captions | should | services::TranscriptionService is now constructed and reachable through timeline.transcribe_to_captions, but no recognizer backend is bundled or pluggable in this build, so it always reports Unsupported by name. | - | - |
 | color | partial | core::EffectType::ColorGrade, core::ColorSpace, gpu::EffectKernels | should | Only one color_grade effect is reachable via timeline.add_effect; no curve, wheel, scope or LUT operation exists, so a grade cannot be shaped or judged. | - | - |
 | effects | present | core::EffectType, gpu::EffectKernels, gpu::Compositor, services::ToolRegistry timeline.add_effect/remove_effect/reorder_effects/set_effect_parameter, ui::InspectorPanel | - | - | - | - |
 | denoise | absent | none | later | No denoise effect type and no denoise kernel exist in core::Effect or gpu::EffectKernels, so noise reduction is unavailable on every surface. | - | - |
@@ -92,7 +92,7 @@ every `N. ` line as a build-order item.
 |---|---|---|---|---|---|---|
 | timeline editing | present | core::TimelineEngine, core::EditCommands, services::ToolRegistry, ui::TimelineViewModel, ui::TimelineModel, ui::TimelinePanel, ui::TimelineGraphView, ui::MainWindow, ui::InspectorViewModel, ui::MediaBrowserViewModel | - | - | - | - |
 | multicam | partial | core::ClipGroup, core::EditCommands::RippleTrimCommand, services::ToolRegistry timeline.ripple_trim | should | A ripple-trim on a grouped clip propagates in sync to every clipGroups member (PR 397); angle switching is still deferred, so multi-angle footage trims together but cannot be cut between angles. | - | - |
-| transcription and captions | absent | services::TranscriptionService | should | No recognizer backend is bundled and nothing reaches TranscriptionService; there is also no caption track kind, so captions cannot be produced or burned in. | - | - |
+| transcription and captions | partial | core::TrackKind::Caption, services::TranscriptionService, services::ToolRegistry, services::CaptionExport, gpu::Compositor | should | Caption cues can be authored, edited, retimed, burned into the export and written as an SRT sidecar; the audio-to-cues bridge always reports Unsupported, since no recognizer backend is bundled or pluggable yet. | - | - |
 | text and graphics | partial | core::TextStyle, core::Clip::textStyle, services::ToolRegistry timeline.add_text_clip/set_text_content/set_text_style, gpu::Compositor, ui::QtTextRasterizer, ui::InspectorPanel | should | A title/lower-third text clip type, three creation/edit/style tools and a QPainter-backed renderer shared by preview and export now exist; no shape layer does. | - | - |
 | color and effects | partial | gpu::EffectKernels, gpu::Compositor, core::EffectType, services::ToolRegistry timeline.add_effect/remove_effect/reorder_effects/set_effect_parameter | should | Six effects including invert_colors render on both paths, and remove/reorder/re-parameterise are all reachable; there is still no curve, wheel, scope, LUT or denoise. | - | - |
 | audio scrub and metering | absent | none | should | The audio pipeline mixes and outputs, but no level meter, waveform or scrub-audio component exists, so levels cannot be monitored while editing. | SwiftUI | Qt 6 Widgets |
@@ -140,9 +140,9 @@ Each item is written `<name> (<table>) — <priority>` because `multicam` appear
 23. telemetry (capability area) — later
 24. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 10 `present`, 11 `partial`, 13 `absent`; 24 in this list, of which 1 `must`, 13 `should` and 10 `later`. Per table:
-table 1 holds 22 entries (8 `present`, 5 `partial`, 9 `absent`, so 14 appear below) and table 2
-holds 12 (2 `present`, 6 `partial`, 4 `absent`, so 10 appear below).
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 10 `present`, 14 `partial`, 10 `absent`; 24 in this list, of which 1 `must`, 13 `should` and 10 `later`. Per table:
+table 1 holds 22 entries (8 `present`, 7 `partial`, 7 `absent`, so 14 appear below) and table 2
+holds 12 (2 `present`, 7 `partial`, 3 `absent`, so 10 appear below).
 
 ## Known limits of this comparison
 
@@ -262,3 +262,23 @@ those claims rest on weaker evidence than the rest.
   graphic exists on either render path — so the row's rationale is rewritten to name exactly that
   one remaining gap rather than the now-closed text half. No other row's Linux-side facts moved at
   this ref.
+- **2026-08-24 re-check (`.kiro/specs/usable-editor` Phase 4, task 13).** `captions` (tool
+  category) and `transcription` (tool category) both move from `absent` to `partial`, and
+  `transcription and captions` (capability area) moves from `absent` to `partial`, not `present`,
+  for the identical shape of reason task 12's `text and graphics` row stopped short of `present`:
+  a whole half of the row's own scope works and the other half is structurally blocked by a
+  dependency this tree deliberately does not bundle. `core::TrackKind::Caption` and
+  `Clip::captionText` are the caption cue type Requirement 10.1 names, round-tripping through
+  schema 1.3; `timeline.add_caption_cue`, `timeline.set_caption_text`,
+  `timeline.retime_caption_cue` and `timeline.remove_caption_cue` are the create/edit/retime/remove
+  operations Requirement 10.2 names, each one undoable edit; `gpu::Compositor`'s existing
+  `TextRasterizer` seam (from task 12) now also composites caption cues, burning them into every
+  export, and the new `services::CaptionExport` writes the identical cues as an SRT sidecar file
+  next to the video — together the two halves of Requirement 10.3. `services::TranscriptionService`
+  is now genuinely constructed by the Composition_Root (Requirement 10.4) and reachable through the
+  new `timeline.transcribe_to_captions` tool, but the service is bound to
+  `UnavailableTranscriptionBackend`, the only backend this tree bundles, which always reports
+  `Unsupported` by name (Requirement 10.5) — hand-authored caption editing through the other four
+  tools is unaffected either way, which is exactly what keeps this at `partial` rather than
+  `absent`: the mechanism is real and wired, not merely declared, but no recognizer can be
+  configured to make it produce a cue yet. No other row's Linux-side facts moved at this ref.
