@@ -527,6 +527,17 @@ void writeMediaAssetRef(JsonWriter& w, const MediaAssetRef& ref) {
     writeUuid(w, "assetId", ref.assetId);
     w.key("sourcePath");
     w.valueString(ref.sourcePath);
+    // Schema 1.4 addition (usable-editor tasks.md task 15): always written as
+    // an array, empty when the asset carries no tags, mirroring how every
+    // other array-shaped field in this format is always present rather than
+    // conditionally omitted like the optional-object fields (textStyle,
+    // transitionIn) are.
+    w.key("tags");
+    w.beginArray();
+    for (const std::string& tag : ref.tags) {
+        w.valueString(tag);
+    }
+    w.endArray();
     w.endObject();
 }
 
@@ -824,6 +835,18 @@ MediaAssetRef readMediaAssetRef(const JsonValue& v) {
     MediaAssetRef ref;
     ref.assetId = requireUuid(v, "assetId");
     ref.sourcePath = requireString(v, "sourcePath");
+    // Schema 1.4 addition (usable-editor tasks.md task 15): absent entirely on
+    // every pre-1.4 document, in which case the asset simply has no tags —
+    // the identical absent-means-default convention every earlier addition
+    // (tracks[].name, textStyle, captionText) already established, just for
+    // an array rather than a string or an optional object.
+    if (const JsonValue* tags = v.find("tags"); tags != nullptr && !tags->isNull()) {
+        const JsonValue& tagsArray = requireArray(*tags, "asset.tags");
+        for (const JsonValue& tag : tagsArray.array) {
+            if (!tag.isString()) fail("asset.tags entries must be strings");
+            ref.tags.push_back(tag.string);
+        }
+    }
     return ref;
 }
 

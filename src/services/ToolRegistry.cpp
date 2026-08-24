@@ -98,6 +98,8 @@ constexpr const char* kProjectInfo    = "project.info";
 constexpr const char* kSetProjectSettings = "project.set_settings";
 constexpr const char* kMediaImport    = "media.import";
 constexpr const char* kMediaList      = "media.list";
+// Media organisation (usable-editor tasks.md task 15; no dedicated Requirement).
+constexpr const char* kMediaSetTags   = "media.set_tags";
 constexpr const char* kAddTrack       = "timeline.add_track";
 constexpr const char* kRemoveTrack    = "timeline.remove_track";
 constexpr const char* kSetTrackMuted  = "timeline.set_track_muted";
@@ -2241,6 +2243,12 @@ Tool makeMediaListTool(ProjectSession* session, Tool::Handler hook) {
                        entry.set("sourcePath", ref.sourcePath);
                        entry.set("displayName",
                                  std::filesystem::path(ref.sourcePath).filename().string());
+                       // Usable-editor tasks.md task 15; no dedicated Requirement.
+                       Json tags = Json::array();
+                       for (const std::string& tag : ref.tags) {
+                           tags.push_back(Json(tag));
+                       }
+                       entry.set("tags", std::move(tags));
                        assets.push_back(std::move(entry));
                    }
                    const std::size_t count = assets.asArray().size();
@@ -2249,6 +2257,46 @@ Tool makeMediaListTool(ProjectSession* session, Tool::Handler hook) {
                    out.set("count", static_cast<std::int64_t>(count));
                    return out;
                }));
+    return t;
+}
+
+Tool makeMediaSetTagsTool(ProjectSession* session) {
+    Tool t;
+    t.name = kMediaSetTags;
+    t.description = "Replace a media asset's tag list wholesale (usable-editor tasks.md task 15; "
+                    "no dedicated Requirement). Not an undoable edit: tags are informational "
+                    "project state, like an asset's sourcePath, not a timeline edit.";
+    t.schema
+        .arg(uuidArg("assetId", true, "UUID of the media asset in Project.assets."))
+        .arg(ArgSpec{.name = "tags",
+                     .kind = JsonKind::Array,
+                     .required = true,
+                     .description = "The asset's complete new tag list (strings); replaces "
+                                    "any existing tags."});
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kMediaSetTags));
+        Result<Uuid> assetId = requireUuid(in, "assetId");
+        if (assetId.isError()) return err<Json>(std::move(assetId).error());
+        const Json* tagsArg = in.find("tags");
+        if (tagsArg == nullptr || !tagsArg->isArray()) {
+            return err<Json>(invalidArgument("missing or non-array field 'tags'"));
+        }
+        std::vector<std::string> tags;
+        tags.reserve(tagsArg->asArray().size());
+        for (const Json& tag : tagsArg->asArray()) {
+            if (!tag.isString()) {
+                return err<Json>(invalidArgument("field 'tags' must contain strings"));
+            }
+            tags.push_back(tag.asString());
+        }
+        Result<void> applied = session->mediaLibrary().setAssetTags(assetId.value(), std::move(tags));
+        if (applied.isError()) {
+            return err<Json>(std::move(applied).error());
+        }
+        Json out = Json::object();
+        out.set("assetId", assetId.value().toString());
+        return out;
+    };
     return t;
 }
 
@@ -2510,6 +2558,7 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(makeSetProjectSettingsTool(session));
     registry.add(makeMediaImportTool(session, std::move(hooks.importMedia)));
     registry.add(makeMediaListTool(session, std::move(hooks.listMedia)));
+    registry.add(makeMediaSetTagsTool(session));
     registry.add(makeAddTrackTool(session));
     registry.add(makeRemoveTrackTool(session));
     registry.add(makeSetTrackMutedTool(session));

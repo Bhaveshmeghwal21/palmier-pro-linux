@@ -33,6 +33,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -114,6 +115,15 @@ public:
     /// This is used by undoable generated-placement commands to reverse an asset
     /// import that the same command performed.
     [[nodiscard]] Result<void> removeAsset(const Uuid& assetId);
+
+    /// Replace `assetId`'s tag list wholesale (usable-editor tasks.md task 15;
+    /// no dedicated Requirement). Not an EditCommand — mirroring
+    /// MediaAssetRef::sourcePath's own status as informational, unvalidated
+    /// project state rather than an undoable timeline edit — so tagging is not
+    /// part of the undo/redo history at all.
+    ///
+    /// Returns ErrorCode::NotFound if `assetId` is not in the library.
+    [[nodiscard]] Result<void> setAssetTags(const Uuid& assetId, std::vector<std::string> tags);
 
     // --- Per-clip version history (Requirement 3.4) -------------------------
 

@@ -24,6 +24,7 @@
 #include "ui/MediaBrowserViewModel.hpp"
 
 class QLabel;
+class QLineEdit;
 class QListWidget;
 class QPushButton;
 
@@ -86,6 +87,7 @@ private:
     MediaBrowserViewModel viewModel_;
 
     QPushButton* importButton_ = nullptr;
+    QLineEdit*   filterEdit_ = nullptr;  ///< Usable-editor tasks.md task 15.2.
     QListWidget* libraryList_ = nullptr;
     QListWidget* versionList_ = nullptr;
     QLabel*      keyMomentLabel_ = nullptr;

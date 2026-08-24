@@ -379,5 +379,124 @@ TEST(MediaBrowserViewModelTest, NoClipSelectedYieldsEmptyDisplays) {
     EXPECT_FALSE(vm.selectedClip().has_value());
 }
 
+// --- Media organisation (usable-editor tasks.md task 15; no dedicated
+// Requirement) ---------------------------------------------------------------
+
+TEST(MediaBrowserViewModelTest, SetAssetTagsRoundTripsThroughTheLibraryRow) {
+    MediaManager media;
+    KeyMomentMarkerModel markers;
+    MediaBrowserViewModel vm(media, markers, acceptingValidator());
+
+    const Result<MediaAssetRef> imported = vm.importMedia("/a/first.mov");
+    ASSERT_TRUE(imported.isOk());
+    const Uuid assetId = imported.value().assetId;
+
+    EXPECT_TRUE(vm.assetTags(assetId).empty());
+
+    ASSERT_TRUE(vm.setAssetTags(assetId, {"b-roll", "outdoor"}).isOk());
+    EXPECT_EQ(vm.assetTags(assetId), (std::vector<std::string>{"b-roll", "outdoor"}));
+
+    const auto rows = vm.library();
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].tags, (std::vector<std::string>{"b-roll", "outdoor"}));
+}
+
+TEST(MediaBrowserViewModelTest, SetAssetTagsRejectsAnAssetNotInTheLibrary) {
+    MediaManager media;
+    KeyMomentMarkerModel markers;
+    MediaBrowserViewModel vm(media, markers, acceptingValidator());
+
+    const Result<void> result = vm.setAssetTags(Uuid::generateV4(), {"anything"});
+    EXPECT_TRUE(result.isError());
+}
+
+TEST(MediaBrowserViewModelTest, EmptyFilterAcceptsEveryEntry) {
+    MediaManager media;
+    KeyMomentMarkerModel markers;
+    MediaBrowserViewModel vm(media, markers, acceptingValidator());
+
+    ASSERT_TRUE(vm.importMedia("/a/first.mov").isOk());
+    ASSERT_TRUE(vm.importMedia("/b/second.png").isOk());
+
+    EXPECT_EQ(vm.filterText(), "");
+    EXPECT_EQ(vm.library().size(), 2u);
+}
+
+TEST(MediaBrowserViewModelTest, FilterMatchesTheDisplayNameCaseInsensitively) {
+    MediaManager media;
+    KeyMomentMarkerModel markers;
+    MediaBrowserViewModel vm(media, markers, acceptingValidator());
+
+    ASSERT_TRUE(vm.importMedia("/a/interview.mov").isOk());
+    ASSERT_TRUE(vm.importMedia("/b/broll.png").isOk());
+
+    vm.setFilterText("INTERVIEW");
+    const auto rows = vm.library();
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].displayName, "interview.mov");
+}
+
+TEST(MediaBrowserViewModelTest, FilterMatchesASourcePathSubstring) {
+    MediaManager media;
+    KeyMomentMarkerModel markers;
+    MediaBrowserViewModel vm(media, markers, acceptingValidator());
+
+    ASSERT_TRUE(vm.importMedia("/footage/day1/clip.mov").isOk());
+    ASSERT_TRUE(vm.importMedia("/footage/day2/clip.mov").isOk());
+
+    vm.setFilterText("day2");
+    const auto rows = vm.library();
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].sourcePath, "/footage/day2/clip.mov");
+}
+
+TEST(MediaBrowserViewModelTest, FilterMatchesATag) {
+    MediaManager media;
+    KeyMomentMarkerModel markers;
+    MediaBrowserViewModel vm(media, markers, acceptingValidator());
+
+    const Result<MediaAssetRef> first = vm.importMedia("/a/first.mov");
+    ASSERT_TRUE(first.isOk());
+    ASSERT_TRUE(vm.importMedia("/b/second.mov").isOk());
+    ASSERT_TRUE(vm.setAssetTags(first.value().assetId, {"outdoor"}).isOk());
+
+    vm.setFilterText("outdoor");
+    const auto rows = vm.library();
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].assetId, first.value().assetId);
+}
+
+TEST(MediaBrowserViewModelTest, FilterMatchingNothingYieldsAnEmptyLibrary) {
+    MediaManager media;
+    KeyMomentMarkerModel markers;
+    MediaBrowserViewModel vm(media, markers, acceptingValidator());
+
+    ASSERT_TRUE(vm.importMedia("/a/first.mov").isOk());
+
+    vm.setFilterText("no-such-clip");
+    EXPECT_TRUE(vm.library().empty());
+    // The unfiltered count is unaffected by the filter (task 15.3's own
+    // "filtering never changes project state" — libraryCount() reads the
+    // WHOLE library, exactly as it did before any filter was set).
+    EXPECT_EQ(vm.libraryCount(), 1u);
+}
+
+TEST(MediaBrowserViewModelTest, SettingAndClearingTheFilterMutatesNoProjectState) {
+    MediaManager media;
+    KeyMomentMarkerModel markers;
+    MediaBrowserViewModel vm(media, markers, acceptingValidator());
+
+    ASSERT_TRUE(vm.importMedia("/a/first.mov").isOk());
+    ASSERT_TRUE(vm.importMedia("/b/second.mov").isOk());
+    const std::size_t before = media.assetCount();
+
+    vm.setFilterText("first");
+    EXPECT_EQ(vm.library().size(), 1u);
+    vm.setFilterText("");
+    EXPECT_EQ(vm.library().size(), 2u);
+
+    EXPECT_EQ(media.assetCount(), before);
+}
+
 }  // namespace
 }  // namespace palmier::ui

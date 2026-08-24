@@ -158,6 +158,10 @@ std::vector<ToolExpectation> expectedSurface() {
           {"colorSpace", "string", false}}},
         {"media.import", {{"path", "string", true}}},
         {"media.list", {}},
+        // Usable-editor tasks.md task 15 — media organisation; no dedicated
+        // Requirement. Argument order matches makeMediaSetTagsTool's schema
+        // declaration exactly.
+        {"media.set_tags", {{"assetId", "string", true}, {"tags", "array", true}}},
         {"timeline.add_track", {{"kind", "string", true}}},
         {"timeline.remove_track", {{"trackId", "string", true}}},
         // Task 10.1 — the third track edit, added so the offline interpreter's

@@ -179,4 +179,13 @@ Result<void> MediaManager::removeAsset(const Uuid& assetId) {
     return ok();
 }
 
+Result<void> MediaManager::setAssetTags(const Uuid& assetId, std::vector<std::string> tags) {
+    const auto it = assetIndex_.find(assetId);
+    if (it == assetIndex_.end()) {
+        return err(notFound("media asset " + assetId.toString() + " is not in the library"));
+    }
+    library_[it->second].tags = std::move(tags);
+    return ok();
+}
+
 } // namespace palmier

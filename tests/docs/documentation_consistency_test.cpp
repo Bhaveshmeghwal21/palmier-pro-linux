@@ -359,6 +359,15 @@ private:
     observer.run("media.list", object());
     observer.run("generation.list_models", object());
 
+    // Media organisation (usable-editor tasks.md task 15; no dedicated
+    // Requirement).
+    services::Json setTags = object();
+    setTags.set("assetId", assets[0].toString());
+    services::Json tags = services::Json::array();
+    tags.push_back(services::Json(std::string{"b-roll"}));
+    setTags.set("tags", std::move(tags));
+    observer.run("media.set_tags", setTags);
+
     const services::Json videoTrack =
         observer.run("timeline.add_track", with("kind", services::Json(std::string{"video"})));
     observer.run("timeline.add_track", with("kind", services::Json(std::string{"audio"})));

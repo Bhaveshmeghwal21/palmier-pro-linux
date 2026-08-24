@@ -13,6 +13,7 @@
 
 #include <QFileDialog>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QSignalBlocker>
@@ -52,6 +53,20 @@ void MediaBrowserPanel::buildUi() {
     layout->addWidget(importErrorLabel_);
 
     layout->addWidget(new QLabel(QStringLiteral("Library"), this));
+    // Usable-editor tasks.md task 15.2: a free-text filter over the flat
+    // library, matched against display name, source path and tags
+    // (MediaBrowserViewModel::matchesFilter()). Setting it never touches the
+    // project or the media library — it only changes which rows library()
+    // returns — so no gateway/tool routing is needed here, unlike every
+    // import/tag-mutating action in this panel.
+    filterEdit_ = new QLineEdit(this);
+    filterEdit_->setPlaceholderText(QStringLiteral("Filter by name, path or tag…"));
+    connect(filterEdit_, &QLineEdit::textChanged, this, [this](const QString& text) {
+        viewModel_.setFilterText(text.toStdString());
+        refreshLibrary();
+    });
+    layout->addWidget(filterEdit_);
+
     libraryList_ = new QListWidget(this);
     connect(libraryList_, &QListWidget::currentRowChanged, this,
             &MediaBrowserPanel::onLibraryRowChanged);

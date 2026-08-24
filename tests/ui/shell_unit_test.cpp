@@ -363,6 +363,36 @@ TEST_F(ShellUnitTest, AddCaptionTrackActionAppendsACaptionTrackAndIsUndoable) {
     EXPECT_EQ(composition.timeline().snapshot().tracks.size(), tracksBefore);
 }
 
+// Usable-editor tasks.md task 15.2; no dedicated Requirement: a filter field
+// over the Media_Browser's flat library, typing into which changes which rows
+// are listed without touching the project (task 15.3's own "filtering never
+// changes project state").
+TEST_F(ShellUnitTest, MediaBrowserFilterFieldNarrowsTheLibraryWithoutChangingIt) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+
+    const MediaAssetRef interview(Uuid::generateV4(), "/media/interview.mov");
+    const MediaAssetRef broll(Uuid::generateV4(), "/media/broll.mov");
+    ASSERT_TRUE(composition.mediaLibrary().importAsset(interview).isOk());
+    ASSERT_TRUE(composition.mediaLibrary().importAsset(broll).isOk());
+
+    MediaBrowserPanel* mediaBrowser = window.findChild<MediaBrowserPanel*>();
+    ASSERT_NE(mediaBrowser, nullptr);
+    QLineEdit* filterEdit = mediaBrowser->findChild<QLineEdit*>();
+    ASSERT_NE(filterEdit, nullptr);
+
+    const std::size_t assetCountBefore = composition.mediaLibrary().assetCount();
+
+    filterEdit->setText(QStringLiteral("interview"));
+    EXPECT_EQ(mediaBrowser->viewModel().library().size(), 1u);
+
+    filterEdit->clear();
+    EXPECT_EQ(mediaBrowser->viewModel().library().size(), 2u);
+
+    // The library itself, and the project it lives in, are untouched.
+    EXPECT_EQ(composition.mediaLibrary().assetCount(), assetCountBefore);
+}
+
 
 // called either, and MediaBrowserViewModel had no concept of a selected
 // library asset at all — Place at Playhead could not have existed as a GUI

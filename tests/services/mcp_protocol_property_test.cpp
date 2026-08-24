@@ -134,6 +134,7 @@ constexpr std::string_view kProjectInfo   = "project.info";
 constexpr std::string_view kSetProjectSettings = "project.set_settings";
 constexpr std::string_view kMediaImport   = "media.import";
 constexpr std::string_view kMediaList     = "media.list";
+constexpr std::string_view kMediaSetTags  = "media.set_tags";
 constexpr std::string_view kAddTrack      = "timeline.add_track";
 constexpr std::string_view kRemoveTrack   = "timeline.remove_track";
 constexpr std::string_view kSetTrackMuted = "timeline.set_track_muted";
@@ -706,6 +707,21 @@ struct Invocation {
     if (name == kReadTimeline || name == kProjectInfo || name == kMediaList ||
         name == kUndo || name == kRedo || isHookBacked(name)) {
         return Invocation{name, schemaValidArgs(tool, scratch)};
+    }
+
+    // media.set_tags (usable-editor tasks.md task 15; no dedicated
+    // Requirement) needs a REAL asset id from the project, exactly like
+    // timeline.add_clip needs a real trackId/assetId — the seed project
+    // always carries at least one asset (see drawSeedProject()).
+    if (name == kMediaSetTags) {
+        args.set("assetId", Json(project.assets[drawIndex(project.assets.size())].assetId.toString()));
+        Json tags = Json::array();
+        const int tagCount = *rc::gen::inRange(0, 4);
+        for (int i = 0; i < tagCount; ++i) {
+            tags.push_back(Json(drawAsciiText(1 + drawIndex(12))));
+        }
+        args.set("tags", std::move(tags));
+        return Invocation{name, std::move(args)};
     }
 
     if (name == kProjectCreate) {

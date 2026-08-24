@@ -221,8 +221,22 @@ List the assets registered in the current project's media library.
 
 No arguments.
 
-Result: `assets` (array of `{ "assetId": string, "sourcePath": string, "displayName": string }`,
-where `displayName` is the source path's filename) and `count` (integer).
+Result: `assets` (array of `{ "assetId": string, "sourcePath": string, "displayName": string,
+"tags": array of string }`, where `displayName` is the source path's filename) and `count`
+(integer).
+
+## `media.set_tags`
+
+Replace a media asset's tag list wholesale (usable-editor tasks.md task 15; no dedicated
+Requirement). Not an undoable edit: tags are informational project state, like an asset's
+`sourcePath`, not a timeline edit — they do not appear in the undo/redo history.
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `assetId` | string *uuid* | **yes** | must name an asset in `Project.assets` |
+| `tags` | array of string | **yes** | the asset's complete new tag list; replaces any existing tags |
+
+Result: `assetId` (string).
 
 ## `timeline.add_track`
 
@@ -230,7 +244,7 @@ Append a video or audio track after the last existing track of that kind.
 
 | Argument | Type | Required | Accepted values |
 |---|---|---|---|
-| `kind` | string | **yes** | `video`, `audio` |
+| `kind` | string | **yes** | `video`, `audio`, `text`, `caption` |
 
 The 64-tracks-per-kind cap is enforced by the command, not the schema, because it counts the
 project's existing tracks.

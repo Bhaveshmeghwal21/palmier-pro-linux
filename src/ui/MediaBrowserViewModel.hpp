@@ -95,9 +95,10 @@ class GuiToolGateway;  // ui/GuiToolGateway.hpp — optional gateway-backed impo
 /// is a short, user-facing label derived from the asset's source path (its file
 /// name), falling back to the asset id when no path is available.
 struct MediaLibraryEntry {
-    Uuid        assetId;
-    std::string sourcePath;
-    std::string displayName;
+    Uuid                     assetId;
+    std::string              sourcePath;
+    std::string              displayName;
+    std::vector<std::string> tags;  ///< Usable-editor tasks.md task 15; no dedicated Requirement.
 };
 
 // ---------------------------------------------------------------------------
@@ -215,14 +216,52 @@ public:
 
     // --- Library (Requirement 3.1) -----------------------------------------
 
-    /// The project media library as display rows, in import order.
+    /// The project media library as display rows, in import order, restricted
+    /// to entries `matchesFilter()` accepts against the currently set filter
+    /// text (usable-editor tasks.md task 15.2; no dedicated Requirement). An
+    /// empty filter (the default) accepts every entry, so this is a strict
+    /// extension of the pre-filter behaviour.
     [[nodiscard]] std::vector<MediaLibraryEntry> library() const;
 
-    /// Number of assets in the library.
+    /// Number of assets in the library. Unaffected by the filter — this counts
+    /// the WHOLE library, matching libraryContains()'s own unfiltered meaning;
+    /// use `library().size()` for the filtered count.
     [[nodiscard]] std::size_t libraryCount() const;
 
     /// True iff an asset with `assetId` is in the library.
     [[nodiscard]] bool libraryContains(const Uuid& assetId) const;
+
+    // --- Media organisation (usable-editor tasks.md task 15; no dedicated
+    // Requirement) ------------------------------------------------------
+
+    /// Set the free-text filter `library()` restricts its rows to. A case-
+    /// insensitive substring match against the entry's display name, source
+    /// path or any one of its tags; an empty string clears the filter. Setting
+    /// the filter is NOT an edit: it never touches the project, the media
+    /// library or the undo history — filtering is a pure VIEW of what already
+    /// exists (task 15.3's own "filtering never changes project state").
+    void setFilterText(std::string filter);
+
+    /// The currently set filter text (empty when unfiltered).
+    [[nodiscard]] const std::string& filterText() const noexcept { return filterText_; }
+
+    /// True iff `entry` matches the currently set filter text. Exposed so a
+    /// view can highlight matches without re-deriving the predicate, and so
+    /// tests can exercise the matching rule directly.
+    [[nodiscard]] bool matchesFilter(const MediaLibraryEntry& entry) const;
+
+    /// Replace `assetId`'s tag list wholesale (task 15.1). Duplicates and order
+    /// are preserved exactly as given, mirroring MediaAssetRef::tags' own
+    /// unopinionated convention.
+    ///
+    /// Returns ErrorCode::NotFound if `assetId` is not in the library.
+    [[nodiscard]] Result<void> setAssetTags(const Uuid& assetId, std::vector<std::string> tags);
+
+    /// The tags currently set for `assetId`, or an empty list if the asset has
+    /// none or is not in the library (indistinguishable from "no tags",
+    /// exactly like a clip with no effects and a clip that does not exist both
+    /// read back an empty effect list from this model's own sibling methods).
+    [[nodiscard]] std::vector<std::string> assetTags(const Uuid& assetId) const;
 
     /// The probed duration of `assetId`, if known. Populated only for assets
     /// imported through importMediaViaGateway() (the media.import tool's result
@@ -302,6 +341,7 @@ private:
     std::optional<Uuid>              selectedLibraryAsset_;
     std::optional<std::string>       lastImportError_;
     std::unordered_map<Uuid, Duration> assetDurations_;
+    std::string                      filterText_;  ///< Usable-editor tasks.md task 15.2.
 };
 
 }  // namespace palmier::ui

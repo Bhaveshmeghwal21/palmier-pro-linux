@@ -14,14 +14,24 @@
 #define PALMIER_CORE_MEDIAASSETREF_HPP
 
 #include <string>
+#include <vector>
 
 #include "core/Uuid.hpp"
 
 namespace palmier {
 
 struct MediaAssetRef {
-    Uuid        assetId;    ///< Stable identity within Project.assets.
-    std::string sourcePath; ///< Origin path / locator of the media (informational).
+    Uuid                     assetId;    ///< Stable identity within Project.assets.
+    std::string              sourcePath; ///< Origin path / locator of the media (informational).
+    /// Free-form organisation labels over the flat media library (usable-editor
+    /// tasks.md task 15; no dedicated Requirement). Order is preserved but not
+    /// meaningful; duplicates are permitted and left as the caller wrote them —
+    /// this field is deliberately as unopinionated as the "flat library" it
+    /// extends, mirroring MediaAssetRef's own sourcePath in being informational
+    /// rather than validated. Persisted from schema 1.4 onward and empty by
+    /// default, so an asset with no tags round-trips identically to one from a
+    /// pre-1.4 document.
+    std::vector<std::string> tags;
 
     MediaAssetRef() = default;
     explicit MediaAssetRef(Uuid id, std::string path = {})
@@ -31,8 +41,8 @@ struct MediaAssetRef {
     [[nodiscard]] bool isValid() const noexcept { return !assetId.isNil(); }
 
     /// Two references denote the same asset iff their identities match. The
-    /// sourcePath is intentionally excluded so a clip's ref resolves against an
-    /// asset-table entry by identity alone.
+    /// sourcePath and tags are intentionally excluded so a clip's ref resolves
+    /// against an asset-table entry by identity alone.
     [[nodiscard]] friend bool operator==(const MediaAssetRef& a, const MediaAssetRef& b) noexcept {
         return a.assetId == b.assetId;
     }

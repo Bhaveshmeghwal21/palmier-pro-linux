@@ -296,5 +296,41 @@ TEST(MediaManager, QueriesOnUntrackedClipAreEmpty) {
     EXPECT_FALSE(mgr.selectedVersion(clip).has_value());
 }
 
+// --- Media organisation (usable-editor tasks.md task 15; no dedicated
+// Requirement) ---------------------------------------------------------------
+
+TEST(MediaManager, SetAssetTagsReplacesTheTagListWholesale) {
+    MediaManager mgr;
+    const auto asset = makeAsset();
+    ASSERT_TRUE(mgr.importAsset(asset).isOk());
+
+    ASSERT_TRUE(mgr.setAssetTags(asset.assetId, {"b-roll", "outdoor"}).isOk());
+    std::optional<MediaAssetRef> found = mgr.asset(asset.assetId);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->tags, (std::vector<std::string>{"b-roll", "outdoor"}));
+
+    // A second call REPLACES rather than appends.
+    ASSERT_TRUE(mgr.setAssetTags(asset.assetId, {"interview"}).isOk());
+    found = mgr.asset(asset.assetId);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->tags, (std::vector<std::string>{"interview"}));
+
+    // An empty list clears the tags.
+    ASSERT_TRUE(mgr.setAssetTags(asset.assetId, {}).isOk());
+    found = mgr.asset(asset.assetId);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_TRUE(found->tags.empty());
+}
+
+TEST(MediaManager, SetAssetTagsRejectsAnAssetNotInTheLibrary) {
+    MediaManager mgr;
+    const Uuid unknown = Uuid::generateV4();
+
+    const Result<void> result = mgr.setAssetTags(unknown, {"anything"});
+
+    EXPECT_TRUE(result.isError());
+    EXPECT_EQ(result.error().code(), ErrorCode::NotFound);
+}
+
 }  // namespace
 }  // namespace palmier

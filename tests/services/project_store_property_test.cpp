@@ -94,6 +94,12 @@ MediaAssetRef drawAssetRef() {
     MediaAssetRef ref;
     ref.assetId = drawUuid();
     ref.sourcePath = *rc::gen::arbitrary<std::string>();
+    // Schema 1.4 addition (usable-editor tasks.md task 15): an arbitrary tag
+    // list, including the empty default, must survive.
+    const int tagCount = *rc::gen::inRange(0, 4);
+    for (int i = 0; i < tagCount; ++i) {
+        ref.tags.push_back(*rc::gen::arbitrary<std::string>());
+    }
     return ref;
 }
 

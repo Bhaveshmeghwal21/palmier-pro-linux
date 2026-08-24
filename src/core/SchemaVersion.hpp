@@ -10,15 +10,27 @@
 // supports a stored version iff the major numbers match and the reader's minor is
 // >= the stored minor.
 //
-// The current version is 1.3. Its addition over 1.2 is Clip::captionText and the
-// TrackKind::Caption track kind it requires (usable-editor task 13; Requirement
-// 10): a clip carrying no captionText key at all (every 1.0/1.1/1.2 document) is
-// unaffected, so a 1.3 build reads every earlier document unchanged, and a 1.2
-// build rejects a 1.3 document as unsupported the moment it meets an
-// unrecognised "caption" track kind — the same cross-version behaviour 1.2's
-// own addition (Clip::textStyle, TrackKind::Text) already established for a 1.1
-// reader, which itself extended what 1.1's own additions (`tracks[].name`,
-// `clipGroups`, `invert_colors`) established for a 1.0 reader.
+// The current version is 1.4. Its addition over 1.3 is MediaAssetRef::tags
+// (usable-editor tasks.md task 15; no dedicated Requirement): an asset carrying
+// no "tags" key at all (every 1.0/1.1/1.2/1.3 document) is unaffected, so a 1.4
+// build reads every earlier document unchanged with an empty tag list, and a
+// 1.3 build reads a 1.4 document unchanged too, since an unrecognised extra
+// key on an asset object is simply ignored rather than rejected — unlike each
+// PRIOR addition (a new track/clip KIND a reader must recognise or reject),
+// tags are a per-asset field a reader with no notion of them can harmlessly
+// skip, which is why this is the first addition in the chain that does not
+// need the older reader to REJECT the newer document.
+//
+// The version PRIOR to 1.4 was 1.3. Its addition over 1.2 is Clip::captionText
+// and the TrackKind::Caption track kind it requires (usable-editor task 13;
+// Requirement 10): a clip carrying no captionText key at all (every
+// 1.0/1.1/1.2 document) is unaffected, so a 1.3 build reads every earlier
+// document unchanged, and a 1.2 build rejects a 1.3 document as unsupported
+// the moment it meets an unrecognised "caption" track kind — the same
+// cross-version behaviour 1.2's own addition (Clip::textStyle,
+// TrackKind::Text) already established for a 1.1 reader, which itself
+// extended what 1.1's own additions (`tracks[].name`, `clipGroups`,
+// `invert_colors`) established for a 1.0 reader.
 
 #ifndef PALMIER_CORE_SCHEMAVERSION_HPP
 #define PALMIER_CORE_SCHEMAVERSION_HPP
@@ -40,7 +52,7 @@ struct SchemaVersion {
 
     /// The schema version this build writes and can fully round-trip.
     [[nodiscard]] static constexpr SchemaVersion current() noexcept {
-        return SchemaVersion{1, 3};
+        return SchemaVersion{1, 4};
     }
 
     /// Can a reader at `reader` load data written at `stored`?

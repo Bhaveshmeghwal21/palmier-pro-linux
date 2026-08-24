@@ -102,7 +102,11 @@ std::vector<MediaLibraryEntry> MediaBrowserViewModel::library() const {
     const std::vector<MediaAssetRef>& lib = media_.library();
     rows.reserve(lib.size());
     for (const MediaAssetRef& asset : lib) {
-        rows.push_back(MediaLibraryEntry{asset.assetId, asset.sourcePath, deriveDisplayName(asset)});
+        MediaLibraryEntry entry{asset.assetId, asset.sourcePath, deriveDisplayName(asset),
+                                asset.tags};
+        if (matchesFilter(entry)) {
+            rows.push_back(std::move(entry));
+        }
     }
     return rows;
 }
@@ -111,6 +115,55 @@ std::size_t MediaBrowserViewModel::libraryCount() const { return media_.assetCou
 
 bool MediaBrowserViewModel::libraryContains(const Uuid& assetId) const {
     return media_.hasAsset(assetId);
+}
+
+namespace {
+/// Case-insensitive ASCII lowering, matching the convention every other
+/// case-insensitive comparison in this tree (e.g. RemoteAccessGate's origin
+/// host matching) already uses: this is a UI filter over ASCII-typical file
+/// names and user-typed tags, not a Unicode-aware search.
+[[nodiscard]] std::string toLowerAscii(std::string s) {
+    for (char& c : s) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+    return s;
+}
+}  // namespace
+
+void MediaBrowserViewModel::setFilterText(std::string filter) {
+    filterText_ = std::move(filter);
+}
+
+bool MediaBrowserViewModel::matchesFilter(const MediaLibraryEntry& entry) const {
+    if (filterText_.empty()) {
+        return true;
+    }
+    const std::string needle = toLowerAscii(filterText_);
+    if (toLowerAscii(entry.displayName).find(needle) != std::string::npos) {
+        return true;
+    }
+    if (toLowerAscii(entry.sourcePath).find(needle) != std::string::npos) {
+        return true;
+    }
+    for (const std::string& tag : entry.tags) {
+        if (toLowerAscii(tag).find(needle) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+Result<void> MediaBrowserViewModel::setAssetTags(const Uuid& assetId,
+                                                 std::vector<std::string> tags) {
+    return media_.setAssetTags(assetId, std::move(tags));
+}
+
+std::vector<std::string> MediaBrowserViewModel::assetTags(const Uuid& assetId) const {
+    const std::optional<MediaAssetRef> asset = media_.asset(assetId);
+    if (!asset.has_value()) {
+        return {};
+    }
+    return asset->tags;
 }
 
 std::optional<Duration> MediaBrowserViewModel::assetDuration(const Uuid& assetId) const {
