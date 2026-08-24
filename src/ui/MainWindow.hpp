@@ -143,6 +143,7 @@ private:
     QAction* addVideoTrackAction_ = nullptr;
     QAction* addAudioTrackAction_ = nullptr;
     QAction* addTextTrackAction_ = nullptr;  ///< usable-editor task 12; Requirement 9.
+    QAction* addCaptionTrackAction_ = nullptr;  ///< usable-editor task 13; Requirement 10.
     QAction* placeAtPlayheadAction_ = nullptr;
 
     // Status bar: the three persistent notices (GPU, software-compositing,

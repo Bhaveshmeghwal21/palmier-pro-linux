@@ -3,13 +3,15 @@
 // core/Track.hpp — one lane of the multi-track timeline.
 //
 // A Project holds an ordered list of Tracks; each Track holds a list of Clips
-// (design.md Data Models). A track is a Video, Audio or Text lane (the last
-// added by usable-editor task 12; Requirement 9 — see core/TextStyle.hpp for why
-// text needs its own track kind), may be muted or locked, and owns its clips.
-// The design's clip-ordering invariant requires a track's clips to be sorted by
-// timelineStart and non-overlapping outside explicit transition regions; that
-// invariant is enforced by the TimelineEngine (task 3.x) and checked by
-// ProjectValidation, uniformly across every kind of track.
+// (design.md Data Models). A track is a Video, Audio, Text or Caption lane (the
+// last two added by usable-editor tasks 12/13; Requirements 9/10 — see
+// core/TextStyle.hpp for why text needs its own track kind, and Clip.hpp's
+// captionText doc comment for why captions follow the identical pattern), may
+// be muted or locked, and owns its clips. The design's clip-ordering invariant
+// requires a track's clips to be sorted by timelineStart and non-overlapping
+// outside explicit transition regions; that invariant is enforced by the
+// TimelineEngine (task 3.x) and checked by ProjectValidation, uniformly across
+// every kind of track.
 
 #ifndef PALMIER_CORE_TRACK_HPP
 #define PALMIER_CORE_TRACK_HPP
@@ -22,11 +24,13 @@
 
 namespace palmier {
 
-/// Whether a track carries picture, sound, or on-screen text (Requirement 9).
+/// Whether a track carries picture, sound, on-screen text (Requirement 9) or
+/// caption cues (Requirement 10).
 enum class TrackKind {
     Video,
     Audio,
     Text,
+    Caption,
 };
 
 struct Track {

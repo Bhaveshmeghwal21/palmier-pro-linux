@@ -144,6 +144,27 @@ public:
                                             std::optional<TextAlignment> alignment,
                                             std::optional<double> x, std::optional<double> y);
 
+    // --- Captions and transcription (usable-editor task 13; Requirement 10) -
+
+    /// timeline.add_caption_cue
+    [[nodiscard]] Result<Json> addCaptionCue(Uuid trackId, Duration timelineStart,
+                                             Duration duration, const std::string& text);
+
+    /// timeline.set_caption_text
+    [[nodiscard]] Result<Json> setCaptionText(ClipId clipId, const std::string& text);
+
+    /// timeline.retime_caption_cue. Leaving either as std::nullopt leaves that
+    /// field exactly as it was; at least one must be given.
+    [[nodiscard]] Result<Json> retimeCaptionCue(ClipId clipId,
+                                                std::optional<Duration> newTimelineStart,
+                                                std::optional<Duration> newDuration);
+
+    /// timeline.remove_caption_cue
+    [[nodiscard]] Result<Json> removeCaptionCue(ClipId clipId);
+
+    /// timeline.transcribe_to_captions
+    [[nodiscard]] Result<Json> transcribeToCaptions(ClipId sourceClipId, Uuid captionTrackId);
+
     // --- Media / project gestures ------------------------------------------
 
     /// media.import

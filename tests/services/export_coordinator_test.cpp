@@ -1531,5 +1531,90 @@ TEST_F(ExportCoordinatorTest, ExportToolRunsThroughTheSharedToolRegistry) {
     EXPECT_TRUE(std::filesystem::exists(out));
 }
 
+// ---------------------------------------------------------------------------
+// Captions sidecar export (usable-editor task 13; Requirement 10.3's second
+// export mode, alongside burn-in). A caption cue on the project's timeline
+// also needs a text rasterizer installed on the export-local Compositor
+// (Requirement 9.5/10.3's shared seam), which the shared fixture's own
+// options() does not set for every OTHER test — set directly here instead of
+// changing that shared default.
+// ---------------------------------------------------------------------------
+
+TEST_F(ExportCoordinatorTest, WritesAnSrtSidecarNextToTheVideoWhenTheProjectHasACaptionCue) {
+    // Add a caption track/cue to the already-seeded video+audio timeline.
+    Project project = session_.engine().snapshot();
+    Clip cue;
+    cue.id = Uuid::generateV4();
+    cue.timelineStart = Duration::zero();
+    cue.sourceIn = Duration::zero();
+    cue.sourceOut = FrameRate::fps30().durationForFrames(4);
+    cue.captionText = "Hello, captions!";
+    Track captionTrack;
+    captionTrack.id = Uuid::generateV4();
+    captionTrack.kind = TrackKind::Caption;
+    captionTrack.clips = {cue};
+    project.tracks.push_back(captionTrack);
+    ASSERT_TRUE(session_.engine().reset(project).isOk());
+
+    BackendScript script;
+    const std::filesystem::path out = scratchPath("captions_sidecar");
+    script.outputPath = out;
+
+    ExportCoordinator::Options opts = options(&script);
+    // Requirement 9.5/10.3: the export-local Compositor needs a rasterizer to
+    // burn the caption cue in at all; a fixed solid frame stands in for a real
+    // glyph render, exactly like the video frameProvider above stands in for a
+    // real decode.
+    opts.textRasterizer = [](const TextStyle&, std::uint32_t w,
+                            std::uint32_t h) -> Result<gpu::SourceFrame> {
+        return gpu::SourceFrame::solid(w, h, gpu::RgbaColor{255, 255, 255, 255});
+    };
+    coordinator_ = std::make_unique<ExportCoordinator>(session_, *context_, teardown_, opts);
+
+    ExportRequest2 r = request(out);
+    ASSERT_TRUE(coordinator_->begin(r).isOk());
+    ASSERT_GT(runToCompletion(), 0u);
+
+    ASSERT_TRUE(coordinator_->lastOutcome().has_value());
+    const ExportOutcome& outcome = *coordinator_->lastOutcome();
+    EXPECT_FALSE(coordinator_->lastError().has_value());
+
+    // The video output itself succeeded, independent of the sidecar.
+    ASSERT_TRUE(std::filesystem::exists(out));
+
+    // The sidecar sits next to it with the same base name and a .srt extension.
+    ASSERT_FALSE(outcome.captionsSidecarPath.empty());
+    std::filesystem::path expectedSidecar = out;
+    expectedSidecar.replace_extension(".srt");
+    EXPECT_EQ(outcome.captionsSidecarPath, expectedSidecar);
+    ASSERT_TRUE(std::filesystem::exists(outcome.captionsSidecarPath));
+
+    std::ifstream sidecar(outcome.captionsSidecarPath, std::ios::binary);
+    const std::string contents((std::istreambuf_iterator<char>(sidecar)),
+                               std::istreambuf_iterator<char>());
+    EXPECT_NE(contents.find("Hello, captions!"), std::string::npos);
+    EXPECT_NE(contents.find("00:00:00,000 -->"), std::string::npos);
+}
+
+TEST_F(ExportCoordinatorTest, ReportsNoSidecarPathWhenTheProjectHasNoCaptions) {
+    // The fixture's own seeded timeline (video + audio, no captions).
+    BackendScript script;
+    const std::filesystem::path out = scratchPath("no_captions");
+    script.outputPath = out;
+    makeCoordinator(&script);
+
+    ExportRequest2 r = request(out);
+    ASSERT_TRUE(coordinator_->begin(r).isOk());
+    ASSERT_GT(runToCompletion(), 0u);
+
+    ASSERT_TRUE(coordinator_->lastOutcome().has_value());
+    const ExportOutcome& outcome = *coordinator_->lastOutcome();
+    EXPECT_TRUE(outcome.captionsSidecarPath.empty());
+
+    std::filesystem::path wouldBeSidecar = out;
+    wouldBeSidecar.replace_extension(".srt");
+    EXPECT_FALSE(std::filesystem::exists(wouldBeSidecar));
+}
+
 } // namespace
 } // namespace palmier::services

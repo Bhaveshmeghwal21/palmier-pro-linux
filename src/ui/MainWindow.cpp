@@ -249,6 +249,15 @@ void MainWindow::buildMenus() {
         }
     });
 
+    // Usable-editor task 13; Requirement 10: a caption cue must sit on a
+    // caption track, for the identical reason a text clip needs a text track.
+    addCaptionTrackAction_ = editMenu->addAction(QStringLiteral("Add &Caption Track"));
+    connect(addCaptionTrackAction_, &QAction::triggered, this, [this]() {
+        if (timelinePanel_ != nullptr) {
+            (void)timelinePanel_->model().addTrack(QStringLiteral("caption"));
+        }
+    });
+
     editMenu->addSeparator();
     placeAtPlayheadAction_ = editMenu->addAction(QStringLiteral("&Place at Playhead"));
     placeAtPlayheadAction_->setEnabled(false);  // no asset/track selected at startup
@@ -679,11 +688,13 @@ void MainWindow::onStatusRefreshTick() {
     refreshNotices();
     refreshSelectionActions();
     if (addVideoTrackAction_ != nullptr && addAudioTrackAction_ != nullptr &&
-        addTextTrackAction_ != nullptr && timelinePanel_ != nullptr) {
+        addTextTrackAction_ != nullptr && addCaptionTrackAction_ != nullptr &&
+        timelinePanel_ != nullptr) {
         const bool canAddTrack = timelinePanel_->model().canAddTrack();
         addVideoTrackAction_->setEnabled(canAddTrack);
         addAudioTrackAction_->setEnabled(canAddTrack);
         addTextTrackAction_->setEnabled(canAddTrack);
+        addCaptionTrackAction_->setEnabled(canAddTrack);
     }
 }
 

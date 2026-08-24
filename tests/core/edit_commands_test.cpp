@@ -95,6 +95,32 @@ Clip makeTextClip(ClipId id, Duration timelineStart, Duration duration,
     return clip;
 }
 
+// A project with a single, otherwise-empty CAPTION track (usable-editor task
+// 13; Requirement 10), mirroring makeProjectWithOneTextTrack exactly.
+Project makeProjectWithOneCaptionTrack(Uuid& trackIdOut) {
+    Project project;
+    project.id = Uuid::generateV4();
+    project.name = "test";
+    Track track;
+    track.id = Uuid::generateV4();
+    track.kind = TrackKind::Caption;
+    trackIdOut = track.id;
+    project.tracks.push_back(std::move(track));
+    return project;
+}
+
+// A caption cue: no assetRef, timing like any other clip, and a plain
+// captionText — no styling, mirroring makeTextClip exactly minus the style.
+Clip makeCaptionCue(ClipId id, Duration timelineStart, Duration duration, std::string text) {
+    Clip clip;
+    clip.id = id;
+    clip.timelineStart = timelineStart;
+    clip.sourceIn = Duration::zero();
+    clip.sourceOut = duration;
+    clip.captionText = std::move(text);
+    return clip;
+}
+
 constexpr Duration ms(std::int64_t v) { return Duration::fromMilliseconds(v); }
 
 // --- AddClipCommand --------------------------------------------------------
@@ -1545,6 +1571,215 @@ TEST(ProjectValidation, RejectsATextClipWhoseStyleIsNotInternallyWellFormed) {
     const ClipId clipId = Uuid::generateV4();
     Clip clip = makeTextClip(clipId, ms(0), ms(1000), "Title");
     clip.textStyle->colorR = 2.5;  // outside [0,1]
+    project.tracks[0].clips.push_back(std::move(clip));
+
+    const Result<void> result = validateProject(project);
+    EXPECT_FALSE(result.isOk());
+}
+
+// ---------------------------------------------------------------------------
+// Captions and transcription (usable-editor task 13; Requirement 10)
+// ---------------------------------------------------------------------------
+
+TEST(AddClipCommand, PlacesACaptionCueWithoutRegisteringAnyAsset) {
+    Uuid trackId;
+    TimelineEngine engine(makeProjectWithOneCaptionTrack(trackId));
+
+    const ClipId clipId = Uuid::generateV4();
+    ASSERT_TRUE(engine.apply(std::make_unique<AddClipCommand>(
+                                 trackId, makeCaptionCue(clipId, ms(0), ms(2000), "Hello")))
+                    .changed());
+
+    const Project snap = engine.snapshot();
+    ASSERT_EQ(snap.tracks[0].clips.size(), 1u);
+    const Clip& clip = snap.tracks[0].clips[0];
+    EXPECT_TRUE(clip.isCaptionCue());
+    EXPECT_EQ(*clip.captionText, "Hello");
+    EXPECT_FALSE(clip.assetRef.isValid());
+    EXPECT_TRUE(snap.assets.empty());
+}
+
+TEST(SetCaptionTextCommand, ChangesTheStringAndUndoRestoresIt) {
+    Uuid trackId;
+    Project project = makeProjectWithOneCaptionTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeCaptionCue(clipId, ms(0), ms(1000), "Original"));
+    TimelineEngine engine(std::move(project));
+
+    ASSERT_TRUE(engine.apply(std::make_unique<SetCaptionTextCommand>(clipId, "Changed"))
+                    .changed());
+    EXPECT_EQ(*engine.snapshot().tracks[0].clips[0].captionText, "Changed");
+
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_EQ(*engine.snapshot().tracks[0].clips[0].captionText, "Original");
+}
+
+TEST(SetCaptionTextCommand, RefusesAnEmptyString) {
+    Uuid trackId;
+    Project project = makeProjectWithOneCaptionTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeCaptionCue(clipId, ms(0), ms(1000), "Original"));
+    TimelineEngine engine(std::move(project));
+
+    const CommandResult result = engine.apply(std::make_unique<SetCaptionTextCommand>(clipId, ""));
+    EXPECT_FALSE(result.changed());
+    EXPECT_EQ(*engine.snapshot().tracks[0].clips[0].captionText, "Original");
+    EXPECT_FALSE(engine.canUndo());
+}
+
+TEST(SetCaptionTextCommand, RefusesAClipThatIsNotACaptionCue) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeClip(clipId, ms(0), ms(0), ms(1000)));
+    TimelineEngine engine(std::move(project));
+
+    const CommandResult result =
+        engine.apply(std::make_unique<SetCaptionTextCommand>(clipId, "New text"));
+    EXPECT_FALSE(result.changed());
+    EXPECT_FALSE(engine.canUndo());
+}
+
+// Requirement 10.2: "retime" changes timelineStart and/or duration together in
+// ONE undoable edit — mirroring SetTextStyleCommand's own optional-field
+// pattern, but over the two timing fields RetimeCaptionCueCommand owns.
+TEST(RetimeCaptionCueCommand, ChangesBothFieldsTogetherAndUndoRestoresThem) {
+    Uuid trackId;
+    Project project = makeProjectWithOneCaptionTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeCaptionCue(clipId, ms(0), ms(1000), "Hello"));
+    TimelineEngine engine(std::move(project));
+
+    ASSERT_TRUE(engine.apply(std::make_unique<RetimeCaptionCueCommand>(clipId, ms(2000), ms(500)))
+                    .changed());
+
+    const Clip& after = engine.snapshot().tracks[0].clips[0];
+    EXPECT_EQ(after.timelineStart, ms(2000));
+    EXPECT_EQ(after.duration(), ms(500));
+    EXPECT_EQ(*after.captionText, "Hello");  // retiming touched nothing else
+
+    ASSERT_TRUE(engine.undo().changed());
+    const Clip& restored = engine.snapshot().tracks[0].clips[0];
+    EXPECT_EQ(restored.timelineStart, ms(0));
+    EXPECT_EQ(restored.duration(), ms(1000));
+}
+
+TEST(RetimeCaptionCueCommand, ChangesOnlyTheSuppliedField) {
+    Uuid trackId;
+    Project project = makeProjectWithOneCaptionTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeCaptionCue(clipId, ms(1000), ms(500), "Hello"));
+    TimelineEngine engine(std::move(project));
+
+    // Only the start is supplied; duration must be left exactly as it was.
+    ASSERT_TRUE(
+        engine.apply(std::make_unique<RetimeCaptionCueCommand>(clipId, ms(3000), std::nullopt))
+            .changed());
+
+    const Clip& after = engine.snapshot().tracks[0].clips[0];
+    EXPECT_EQ(after.timelineStart, ms(3000));
+    EXPECT_EQ(after.duration(), ms(500));
+}
+
+TEST(RetimeCaptionCueCommand, RefusesAMoveThatWouldOverlapAnotherCueOnTheSameTrack) {
+    Uuid trackId;
+    Project project = makeProjectWithOneCaptionTrack(trackId);
+    const ClipId firstId = Uuid::generateV4();
+    const ClipId secondId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeCaptionCue(firstId, ms(0), ms(1000), "First"));
+    project.tracks[0].clips.push_back(makeCaptionCue(secondId, ms(2000), ms(1000), "Second"));
+    TimelineEngine engine(std::move(project));
+
+    // Moving "Second" to overlap "First" must be refused and leave both cues
+    // exactly where they were (mirroring MoveClipCommand's own overlap rule).
+    const CommandResult result =
+        engine.apply(std::make_unique<RetimeCaptionCueCommand>(secondId, ms(500), std::nullopt));
+    EXPECT_FALSE(result.changed());
+    EXPECT_EQ(engine.snapshot().tracks[0].clips.size(), 2u);
+    EXPECT_FALSE(engine.canUndo());
+}
+
+TEST(RetimeCaptionCueCommand, RefusesAClipThatIsNotACaptionCue) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeClip(clipId, ms(0), ms(0), ms(1000)));
+    TimelineEngine engine(std::move(project));
+
+    const CommandResult result =
+        engine.apply(std::make_unique<RetimeCaptionCueCommand>(clipId, ms(500), std::nullopt));
+    EXPECT_FALSE(result.changed());
+    EXPECT_FALSE(engine.canUndo());
+}
+
+// Requirement 10.1's round-trip half at the domain level: a caption cue's own
+// existing operations already work through the identical commands every other
+// clip uses, since a caption cue is just a Clip whose captionText happens to
+// be set. Removing one via DeleteClipCommand is what timeline.remove_caption_cue
+// reuses directly.
+TEST(DeleteClipCommand, RemovesACaptionCueThroughTheIdenticalCommandEveryOtherClipUses) {
+    Uuid trackId;
+    Project project = makeProjectWithOneCaptionTrack(trackId);
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeCaptionCue(clipId, ms(0), ms(1000), "Hello"));
+    TimelineEngine engine(std::move(project));
+
+    ASSERT_TRUE(engine.apply(std::make_unique<DeleteClipCommand>(clipId)).changed());
+    EXPECT_TRUE(engine.snapshot().tracks[0].clips.empty());
+
+    ASSERT_TRUE(engine.undo().changed());
+    ASSERT_EQ(engine.snapshot().tracks[0].clips.size(), 1u);
+    EXPECT_EQ(*engine.snapshot().tracks[0].clips[0].captionText, "Hello");
+}
+
+TEST(ProjectValidation, ACaptionCueIsExemptFromAssetResolutionAndPassesWithNoAssetsAtAll) {
+    Uuid trackId;
+    Project project = makeProjectWithOneCaptionTrack(trackId);
+    project.timelineFps = FrameRate::fps30();
+    project.canvas = Resolution::hd1080();
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeCaptionCue(clipId, ms(0), ms(1000), "Hello"));
+
+    ASSERT_TRUE(project.assets.empty());
+    EXPECT_TRUE(validateProject(project).isOk());
+}
+
+TEST(ProjectValidation, RejectsACaptionCueOnAVideoTrack) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);  // TrackKind::Video
+    project.timelineFps = FrameRate::fps30();
+    project.canvas = Resolution::hd1080();
+    const ClipId clipId = Uuid::generateV4();
+    project.tracks[0].clips.push_back(makeCaptionCue(clipId, ms(0), ms(1000), "Hello"));
+
+    const Result<void> result = validateProject(project);
+    EXPECT_FALSE(result.isOk());
+}
+
+TEST(ProjectValidation, RejectsAMediaClipOnACaptionTrack) {
+    Uuid trackId;
+    Project project = makeProjectWithOneCaptionTrack(trackId);
+    project.timelineFps = FrameRate::fps30();
+    project.canvas = Resolution::hd1080();
+    const ClipId clipId = Uuid::generateV4();
+    MediaAssetRef asset(Uuid::generateV4(), "mem://asset");
+    project.assets.push_back(asset);
+    Clip clip = makeClip(clipId, ms(0), ms(0), ms(1000));
+    clip.assetRef = asset;
+    project.tracks[0].clips.push_back(std::move(clip));
+
+    const Result<void> result = validateProject(project);
+    EXPECT_FALSE(result.isOk());
+}
+
+TEST(ProjectValidation, RejectsACaptionCueWithEmptyText) {
+    Uuid trackId;
+    Project project = makeProjectWithOneCaptionTrack(trackId);
+    project.timelineFps = FrameRate::fps30();
+    project.canvas = Resolution::hd1080();
+    const ClipId clipId = Uuid::generateV4();
+    Clip clip = makeCaptionCue(clipId, ms(0), ms(1000), "Hello");
+    clip.captionText = "";  // present but empty — must be rejected
     project.tracks[0].clips.push_back(std::move(clip));
 
     const Result<void> result = validateProject(project);

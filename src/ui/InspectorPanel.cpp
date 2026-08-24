@@ -123,6 +123,8 @@ void InspectorPanel::rebuild() {
     textContentEdit_ = nullptr;
     textPointSizeSpin_ = nullptr;
     textAlignmentCombo_ = nullptr;
+    captionContainer_ = nullptr;
+    captionTextEdit_ = nullptr;
 
     const std::optional<ClipInspectorView> view = model_.selectedClip();
     if (!view) {
@@ -216,6 +218,26 @@ void InspectorPanel::rebuild() {
         textForm->addRow(QStringLiteral("Alignment"), textAlignmentCombo_);
 
         rootLayout_->addWidget(textContainer_);
+    }
+
+    // --- Captions and transcription (usable-editor task 13; Requirement 10.2)
+    // Present only while the selected clip carries a captionText — no styling
+    // controls, since a caption cue carries none of its own.
+    if (view->captionText.has_value()) {
+        captionContainer_ = new QWidget(this);
+        auto* captionForm = new QFormLayout(captionContainer_);
+        captionForm->addRow(new QLabel(QStringLiteral("Caption"), captionContainer_));
+
+        captionTextEdit_ = new QLineEdit(captionContainer_);
+        captionTextEdit_->setText(QString::fromStdString(*view->captionText));
+        QObject::connect(captionTextEdit_, &QLineEdit::editingFinished, this, [this] {
+            if (captionTextEdit_ != nullptr) {
+                (void)model_.setCaptionText(captionTextEdit_->text().toStdString());
+            }
+        });
+        captionForm->addRow(QStringLiteral("Text"), captionTextEdit_);
+
+        rootLayout_->addWidget(captionContainer_);
     }
 
     // --- Effect chain ------------------------------------------------------

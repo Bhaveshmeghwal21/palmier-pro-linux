@@ -184,6 +184,11 @@ std::optional<ClipInspectorView> InspectorViewModel::selectedClip() const {
         tv.y = clip->textStyle->y;
         view.textStyle = std::move(tv);
     }
+
+    // Requirement 10.2: the Inspector's caption-cue editing surface reads this.
+    if (clip->captionText.has_value()) {
+        view.captionText = *clip->captionText;
+    }
     return view;
 }
 
@@ -314,6 +319,29 @@ CommandResult InspectorViewModel::setTextStyle(
     }
     return engine_.apply(std::make_unique<SetTextStyleCommand>(
         *selected_, fontFamily, pointSize, colorR, colorG, colorB, colorA, alignment, x, y));
+}
+
+CommandResult InspectorViewModel::setCaptionText(std::string text) {
+    if (!selected_) {
+        return CommandResult::failed(failedPrecondition("Inspector: no clip is selected"));
+    }
+    if (gateway_ != nullptr) {
+        return toCommandResult(gateway_->setCaptionText(*selected_, text));
+    }
+    return engine_.apply(std::make_unique<SetCaptionTextCommand>(*selected_, std::move(text)));
+}
+
+CommandResult InspectorViewModel::retimeCaptionCue(std::optional<Duration> newTimelineStart,
+                                                   std::optional<Duration> newDuration) {
+    if (!selected_) {
+        return CommandResult::failed(failedPrecondition("Inspector: no clip is selected"));
+    }
+    if (gateway_ != nullptr) {
+        return toCommandResult(
+            gateway_->retimeCaptionCue(*selected_, newTimelineStart, newDuration));
+    }
+    return engine_.apply(std::make_unique<RetimeCaptionCueCommand>(*selected_, newTimelineStart,
+                                                                   newDuration));
 }
 
 void InspectorViewModel::setOnChanged(std::function<void()> callback) {

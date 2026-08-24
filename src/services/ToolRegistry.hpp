@@ -149,6 +149,16 @@ struct ToolRegistryHooks {
     Tool::Handler saveProject;    ///< `project.save`  (Requirements 4.1, 4.4).
     Tool::Handler projectInfo;    ///< `project.info`  (Requirement 3.7).
     Tool::Handler listMedia;      ///< `media.list`.
+
+    /// Handles `timeline.transcribe_to_captions` (usable-editor task 13;
+    /// Requirement 10.4): transcribe a clip's audio and place the resulting
+    /// segments as caption cues on a caption track. Typically an adapter over
+    /// `services::TranscriptionService::transcribe`. Empty ⇒ the tool reports
+    /// Unsupported ("no recognizer backend is configured") — the Requirement
+    /// 10.5 precondition, reported by name, that leaves hand-authored caption
+    /// editing (the other three caption tools, none of which need this hook)
+    /// unaffected.
+    Tool::Handler transcribeToCaptions;
 };
 
 // ---------------------------------------------------------------------------

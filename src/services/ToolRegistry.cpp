@@ -77,6 +77,12 @@ constexpr const char* kAddTransition  = "timeline.add_transition";
 constexpr const char* kAddTextClip      = "timeline.add_text_clip";
 constexpr const char* kSetTextContent   = "timeline.set_text_content";
 constexpr const char* kSetTextStyle     = "timeline.set_text_style";
+// Captions and transcription (usable-editor Phase 4 task 13; Requirement 10).
+constexpr const char* kAddCaptionCue      = "timeline.add_caption_cue";
+constexpr const char* kSetCaptionText     = "timeline.set_caption_text";
+constexpr const char* kRetimeCaptionCue   = "timeline.retime_caption_cue";
+constexpr const char* kRemoveCaptionCue   = "timeline.remove_caption_cue";
+constexpr const char* kTranscribeToCaptions = "timeline.transcribe_to_captions";
 constexpr const char* kGenerate       = "generation.generate";
 constexpr const char* kListModels     = "generation.list_models";
 constexpr const char* kExport         = "timeline.export";
@@ -214,18 +220,20 @@ std::optional<TransitionKind> parseTransitionKind(std::string_view s) {
 
 std::string_view trackKindName(TrackKind kind) {
     switch (kind) {
-        case TrackKind::Audio: return "audio";
-        case TrackKind::Text:  return "text";
-        case TrackKind::Video: return "video";
+        case TrackKind::Audio:   return "audio";
+        case TrackKind::Text:    return "text";
+        case TrackKind::Caption: return "caption";
+        case TrackKind::Video:   return "video";
     }
     return "video";
 }
 
 /// The accepted `kind` values of the track tools, declared once so the published
 /// enum and `parseTrackKind`'s accepted set are one list (Requirements 3.3, 3.8;
-/// `text` added by usable-editor task 12, Requirement 9).
+/// `text` added by usable-editor task 12, Requirement 9; `caption` by task 13,
+/// Requirement 10).
 const std::vector<std::string>& trackKindValues() {
-    static const std::vector<std::string> values = {"video", "audio", "text"};
+    static const std::vector<std::string> values = {"video", "audio", "text", "caption"};
     return values;
 }
 
@@ -233,6 +241,7 @@ std::optional<TrackKind> parseTrackKind(std::string_view s) {
     if (s == "video") return TrackKind::Video;
     if (s == "audio") return TrackKind::Audio;
     if (s == "text") return TrackKind::Text;
+    if (s == "caption") return TrackKind::Caption;
     return std::nullopt;
 }
 
@@ -1369,6 +1378,161 @@ Tool makeSetTextStyleTool(ProjectSession* session) {
     return t;
 }
 
+// ---------------------------------------------------------------------------
+// Captions and transcription (usable-editor task 13; Requirement 10).
+//
+// Creating a caption cue publishes as its own tool (kAddCaptionCue), for the
+// identical reason timeline.add_text_clip does (task 12): the shape barely
+// overlaps timeline.add_clip's (no assetId/sourcePath at all), and this
+// handler simply constructs a Clip whose captionText is populated and whose
+// assetRef is left at its default value, which AddClipCommand's own
+// asset-registration step already skips.
+// ---------------------------------------------------------------------------
+
+Tool makeAddCaptionCueTool(ProjectSession* session) {
+    Tool t;
+    t.name = kAddCaptionCue;
+    t.description = "Add a caption cue onto a caption track at a timeline position.";
+    t.schema
+        .arg(uuidArg("trackId", true, "UUID of the target CAPTION track."))
+        .arg(uuidArg("clipId", false, "Optional explicit clip UUID; generated when omitted."))
+        .arg(intArg("timelineStartNs", false, "Timeline start position in nanoseconds.", 0))
+        .arg(intArg("durationNs", true, "On-screen duration in nanoseconds (> 0).", 1))
+        .arg(stringArg("text", true, "The cue's caption text."));
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kAddCaptionCue));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> trackId = requireUuid(in, "trackId");
+        if (trackId.isError()) return err<Json>(std::move(trackId).error());
+        Result<std::int64_t> durationNs = requireInt(in, "durationNs");
+        if (durationNs.isError()) return err<Json>(std::move(durationNs).error());
+        if (durationNs.value() <= 0) {
+            return err<Json>(invalidArgument("durationNs must be > 0"));
+        }
+        Result<std::string> text = requireString(in, "text");
+        if (text.isError()) return err<Json>(std::move(text).error());
+        if (text.value().empty()) {
+            return err<Json>(invalidArgument("text must not be empty"));
+        }
+
+        Clip clip;
+        if (const Json* cid = in.find("clipId"); cid != nullptr && cid->isString()) {
+            std::optional<Uuid> parsed = Uuid::parse(cid->asString());
+            if (!parsed) return err<Json>(invalidArgument("field 'clipId' is not a valid UUID"));
+            clip.id = *parsed;
+        } else {
+            clip.id = Uuid::generateV4();
+        }
+        clip.timelineStart = Duration::fromNanoseconds(in.intOr("timelineStartNs", 0));
+        clip.sourceIn = Duration::zero();
+        clip.sourceOut = Duration::fromNanoseconds(durationNs.value());
+        clip.captionText = text.value();
+
+        Json out = Json::object();
+        out.set("clipId", clip.id.toString());
+        return applyCommand(engine, std::make_unique<AddClipCommand>(trackId.value(),
+                                                                     std::move(clip)),
+                            std::move(out));
+    };
+    return t;
+}
+
+Tool makeSetCaptionTextTool(ProjectSession* session) {
+    Tool t;
+    t.name = kSetCaptionText;
+    t.description = "Change a caption cue's displayed text.";
+    t.schema
+        .arg(uuidArg("clipId", true, "UUID of the caption cue."))
+        .arg(stringArg("text", true, "The new caption text."));
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kSetCaptionText));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> clipId = requireUuid(in, "clipId");
+        if (clipId.isError()) return err<Json>(std::move(clipId).error());
+        Result<std::string> text = requireString(in, "text");
+        if (text.isError()) return err<Json>(std::move(text).error());
+        Json out = Json::object();
+        out.set("clipId", clipId.value().toString());
+        return applyCommand(
+            engine, std::make_unique<SetCaptionTextCommand>(clipId.value(), text.value()),
+            std::move(out));
+    };
+    return t;
+}
+
+Tool makeRetimeCaptionCueTool(ProjectSession* session) {
+    Tool t;
+    t.name = kRetimeCaptionCue;
+    t.description = "Change a caption cue's start position and/or duration. At least one of "
+                    "timelineStartNs or durationNs must be given.";
+    // NOT expressible: "at least one of timelineStartNs/durationNs must be
+    // given" is a cross-field relation, the same Class 1 gap
+    // project.set_settings's own three-field version already occupies.
+    t.schema
+        .arg(uuidArg("clipId", true, "UUID of the caption cue."))
+        .arg(intArg("timelineStartNs", false, "New timeline start position in nanoseconds.", 0))
+        .arg(intArg("durationNs", false, "New on-screen duration in nanoseconds (> 0).", 1));
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kRetimeCaptionCue));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> clipId = requireUuid(in, "clipId");
+        if (clipId.isError()) return err<Json>(std::move(clipId).error());
+
+        const bool hasStart = in.find("timelineStartNs") != nullptr;
+        const bool hasDuration = in.find("durationNs") != nullptr;
+        if (!hasStart && !hasDuration) {
+            return err<Json>(invalidArgument(
+                "timeline.retime_caption_cue: at least one of timelineStartNs or durationNs "
+                "must be given"));
+        }
+
+        std::optional<Duration> newStart;
+        if (hasStart) {
+            Result<std::int64_t> startNs = requireInt(in, "timelineStartNs");
+            if (startNs.isError()) return err<Json>(std::move(startNs).error());
+            newStart = Duration::fromNanoseconds(startNs.value());
+        }
+        std::optional<Duration> newDuration;
+        if (hasDuration) {
+            Result<std::int64_t> durationNs = requireInt(in, "durationNs");
+            if (durationNs.isError()) return err<Json>(std::move(durationNs).error());
+            if (durationNs.value() <= 0) {
+                return err<Json>(invalidArgument("durationNs must be > 0"));
+            }
+            newDuration = Duration::fromNanoseconds(durationNs.value());
+        }
+
+        Json out = Json::object();
+        out.set("clipId", clipId.value().toString());
+        return applyCommand(
+            engine,
+            std::make_unique<RetimeCaptionCueCommand>(clipId.value(), newStart, newDuration),
+            std::move(out));
+    };
+    return t;
+}
+
+Tool makeRemoveCaptionCueTool(ProjectSession* session) {
+    Tool t;
+    t.name = kRemoveCaptionCue;
+    t.description = "Remove a caption cue by id from whichever track holds it.";
+    // Reuses DeleteClipCommand directly: a caption cue is an ordinary Clip, and
+    // "remove it" needs no caption-specific behaviour beyond what removing any
+    // other clip already does.
+    t.schema.arg(uuidArg("clipId", true, "UUID of the caption cue to remove."));
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kRemoveCaptionCue));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> clipId = requireUuid(in, "clipId");
+        if (clipId.isError()) return err<Json>(std::move(clipId).error());
+        Json out = Json::object();
+        out.set("clipId", clipId.value().toString());
+        return applyCommand(engine, std::make_unique<DeleteClipCommand>(clipId.value()),
+                            std::move(out));
+    };
+    return t;
+}
+
 /// Wrap `handler` in the Requirement 3.5 guard: while no project is current the
 /// tool refuses with "no project is open" before `handler` can run. Used by every
 /// tool whose handler is not written inline (the hook-backed ones and the
@@ -1473,6 +1637,30 @@ Tool makeListModelsTool(ProjectSession* session, Tool::Handler hook) {
     t.handler = guardedHookHandler(
         session, kListModels, std::move(hook),
         "generation.list_models is not available: no model catalog is configured");
+    return t;
+}
+
+Tool makeTranscribeToCaptionsTool(ProjectSession* session, Tool::Handler hook) {
+    Tool t;
+    t.name = kTranscribeToCaptions;
+    t.description = "Transcribe a clip's audio and place the resulting segments as caption "
+                    "cues on a caption track (usable-editor task 13; Requirement 10.4).";
+    // NOT expressible: "the named source clip exists and has decodable audio" is
+    // a state-dependent rule the schema cannot see; the hook (an adapter over
+    // services::TranscriptionService::transcribe) reports it as NotFound / a
+    // Requirement 4.4-style "no audio found" indication.
+    t.schema
+        .arg(uuidArg("sourceClipId", true, "UUID of the clip whose audio is transcribed."))
+        .arg(uuidArg("captionTrackId", true, "UUID of the target CAPTION track the produced "
+                    "cues are placed on."));
+    // Requirement 10.5: absent the hook (no recognizer backend configured), this
+    // reports that precondition by name and leaves the project unchanged,
+    // without touching any of the OTHER three caption tools, none of which need
+    // this hook — hand-authored caption editing stays available either way.
+    t.handler = guardedHookHandler(
+        session, kTranscribeToCaptions, std::move(hook),
+        "timeline.transcribe_to_captions is not available: no recognizer backend is "
+        "configured");
     return t;
 }
 
@@ -2323,10 +2511,18 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(makeAddTextClipTool(session));
     registry.add(makeSetTextContentTool(session));
     registry.add(makeSetTextStyleTool(session));
+    // Captions and transcription sits right after text and titles
+    // (usable-editor task 13.2).
+    registry.add(makeAddCaptionCueTool(session));
+    registry.add(makeSetCaptionTextTool(session));
+    registry.add(makeRetimeCaptionCueTool(session));
+    registry.add(makeRemoveCaptionCueTool(session));
     registry.add(makeUndoTool(session));
     registry.add(makeRedoTool(session));
     registry.add(makeGenerateTool(session, std::move(hooks.generate)));
     registry.add(makeListModelsTool(session, std::move(hooks.listModels)));
+    registry.add(
+        makeTranscribeToCaptionsTool(session, std::move(hooks.transcribeToCaptions)));
     registry.add(makeExportTool(session, std::move(hooks.exportTimeline)));
     return registry;
 }

@@ -125,6 +125,7 @@ constexpr const char* kReorder  = "timeline.reorder_clips";
 constexpr const char* kReorderEffects = "timeline.reorder_effects";
 constexpr const char* kGenerate = "generation.generate";
 constexpr const char* kSetProjectSettings = "project.set_settings";
+constexpr const char* kRetimeCaptionCue = "timeline.retime_caption_cue";
 
 // ---------------------------------------------------------------------------
 // The `ArgSpec` type predicate, mirrored
@@ -597,6 +598,17 @@ enum class SharedRule { None, MissingRequired, WrongTypedRequired, OutOfEnumRequ
         if (args.contains("width") != args.contains("height")) {
             return "class 1: cross-field relation — width and height must be present "
                    "together";
+        }
+    }
+    if (tool.name == kRetimeCaptionCue) {
+        // Both arguments are individually optional, so an empty object is
+        // schema-valid on its own — but the handler additionally requires at
+        // least one of timelineStartNs/durationNs to be present, the same
+        // Class 1 shape project.set_settings's own "at least one of" rule above
+        // occupies.
+        if (!args.contains("timelineStartNs") && !args.contains("durationNs")) {
+            return "class 1: cross-field relation — at least one of timelineStartNs/"
+                   "durationNs must be present";
         }
     }
 

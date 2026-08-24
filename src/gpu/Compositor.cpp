@@ -260,6 +260,22 @@ void applyColorGrade(std::uint8_t* rgba, std::size_t pixels,
     }
 }
 
+/// Requirement 10.3's fixed default burn-in style: white text, bottom-centred,
+/// a size proportional to neither font metrics nor canvas — TextRasterizer's
+/// own point-size field is an absolute value, so a single documented default
+/// (24pt, matching TextStyle's own default) is used regardless of canvas
+/// resolution, exactly the same convention a text clip's own unstyled default
+/// already carries. Captions carry no styling of their own (Requirement 10
+/// asks for none), so nothing here is caller-configurable.
+[[nodiscard]] TextStyle captionCueStyle(const std::string& text) {
+    TextStyle style;
+    style.content = text;
+    style.alignment = TextAlignment::Center;
+    style.x = 0.5;
+    style.y = 0.9;  // bottom-centred, the standard subtitle placement.
+    return style;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -375,6 +391,27 @@ std::vector<Compositor::VisibleLayer> Compositor::gatherVisibleTextClips(const P
     return visible;
 }
 
+std::vector<Compositor::VisibleLayer> Compositor::gatherVisibleCaptionCues(const Project& project,
+                                                                           Duration position) {
+    std::vector<VisibleLayer> visible;
+    // Same z convention again (usable-editor task 13; Requirement 10): only
+    // non-muted CAPTION tracks contribute. A caption-track clip that somehow
+    // carries no captionText is skipped rather than rasterized as an empty cue
+    // — the identical defensive posture gatherVisibleTextClips takes for a
+    // text-track clip carrying no TextStyle.
+    for (std::size_t i = 0; i < project.tracks.size(); ++i) {
+        const Track& track = project.tracks[i];
+        if (track.kind != TrackKind::Caption || track.muted) continue;
+        if (const Clip* clip = clipAt(track, position);
+            clip != nullptr && clip->isCaptionCue()) {
+            visible.push_back(VisibleLayer{clip, i});
+        }
+    }
+    std::stable_sort(visible.begin(), visible.end(),
+                     [](const VisibleLayer& a, const VisibleLayer& b) { return a.z < b.z; });
+    return visible;
+}
+
 Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration position,
                                            const RenderTarget& target) {
     if (target.width == 0 || target.height == 0) {
@@ -386,32 +423,37 @@ Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration posi
             "Compositor::renderAt: only RGBA8 render targets are supported"));
     }
 
-    // Video and text layers are gathered separately (Requirement 9.4's title
-    // sits alongside a decoded video frame, but the two have nothing else in
-    // common — a ClipFrameProvider decodes one, a TextRasterizer rasterizes the
-    // other) and then merged into one z-ordered painter's-order sequence, so a
-    // title composites above or below any video track purely by its position in
-    // Project.tracks, exactly like today's multi-video-track compositing.
+    // Video, text and caption layers are gathered separately (each has nothing
+    // in common with the others' pixel source — a ClipFrameProvider decodes
+    // one, a TextRasterizer rasterizes the other two from two different styles)
+    // and then merged into one z-ordered painter's-order sequence, so a title
+    // or a burned-in caption composites above or below any video track purely
+    // by its position in Project.tracks, exactly like today's multi-video-track
+    // compositing.
     std::vector<VisibleLayer> layers = gatherVisibleClips(project, position);
     const std::vector<VisibleLayer> textLayers = gatherVisibleTextClips(project, position);
+    const std::vector<VisibleLayer> captionLayers = gatherVisibleCaptionCues(project, position);
     layers.insert(layers.end(), textLayers.begin(), textLayers.end());
+    layers.insert(layers.end(), captionLayers.begin(), captionLayers.end());
     std::stable_sort(layers.begin(), layers.end(),
                      [](const VisibleLayer& a, const VisibleLayer& b) { return a.z < b.z; });
 
     const bool anyVideoLayer =
-        std::any_of(layers.begin(), layers.end(),
-                    [](const VisibleLayer& l) { return !l.clip->isTextClip(); });
-    const bool anyTextLayer =
-        std::any_of(layers.begin(), layers.end(),
-                    [](const VisibleLayer& l) { return l.clip->isTextClip(); });
+        std::any_of(layers.begin(), layers.end(), [](const VisibleLayer& l) {
+            return !l.clip->isTextClip() && !l.clip->isCaptionCue();
+        });
+    const bool anyRasterizedLayer =
+        std::any_of(layers.begin(), layers.end(), [](const VisibleLayer& l) {
+            return l.clip->isTextClip() || l.clip->isCaptionCue();
+        });
     if (anyVideoLayer && !provider_) {
         return err<RenderedFrame>(failedPrecondition(
             "Compositor::renderAt: visible clips present but no frame provider is installed"));
     }
-    if (anyTextLayer && !textRasterizer_) {
+    if (anyRasterizedLayer && !textRasterizer_) {
         return err<RenderedFrame>(failedPrecondition(
-            "Compositor::renderAt: a visible text clip is present but no text rasterizer is "
-            "installed"));
+            "Compositor::renderAt: a visible text clip or caption cue is present but no text "
+            "rasterizer is installed"));
     }
 
     // Acquire the output frame from the pool (bounded by VRAM / host budget).
@@ -436,17 +478,23 @@ Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration posi
     // Painter's order: composite each visible clip onto the accumulated result.
     for (const VisibleLayer& layer : layers) {
         SourceFrame frame;
-        if (layer.clip->isTextClip()) {
-            // A text clip's "source frame" is a full-canvas rasterization of its
-            // TextStyle at the target's own resolution (Requirement 9.4: the
-            // text is placed by TextStyle's own normalized x/y, which needs the
-            // real canvas size to resolve — rasterizing at the clip's own
-            // geometry would need a second, separate placement step this avoids
-            // entirely). Per-clip effects still apply to a text layer exactly
-            // as they do to a video layer: nothing about applyEffectSoftware
+        if (layer.clip->isTextClip() || layer.clip->isCaptionCue()) {
+            // A text clip's or caption cue's "source frame" is a full-canvas
+            // rasterization of a TextStyle at the target's own resolution
+            // (Requirement 9.4/10.3: normalized x/y needs the real canvas size
+            // to resolve — rasterizing at the clip's own geometry would need a
+            // second, separate placement step this avoids entirely). A caption
+            // cue carries no TextStyle of its own (Requirement 10 asks for no
+            // per-cue styling), so one is synthesized from its plain text with
+            // the fixed default burn-in style — see captionCueStyle() below.
+            // Per-clip effects still apply to either kind of layer exactly as
+            // they do to a video layer: nothing about applyEffectSoftware
             // assumes decoded video pixels.
+            const TextStyle style =
+                layer.clip->isTextClip() ? *layer.clip->textStyle
+                                        : captionCueStyle(*layer.clip->captionText);
             Result<SourceFrame> textResult =
-                textRasterizer_(*layer.clip->textStyle, target.width, target.height);
+                textRasterizer_(style, target.width, target.height);
             if (textResult.isError()) {
                 return err<RenderedFrame>(std::move(textResult).error());
             }

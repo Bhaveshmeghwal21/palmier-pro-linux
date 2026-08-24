@@ -40,6 +40,7 @@
 #include "core/Resolution.hpp"
 #include "core/Result.hpp"
 #include "core/TimelineEngine.hpp"
+#include "core/EditCommands.hpp"
 #include "core/Uuid.hpp"
 
 #include "gpu/CodecBridge.hpp"
@@ -68,6 +69,7 @@
 #include "services/LocalizationManager.hpp"
 #include "services/McpServer.hpp"
 #include "services/McpToolExecutor.hpp"
+#include "services/TranscriptionService.hpp"
 #include "services/MentionResolver.hpp"
 #include "services/ProjectSaveService.hpp"
 #include "services/ProjectSession.hpp"
@@ -268,6 +270,90 @@ public:
 
         Json out = Json::object();
         out.set("providers", std::move(providers));
+        return out;
+    };
+}
+
+/// `timeline.transcribe_to_captions`'s hook (usable-editor task 13; Requirement
+/// 10.4): transcribe `sourceClipId`'s audio via the bound TranscriptionService
+/// and place the resulting segments as caption cues on `captionTrackId`, each
+/// cue placed through the identical AddClipCommand every caption cue already
+/// uses. `session` is the one ProjectSession every other hook already resolves
+/// its engine from.
+///
+/// Known limitation, documented rather than hidden: this build has no media
+/// probe wired into this seam, so TranscriptionAudioSource is derived directly
+/// from the source clip's own timeline duration and assumes audio is present
+/// (hasAudioTrack = true) — accurate for a genuinely audio-bearing clip, but
+/// not a substitute for the real audio-track detection a bundled recognizer
+/// would need. Since no real recognizer is bundled either (the backend this
+/// hook is bound to is always UnavailableTranscriptionBackend), the effective
+/// behaviour today is unconditionally Unsupported regardless of this
+/// approximation; wiring a real backend later should also wire real media
+/// probing into this seam at the same time.
+[[nodiscard]] services::Tool::Handler makeTranscribeToCaptionsHook(
+    services::TranscriptionService& transcription, services::ProjectSession& session) {
+    return [&transcription, &session](const services::Json& in) -> Result<services::Json> {
+        using namespace palmier::services;
+
+        const Json* sourceClipIdArg = in.find("sourceClipId");
+        if (sourceClipIdArg == nullptr || !sourceClipIdArg->isString()) {
+            return err<Json>(invalidArgument("missing or non-string field 'sourceClipId'"));
+        }
+        const std::optional<Uuid> sourceClipId = Uuid::parse(sourceClipIdArg->asString());
+        if (!sourceClipId.has_value()) {
+            return err<Json>(invalidArgument("field 'sourceClipId' is not a valid UUID"));
+        }
+        const Json* captionTrackIdArg = in.find("captionTrackId");
+        if (captionTrackIdArg == nullptr || !captionTrackIdArg->isString()) {
+            return err<Json>(invalidArgument("missing or non-string field 'captionTrackId'"));
+        }
+        const std::optional<Uuid> captionTrackId = Uuid::parse(captionTrackIdArg->asString());
+        if (!captionTrackId.has_value()) {
+            return err<Json>(invalidArgument("field 'captionTrackId' is not a valid UUID"));
+        }
+
+        TimelineEngine& engine = session.engine();
+        const std::optional<Clip> sourceClip = engine.clip(*sourceClipId);
+        if (!sourceClip.has_value()) {
+            return err<Json>(notFound("timeline.transcribe_to_captions: clip " +
+                                      sourceClipId->toString() + " not found"));
+        }
+
+        TranscriptionAudioSource source;
+        source.hasAudioTrack = true;  // see this function's own doc comment
+        source.duration = sourceClip->duration();
+
+        Result<Transcript> transcript = transcription.transcribe(*sourceClipId, source);
+        if (transcript.isError()) {
+            return err<Json>(std::move(transcript).error());
+        }
+
+        Json out = Json::object();
+        if (transcript.value().noAudioFound()) {
+            out.set("status", std::string{"no_audio_found"});
+            out.set("cuesAdded", static_cast<std::int64_t>(0));
+            return out;
+        }
+
+        std::int64_t cuesAdded = 0;
+        for (const TextSegment& segment : transcript.value().segments) {
+            Clip cue;
+            cue.id = Uuid::generateV4();
+            cue.timelineStart = Duration::fromMilliseconds(segment.startMs);
+            cue.sourceIn = Duration::zero();
+            cue.sourceOut = Duration::fromMilliseconds(segment.durationMs());
+            cue.captionText = segment.text;
+            const CommandResult placed = engine.apply(
+                std::make_unique<AddClipCommand>(*captionTrackId, std::move(cue)));
+            if (placed.isError()) {
+                return err<Json>(placed.error());
+            }
+            ++cuesAdded;
+        }
+
+        out.set("status", std::string{"transcribed"});
+        out.set("cuesAdded", cuesAdded);
         return out;
     };
 }
@@ -536,6 +622,15 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     genCoordinator_ = std::make_unique<services::GenerativeMediaCoordinator>(
         *genGate_, *genRunner_, session_->mediaLibrary(), *placer_, genCatalog_.get());
 
+    // Requirement 10.4: the Composition_Root constructs services::
+    // TranscriptionService unconditionally — no real recognizer backend is
+    // bundled in this build, so it is bound to the Unsupported-reporting stub
+    // (UnavailableTranscriptionBackend's own doc comment explains why the
+    // service is still genuinely constructed rather than simply omitted).
+    transcriptionBackend_ = std::make_unique<services::UnavailableTranscriptionBackend>();
+    transcriptionService_ =
+        std::make_unique<services::TranscriptionService>(*transcriptionBackend_);
+
     // --- Shared tool surface (UI == MCP == agent path; Property P4) --------
     // Three hooks, all bound to the single instances constructed above: the
     // generative coordinator, the Export_Coordinator (task 9.7) and the
@@ -551,6 +646,8 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     services::ToolRegistryHooks hooks;
     hooks.generate = makeGenerateHook(*genCoordinator_, selectedGenerativeBackend_);
     hooks.listModels = makeListModelsHook(*genCatalog_);
+    hooks.transcribeToCaptions =
+        makeTranscribeToCaptionsHook(*transcriptionService_, *session_);
     hooks.exportTimeline = services::makeExportToolHandler(*exportCoordinator_, *session_,
                                                            config.exportToolOptions);
     hooks.importMedia = [service = mediaImportService_.get()](const std::filesystem::path& path) {

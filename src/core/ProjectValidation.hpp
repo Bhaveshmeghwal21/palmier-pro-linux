@@ -14,15 +14,20 @@
 //   Clip    — sourceOut > sourceIn; opacity in [0, 1]; gain >= 0; a non-negative
 //             transitionIn duration when present; when textStyle is present
 //             (Requirement 9), its own fields are internally well-formed
-//             instead of assetRef resolving to an asset.
-//   Track   — every contained Clip is valid, and a clip's textStyle presence
-//             agrees with the track's own kind: a TEXT track's clips must all
-//             carry a TextStyle, and a clip carrying one must sit on a TEXT
-//             track (a text clip has nothing to decode/composite as a video
-//             layer, and a video/audio clip has no on-screen text to place).
+//             instead of assetRef resolving to an asset; when captionText is
+//             present (Requirement 10), it is non-empty, also instead of
+//             assetRef resolving to an asset.
+//   Track   — every contained Clip is valid, and a clip's textStyle/captionText
+//             presence agrees with the track's own kind: a TEXT track's clips
+//             must all carry a TextStyle, a CAPTION track's clips must all
+//             carry captionText, and a clip carrying either must sit on the
+//             matching track (a text clip has nothing to decode/composite as a
+//             video layer, a caption cue is neither, and a video/audio clip has
+//             no on-screen text or cue to place).
 //   Project — timelineFps > 0; canvas.width > 0 && canvas.height > 0; version is a
 //             known, supported schema version; every track is valid; and every
-//             non-text Clip.assetRef resolves to an entry in Project.assets.
+//             non-text, non-caption Clip.assetRef resolves to an entry in
+//             Project.assets.
 
 #ifndef PALMIER_CORE_PROJECTVALIDATION_HPP
 #define PALMIER_CORE_PROJECTVALIDATION_HPP
@@ -37,12 +42,13 @@ namespace palmier {
 /// Validate a clip's intrinsic rules (independent of any containing project):
 /// sourceOut > sourceIn, opacity in [0, 1], gain >= 0, a non-negative
 /// transitionIn duration when present, and — if textStyle is present
-/// (Requirement 9) — TextStyle::isValid().
+/// (Requirement 9) — TextStyle::isValid(), or — if captionText is present
+/// (Requirement 10) — that it is non-empty.
 [[nodiscard]] Result<void> validateClip(const Clip& clip);
 
 /// Validate a track: every contained clip is intrinsically valid, and every
-/// clip's textStyle presence agrees with the track's own kind (see the file
-/// header). Asset resolution is a project-level rule (see validateProject).
+/// clip's textStyle/captionText presence agrees with the track's own kind (see
+/// the file header). Asset resolution is a project-level rule (see validateProject).
 [[nodiscard]] Result<void> validateTrack(const Track& track);
 
 /// Validate an entire project against every data-model rule. Returns the first

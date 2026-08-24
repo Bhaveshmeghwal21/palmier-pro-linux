@@ -11,6 +11,7 @@
 add_library(palmier_services
     AuthenticationService.cpp
     ByokCredentialManager.cpp
+    CaptionExport.cpp
     GenerationModelCatalog.cpp
     GenerativeClient.cpp
     GenerativeMediaCoordinator.cpp

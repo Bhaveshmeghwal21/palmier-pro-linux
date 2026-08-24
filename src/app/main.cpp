@@ -48,6 +48,7 @@
 namespace {
 
 using palmier::app::AppSettings;
+using palmier::app::AppConfig;
 using palmier::app::ApplicationComposition;
 using palmier::app::CompatibilityReport;
 
@@ -150,8 +151,24 @@ int main(int argc, char** argv) {
     // construction, in which case the failure is reported and the editor shell
     // is never constructed or shown.
     std::unique_ptr<ApplicationComposition> compositionPtr;
+    // The text/caption rasterizer (usable-editor tasks 12/13; Requirements 9.5,
+    // 10.3) is constructed here, BEFORE the composition root, so its function
+    // can be handed to BOTH the export-local Compositor (via AppConfig's own
+    // exportOptions.textRasterizer, read once at construction) and the live
+    // preview Compositor (via the post-construction setTextRasterizer() call
+    // below) — the identical QtTextRasterizer instance either way, which is
+    // what makes Requirement 9.5's "export produces identical text to preview"
+    // literally true rather than merely intended. Declared at this scope so it
+    // outlives both composition and app.exec() below, by ordinary C++ scope
+    // rules — main() itself does not return until after both have finished.
+    // Not owned by ApplicationComposition, because QtTextRasterizer needs Qt
+    // and ApplicationComposition (src/app's own Qt-free composition root, see
+    // its own header comment) deliberately never touches Qt directly.
+    palmier::ui::QtTextRasterizer textRasterizer;
+    AppConfig config = settings.config();
+    config.exportOptions.textRasterizer = textRasterizer.asRasterizer();
     try {
-        compositionPtr = std::make_unique<ApplicationComposition>(settings.config());
+        compositionPtr = std::make_unique<ApplicationComposition>(std::move(config));
     } catch (const palmier::app::ComponentConstructionError& ex) {
         std::cerr << "palmier-pro: " << ex.what() << '\n';
         QMessageBox::critical(
@@ -186,22 +203,13 @@ int main(int argc, char** argv) {
     // that start() has evaluated the remote-access prerequisites too.
     reportStartupErrors(composition);
 
-    // Install the text rasterizer (usable-editor task 12; Requirement 9) on the
-    // single shared Compositor, exactly the way ApplicationComposition's own
-    // constructor installs the decoder-backed ClipFrameProvider on the same
-    // instance: one Compositor, used identically by the live preview and by
-    // export (ExportEngine calls the same renderAt()), so a text clip renders
-    // through the identical path either way and Requirement 9.5 ("export shows
-    // the text identically to the preview") holds by construction rather than
-    // needing a second implementation to keep in sync. Not owned by
-    // ApplicationComposition, because QtTextRasterizer needs Qt and
-    // ApplicationComposition (src/app's own Qt-free composition root, see its
-    // own header comment) deliberately never touches Qt directly — this is the
-    // one place PALMIER_HAVE_QT code installs something onto it from outside.
-    // A plain local, like every other object in this function: it must outlive
-    // window and app.exec() below, and it does, by ordinary C++ scope rules —
-    // main() itself does not return until after both have finished.
-    palmier::ui::QtTextRasterizer textRasterizer;
+    // Install the SAME text/caption rasterizer onto the live preview
+    // Compositor that was already handed to the export-local one via
+    // config.exportOptions.textRasterizer above — one QtTextRasterizer
+    // instance, used identically by preview and by every export
+    // (Requirements 9.5, 10.3), so a text clip or caption cue renders through
+    // the identical path either way rather than needing two implementations
+    // kept in sync.
     composition.compositor().setTextRasterizer(textRasterizer.asRasterizer());
 
     palmier::ui::MainWindow window(composition);

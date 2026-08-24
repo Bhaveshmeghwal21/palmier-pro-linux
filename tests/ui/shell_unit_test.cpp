@@ -334,10 +334,36 @@ TEST_F(ShellUnitTest, AddTextTrackActionAppendsATextTrackAndIsUndoable) {
     EXPECT_EQ(composition.timeline().snapshot().tracks.size(), tracksBefore);
 }
 
-// --- Placement (usable-editor Requirement 3) --------------------------------
-//
-// Prior to this, GuiToolGateway::addClip() and TimelineViewModel::addClip()
-// existed and were tested at the gateway/view-model level, but no widget ever
+// Usable-editor task 13; Requirement 10: a caption cue must sit on a caption
+// track, for the identical reason a text clip needs a text track — mirroring
+// AddTextTrackActionAppendsATextTrackAndIsUndoable exactly.
+TEST_F(ShellUnitTest, AddCaptionTrackActionAppendsACaptionTrackAndIsUndoable) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+
+    QMenu* editMenu = window.menuBar()->actions()[1]->menu();
+    QAction* addCaptionTrack = nullptr;
+    for (QAction* action : editMenu->actions()) {
+        if (action->text() == QStringLiteral("Add &Caption Track")) {
+            addCaptionTrack = action;
+            break;
+        }
+    }
+    ASSERT_NE(addCaptionTrack, nullptr);
+    ASSERT_TRUE(addCaptionTrack->isEnabled());
+
+    const std::size_t tracksBefore = composition.timeline().snapshot().tracks.size();
+    addCaptionTrack->trigger();
+    const Project afterAdd = composition.timeline().snapshot();
+    ASSERT_EQ(afterAdd.tracks.size(), tracksBefore + 1);
+    EXPECT_EQ(afterAdd.tracks.back().kind, TrackKind::Caption);
+
+    ASSERT_TRUE(composition.timeline().canUndo());
+    EXPECT_TRUE(composition.timeline().undo().changed());
+    EXPECT_EQ(composition.timeline().snapshot().tracks.size(), tracksBefore);
+}
+
+
 // called either, and MediaBrowserViewModel had no concept of a selected
 // library asset at all — Place at Playhead could not have existed as a GUI
 // gesture. These register an asset directly on the composition's MediaManager

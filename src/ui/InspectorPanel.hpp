@@ -72,6 +72,12 @@ private:
     QDoubleSpinBox* textPointSizeSpin_ = nullptr;
     QComboBox*      textAlignmentCombo_ = nullptr;
 
+    // Usable-editor task 13; Requirement 10.2: caption-cue editing, present only
+    // while the selected clip is a caption cue. No styling controls, since a
+    // caption cue carries none of its own.
+    QWidget*        captionContainer_ = nullptr;
+    QLineEdit*      captionTextEdit_ = nullptr;
+
     bool refreshing_ = false;  ///< Guards against feedback while repopulating.
 };
 

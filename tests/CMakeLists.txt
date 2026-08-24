@@ -2687,6 +2687,23 @@ palmier_register_test(palmier_services_export_coordinator_tests)
 
 
 
+# ---------------------------------------------------------------------------
+# Caption export tests (usable-editor task 13; Requirement 10.3's sidecar
+# export mode) — services::CaptionExport's two pure functions. No fixture, no
+# GPU, no FFmpeg, no Qt: renderSrt/projectHasCaptions read only a Project value,
+# so this target links Palmier::services (CaptionExport.cpp's own home) and
+# nothing else.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_caption_export_tests
+    services/caption_export_test.cpp)
+target_link_libraries(palmier_services_caption_export_tests PRIVATE
+    Palmier::services
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_caption_export_tests)
+
+
+
 
 
 # ---------------------------------------------------------------------------

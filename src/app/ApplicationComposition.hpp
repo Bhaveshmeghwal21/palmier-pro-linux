@@ -127,6 +127,8 @@ class McpToolExecutor;
 class IGenerationGate;
 class IGenerationRunner;
 class ITimelinePlacement;
+class ITranscriptionBackend;
+class TranscriptionService;
 }  // namespace palmier::services
 
 namespace palmier::app {
@@ -616,6 +618,15 @@ private:
     std::unique_ptr<services::ITimelinePlacement>          placer_;
     std::unique_ptr<services::GenerationModelCatalog>      genCatalog_;
     std::unique_ptr<services::GenerativeMediaCoordinator>  genCoordinator_;
+
+    // --- Captions and transcription (usable-editor task 13; Requirement 10) -
+    // No real recognizer backend is bundled in this build, so
+    // transcriptionBackend_ is always the Unsupported-reporting stub; the
+    // TranscriptionService itself is still genuinely constructed, satisfying
+    // Requirement 10.4 literally even without one (see
+    // UnavailableTranscriptionBackend's own doc comment).
+    std::unique_ptr<services::ITranscriptionBackend> transcriptionBackend_;
+    std::unique_ptr<services::TranscriptionService>  transcriptionService_;
 
     // --- Shared tool surface + MCP + agent --------------------------------
     std::unique_ptr<services::ToolRegistry>     toolRegistry_;

@@ -25,6 +25,15 @@
 //                     assetRef is simply unused. See TextStyle.hpp for why a
 //                     text clip is this — an ordinary Clip with one extra
 //                     optional field — rather than a parallel type.
+//   * captionText   — present iff this is a caption cue (usable-editor task 13;
+//                     Requirement 10): a plain string, with no styling of its
+//                     own (Requirement 10 asks for none). Such a clip must sit
+//                     on a TrackKind::Caption track, for the identical reason
+//                     a text clip must sit on a TrackKind::Text one, and is
+//                     equally exempt from the assetRef rule. A caption cue's
+//                     timelineStart/sourceIn/sourceOut are its cue timing —
+//                     Requirement 10.2's "retime" operation is exactly a
+//                     change to those two fields in one undoable edit.
 //
 // Validation rules (enforced in ProjectValidation): sourceOut > sourceIn, the clip
 // duration equals sourceOut - sourceIn, opacity in [0,1], gain >= 0, and — when
@@ -64,6 +73,7 @@ struct Clip {
     double                    gain = 1.0;    ///< Audio gain; unity = 1.0.
     double                    opacity = 1.0; ///< Video opacity in [0, 1].
     std::optional<TextStyle>  textStyle;     ///< Present iff this is a text clip.
+    std::optional<std::string> captionText;  ///< Present iff this is a caption cue.
 
     /// Duration occupied on the timeline: sourceOut - sourceIn.
     [[nodiscard]] Duration duration() const noexcept { return sourceOut - sourceIn; }
@@ -75,6 +85,10 @@ struct Clip {
     /// clip. A short, self-documenting alternative to spelling out
     /// `textStyle.has_value()` at every call site that needs to branch on it.
     [[nodiscard]] bool isTextClip() const noexcept { return textStyle.has_value(); }
+
+    /// True iff this clip is a caption cue (Requirement 10) rather than a media
+    /// clip.
+    [[nodiscard]] bool isCaptionCue() const noexcept { return captionText.has_value(); }
 };
 
 } // namespace palmier

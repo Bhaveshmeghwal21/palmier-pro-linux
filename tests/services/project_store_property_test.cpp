@@ -201,23 +201,55 @@ Clip drawTextClip() {
     return clip;
 }
 
+// Draw a caption cue (usable-editor task 13; Requirement 10): no assetRef, the
+// same timeline-position/duration shape as drawClip/drawTextClip, and a plain
+// non-empty captionText (ProjectValidation rejects an empty one) — mirroring
+// drawTextClip exactly minus the style, since Requirement 10 asks for none.
+Clip drawCaptionCue() {
+    Clip clip;
+    clip.id = drawUuid();
+
+    constexpr std::int64_t kMaxPosNs = 100'000LL * Duration::kTicksPerSecond;
+    constexpr std::int64_t kMaxLenNs = 3'600LL * Duration::kTicksPerSecond;
+    const std::int64_t lenNs = *rc::gen::inRange<std::int64_t>(1, kMaxLenNs + 1);
+    clip.timelineStart = drawDuration(kMaxPosNs);
+    clip.sourceIn = Duration::zero();
+    clip.sourceOut = Duration::fromNanoseconds(lenNs);
+
+    clip.gain = static_cast<double>(*rc::gen::inRange<int>(0, 1'000'001)) / 1'000.0;
+    clip.opacity = static_cast<double>(*rc::gen::inRange<int>(0, 1'000'001)) / 1'000'000.0;
+
+    // Non-empty: rc::gen::arbitrary<std::string>() can draw "", which
+    // ProjectValidation rejects for captionText, so a non-empty suffix is
+    // prepended to guarantee it — the string's OWN arbitrary content still
+    // varies freely, including embedded newlines/unicode/etc.
+    clip.captionText = "c" + *rc::gen::arbitrary<std::string>();
+    return clip;
+}
+
 Track drawTrack(const std::vector<MediaAssetRef>& assets) {
     Track track;
     track.id = drawUuid();
-    // Schema 1.2: "text" joins "video"/"audio" (usable-editor task 12;
-    // Requirement 9).
-    track.kind =
-        *rc::gen::element<TrackKind>(TrackKind::Video, TrackKind::Audio, TrackKind::Text);
+    // Schema 1.3: "caption" joins "video"/"audio"/"text" (usable-editor task
+    // 13; Requirement 10).
+    track.kind = *rc::gen::element<TrackKind>(TrackKind::Video, TrackKind::Audio,
+                                              TrackKind::Text, TrackKind::Caption);
     // Schema 1.1: an arbitrary label (including the empty default) must survive.
     track.name = *rc::gen::arbitrary<std::string>();
     track.muted = *rc::gen::arbitrary<bool>();
     track.locked = *rc::gen::arbitrary<bool>();
     const int clipCount = *rc::gen::inRange<int>(0, 6);
     for (int i = 0; i < clipCount; ++i) {
-        // A text track's clips must all carry a TextStyle (and no other track's
-        // clips may); ProjectValidation enforces this both ways.
-        track.clips.push_back(track.kind == TrackKind::Text ? drawTextClip()
-                                                            : drawClip(assets));
+        // A text track's clips must all carry a TextStyle, a caption track's
+        // clips must all carry captionText (and no other track's clips may
+        // carry either); ProjectValidation enforces this both ways.
+        if (track.kind == TrackKind::Text) {
+            track.clips.push_back(drawTextClip());
+        } else if (track.kind == TrackKind::Caption) {
+            track.clips.push_back(drawCaptionCue());
+        } else {
+            track.clips.push_back(drawClip(assets));
+        }
     }
     return track;
 }

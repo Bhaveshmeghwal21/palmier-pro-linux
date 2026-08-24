@@ -762,6 +762,73 @@ private:
     bool      captured_ = false;
 };
 
+// ===========================================================================
+// Captions and transcription (usable-editor task 13; Requirement 10)
+//
+// Creating a caption cue needs no new command either, for the identical reason
+// creating a text clip did not (task 12): it is an ordinary AddClipCommand
+// whose Clip carries a populated captionText and an unset (nil, "invalid")
+// assetRef. What captions need beyond placement is a way to change a cue's
+// text and to retime it — the two commands below.
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// SetCaptionTextCommand — change a caption cue's displayed string.
+// ---------------------------------------------------------------------------
+//
+// Refused, leaving the project unchanged, when the named clip does not exist,
+// is not a caption cue, or when the new text is empty (Requirement 10's own
+// "a caption cue has text" invariant, checked by TextStyle-analogous
+// well-formedness — see Clip::isCaptionCue()'s own doc comment).
+class SetCaptionTextCommand final : public EditCommand {
+public:
+    SetCaptionTextCommand(ClipId clipId, std::string text);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "SetCaptionText"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+private:
+    ClipId      clipId_;
+    std::string text_;
+    std::string prior_;      // captured on apply for an exact revert
+    bool        captured_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// RetimeCaptionCueCommand — change a caption cue's timing in one undoable edit.
+// ---------------------------------------------------------------------------
+//
+// Requirement 10.2's "retime" operation is a change to when a cue starts and/or
+// how long it lasts. Rather than requiring two separate calls — MoveClipCommand
+// for the start, TrimClipCommand for the duration — retiming sets timelineStart
+// and sourceOut (with sourceIn fixed at zero, exactly like a freshly-created
+// cue) together, so any combination of "move it", "lengthen it", "shorten it",
+// or both at once is the same single command and the same single Undo. Rejects
+// a non-positive resulting duration or a negative timelineStart, leaving the
+// project unchanged, and — like MoveClipCommand — rejects (and rolls back) a
+// destination that would overlap another cue on the same track.
+class RetimeCaptionCueCommand final : public EditCommand {
+public:
+    RetimeCaptionCueCommand(ClipId clipId, std::optional<Duration> newTimelineStart,
+                            std::optional<Duration> newDuration);
+
+    [[nodiscard]] std::string_view name() const noexcept override {
+        return "RetimeCaptionCue";
+    }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+private:
+    ClipId                  clipId_;
+    std::optional<Duration> newTimelineStart_;
+    std::optional<Duration> newDuration_;
+
+    Uuid              trackId_;
+    std::vector<Clip> priorClips_;  // captured on apply for an exact revert
+    bool              captured_ = false;
+};
+
 }  // namespace palmier
 
 #endif  // PALMIER_CORE_EDITCOMMANDS_HPP

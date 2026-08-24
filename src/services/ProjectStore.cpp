@@ -444,6 +444,9 @@ std::string_view trackKindKey(TrackKind k) {
         // build cannot round-trip a text track, so it must not silently accept
         // one (SchemaVersion.hpp's compatibility rule).
         case TrackKind::Text:  return "text";
+        // Schema 1.3 addition (usable-editor task 13; Requirement 10). Same
+        // cross-version behaviour as "text" above, one schema minor later.
+        case TrackKind::Caption: return "caption";
         case TrackKind::Video: return "video";
     }
     return "video";
@@ -453,6 +456,7 @@ std::optional<TrackKind> trackKindFromKey(std::string_view k) {
     if (k == "video") return TrackKind::Video;
     if (k == "audio") return TrackKind::Audio;
     if (k == "text") return TrackKind::Text;
+    if (k == "caption") return TrackKind::Caption;
     return std::nullopt;
 }
 
@@ -615,6 +619,15 @@ void writeClip(JsonWriter& w, const Clip& clip) {
     w.key("textStyle");
     if (clip.textStyle.has_value()) {
         writeTextStyle(w, *clip.textStyle);
+    } else {
+        w.valueNull();
+    }
+    // Schema 1.3 (Requirement 10). Present iff this is a caption cue. A plain
+    // string, unlike textStyle's nested object, since a caption cue carries no
+    // styling of its own (Requirement 10 asks for none).
+    w.key("captionText");
+    if (clip.captionText.has_value()) {
+        w.valueString(*clip.captionText);
     } else {
         w.valueNull();
     }
@@ -887,6 +900,13 @@ Clip readClip(const JsonValue& v) {
     if (const JsonValue* textStyle = v.find("textStyle");
         textStyle != nullptr && !textStyle->isNull()) {
         clip.textStyle = readTextStyle(*textStyle);
+    }
+    // Schema 1.3 (Requirement 10): the identical absent-or-null convention
+    // textStyle above already established, one schema minor later.
+    if (const JsonValue* captionText = v.find("captionText");
+        captionText != nullptr && !captionText->isNull()) {
+        if (!captionText->isString()) fail("clip.captionText must be a string");
+        clip.captionText = captionText->string;
     }
     return clip;
 }

@@ -28,9 +28,10 @@ namespace {
 
 QString kindToString(TrackKind kind) {
     switch (kind) {
-        case TrackKind::Audio: return QStringLiteral("audio");
-        case TrackKind::Text:  return QStringLiteral("text");
-        case TrackKind::Video: return QStringLiteral("video");
+        case TrackKind::Audio:   return QStringLiteral("audio");
+        case TrackKind::Text:    return QStringLiteral("text");
+        case TrackKind::Caption: return QStringLiteral("caption");
+        case TrackKind::Video:   return QStringLiteral("video");
     }
     return QStringLiteral("video");
 }
@@ -257,6 +258,10 @@ bool TimelineModel::addTrack(const QString& kind) {
         // TrackKind::Text track, so the GUI needs a way to create one, just
         // like the existing video/audio track-creation actions.
         parsed = TrackKind::Text;
+    } else if (kind == QStringLiteral("caption")) {
+        // Usable-editor task 13; Requirement 10: same reasoning, for a
+        // caption cue's TrackKind::Caption track.
+        parsed = TrackKind::Caption;
     } else {
         return false;
     }

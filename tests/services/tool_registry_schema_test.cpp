@@ -247,6 +247,23 @@ std::vector<ToolExpectation> expectedSurface() {
           {"alignment", "string", false},
           {"x", "number", false},
           {"y", "number", false}}},
+        // Captions and transcription (usable-editor task 13; Requirement 10).
+        // Argument order matches the schema declaration order in
+        // makeAddCaptionCueTool/makeSetCaptionTextTool/makeRetimeCaptionCueTool/
+        // makeRemoveCaptionCueTool exactly.
+        {"timeline.add_caption_cue",
+         {{"trackId", "string", true},
+          {"clipId", "string", false},
+          {"timelineStartNs", "integer", false},
+          {"durationNs", "integer", true},
+          {"text", "string", true}}},
+        {"timeline.set_caption_text",
+         {{"clipId", "string", true}, {"text", "string", true}}},
+        {"timeline.retime_caption_cue",
+         {{"clipId", "string", true},
+          {"timelineStartNs", "integer", false},
+          {"durationNs", "integer", false}}},
+        {"timeline.remove_caption_cue", {{"clipId", "string", true}}},
         {"generation.generate",
          {{"prompt", "string", true},
           {"model", "string", true},
@@ -264,6 +281,11 @@ std::vector<ToolExpectation> expectedSurface() {
         // usable-editor Phase 2 task 7 (PR 406) — the model catalog listing.
         // Takes no argument: the catalog is fixed, in-tree data.
         {"generation.list_models", {}},
+        // Usable-editor task 13; Requirement 10.4 — the audio-to-cues bridge over
+        // services::TranscriptionService. Argument order matches
+        // makeTranscribeToCaptionsTool's schema declaration exactly.
+        {"timeline.transcribe_to_captions",
+         {{"sourceClipId", "string", true}, {"captionTrackId", "string", true}}},
         // Task 9.7 — `timeline.export` is now wired to services::ExportCoordinator,
         // and Requirement 7.2 lists what a caller may ask for: "an output path,
         // container format, video codec, resolution, frame rate and bit rate".

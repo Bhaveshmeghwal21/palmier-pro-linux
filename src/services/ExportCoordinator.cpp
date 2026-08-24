@@ -34,6 +34,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -43,6 +45,7 @@
 #include "core/TimelineEngine.hpp" // timelineDuration()
 #include "media/AudioGraph.hpp"
 #include "media/DecoderClipFrameProvider.hpp"
+#include "services/CaptionExport.hpp"
 
 namespace palmier::services {
 
@@ -509,6 +512,19 @@ void ExportCoordinator::runExport(WorkerInput input) {
     // --- Export-local compositor and decoders (Requirement 7.2) ------------
     gpu::Compositor compositor(exportContext);
 
+    // Requirements 9.5, 10.3: install the SAME text/caption rasterizer the
+    // live preview compositor uses, so a text clip or caption cue burns in
+    // identically rather than merely being reachable through a second,
+    // separately-behaving renderer. Absent one (no text/caption track exists
+    // in this build's composition, or the caller genuinely configured none),
+    // an export with a visible text clip or caption cue fails with
+    // FailedPrecondition exactly like a visible video clip with no frame
+    // provider would — the same "reachable when configured" contract every
+    // other injectable seam in this options struct already follows.
+    if (options_.textRasterizer) {
+        compositor.setTextRasterizer(options_.textRasterizer);
+    }
+
     // The export-local decoder set: its own DecoderClipFrameProvider, its own
     // decoder cache, retiring through the shared teardown queue (whose whole
     // purpose is to absorb slow decoder destruction off the calling thread).
@@ -662,6 +678,35 @@ void ExportCoordinator::runExport(WorkerInput input) {
                   /*force=*/true);
 
     guard.commit(); // the output file is the deliverable.
+
+    // Requirement 10.3's sidecar export mode: unconditional whenever the
+    // exported snapshot carries at least one non-muted caption cue, run AFTER
+    // guard.commit() so a sidecar-write failure below can never cause the
+    // (already-succeeded) video output to be removed — the two are reported
+    // together but the video's own success is not retroactively undone by a
+    // problem writing a second, optional file. Same base name as the video
+    // output, ".srt" extension, sitting next to it — the burned-in layer
+    // (Compositor::gatherVisibleCaptionCues) and this text both derive their
+    // timing from the identical timelineStart/timelineEnd() fields, so the two
+    // outputs cannot disagree about when a cue is on screen.
+    if (projectHasCaptions(input.snapshot)) {
+        std::filesystem::path sidecarPath = outputPath;
+        sidecarPath.replace_extension(".srt");
+        std::ofstream sidecar(sidecarPath, std::ios::binary | std::ios::trunc);
+        if (sidecar) {
+            const std::string srt = renderSrt(input.snapshot);
+            sidecar.write(srt.data(), static_cast<std::streamsize>(srt.size()));
+            sidecar.close();
+            if (sidecar.good()) {
+                outcome.captionsSidecarPath = sidecarPath;
+            }
+        }
+        // A sidecar write failure is deliberately non-fatal to the export as a
+        // whole (the video output already exists and is correct): outcome
+        // .captionsSidecarPath simply stays empty, which a caller can observe
+        // and treat as "no sidecar was written" without the export itself
+        // having failed.
+    }
 
     QueuedOutcome queued;
     queued.succeeded = true;
@@ -973,6 +1018,12 @@ Json exportOutcomeToJson(const ExportOutcome& outcome) {
     // the project alone rather than assume it. Always false — the worker runs on a
     // value-copy snapshot and holds no session reference.
     out.set("projectModified", outcome.projectModified);
+    // Requirement 10.3: present iff a sidecar subtitle file was written
+    // alongside the video output (i.e. the exported project had at least one
+    // non-muted caption cue and the write succeeded); absent otherwise.
+    if (!outcome.captionsSidecarPath.empty()) {
+        out.set("captionsSidecarPath", outcome.captionsSidecarPath.string());
+    }
     return out;
 }
 

@@ -368,6 +368,28 @@ Project makeProjectWithTextClip(ClipId clipId) {
     return project;
 }
 
+// Usable-editor task 13; Requirement 10: a project with one CAPTION track
+// carrying one caption cue, mirroring makeProjectWithTextClip exactly minus
+// the style.
+Project makeProjectWithCaptionCue(ClipId clipId) {
+    Project project;
+    project.id = Uuid::generateV4();
+    project.name = "test";
+    project.timelineFps = FrameRate::fps24();
+    Track track;
+    track.id = Uuid::generateV4();
+    track.kind = TrackKind::Caption;
+    Clip clip;
+    clip.id = clipId;
+    clip.timelineStart = ms(0);
+    clip.sourceIn = Duration::zero();
+    clip.sourceOut = ms(1000);
+    clip.captionText = "Hello";
+    track.clips.push_back(std::move(clip));
+    project.tracks.push_back(std::move(track));
+    return project;
+}
+
 TEST(InspectorViewModel, ProjectionExposesTextStyleForATextClipAndNotForAMediaClip) {
     const ClipId textClip = Uuid::generateV4();
     TimelineEngine textEngine(makeProjectWithTextClip(textClip));
@@ -433,6 +455,66 @@ TEST(InspectorViewModel, SetTextContentAndSetTextStyleRejectAMediaClipSelection)
                      .setTextStyle(std::nullopt, 40.0, std::nullopt, std::nullopt, std::nullopt,
                                   std::nullopt, std::nullopt, std::nullopt, std::nullopt)
                      .changed());
+}
+
+// --- Captions and transcription (usable-editor task 13; Requirement 10) ----
+
+TEST(InspectorViewModel, ProjectionExposesCaptionTextForACaptionCueAndNotForAMediaClip) {
+    const ClipId captionCue = Uuid::generateV4();
+    TimelineEngine captionEngine(makeProjectWithCaptionCue(captionCue));
+    InspectorViewModel captionModel(captionEngine);
+    captionModel.selectClip(captionCue);
+
+    const std::optional<ClipInspectorView> captionView = captionModel.selectedClip();
+    ASSERT_TRUE(captionView.has_value());
+    ASSERT_TRUE(captionView->captionText.has_value());
+    EXPECT_EQ(*captionView->captionText, "Hello");
+
+    const ClipId mediaClip = Uuid::generateV4();
+    TimelineEngine mediaEngine(makeProjectWithClip(mediaClip));
+    InspectorViewModel mediaModel(mediaEngine);
+    mediaModel.selectClip(mediaClip);
+
+    const std::optional<ClipInspectorView> mediaView = mediaModel.selectedClip();
+    ASSERT_TRUE(mediaView.has_value());
+    EXPECT_FALSE(mediaView->captionText.has_value());
+}
+
+TEST(InspectorViewModel, SetCaptionTextChangesTheStringAndUndoesExactly) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithCaptionCue(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    ASSERT_TRUE(model.setCaptionText("Changed").changed());
+    EXPECT_EQ(*model.selectedClip()->captionText, "Changed");
+
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_EQ(*model.selectedClip()->captionText, "Hello");
+}
+
+TEST(InspectorViewModel, RetimeCaptionCueChangesOnlySuppliedField) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithCaptionCue(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    ASSERT_TRUE(model.retimeCaptionCue(ms(5000), std::nullopt).changed());
+
+    const std::optional<ClipInspectorView> view = model.selectedClip();
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->timelineStart, ms(5000));
+    EXPECT_EQ(view->duration, ms(1000));  // untouched
+}
+
+TEST(InspectorViewModel, SetCaptionTextAndRetimeCaptionCueRejectAMediaClipSelection) {
+    const ClipId clip = Uuid::generateV4();
+    TimelineEngine engine(makeProjectWithClip(clip));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    EXPECT_FALSE(model.setCaptionText("Anything").changed());
+    EXPECT_FALSE(model.retimeCaptionCue(ms(5000), std::nullopt).changed());
 }
 
 // --- Change notification ---------------------------------------------------

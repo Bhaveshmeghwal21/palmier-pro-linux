@@ -188,6 +188,12 @@ struct ExportOutcome {
     /// The session revision when the snapshot was taken, so a caller can attribute
     /// any later revision change to its own edits rather than to the export.
     std::uint64_t         projectRevisionAtStart{0};
+    /// The sidecar subtitle file's path, set iff the exported project had at
+    /// least one non-muted caption cue (Requirement 10.3's second export mode,
+    /// alongside burn-in — the two are unconditional and always run together
+    /// whenever there is a caption to export). Empty when the project carried
+    /// no captions, in which case no sidecar file is written at all.
+    std::filesystem::path captionsSidecarPath{};
 };
 
 // ---------------------------------------------------------------------------
@@ -238,6 +244,17 @@ struct ExportCoordinatorOptions {
     /// The decode backend the export-local decoders open through. Empty → the
     /// FFmpeg factory.
     media::DecodeBackendFactory decodeFactory{};
+
+    /// The text/caption rasterizer the export-local Compositor renders text
+    /// clips and caption cues through (usable-editor tasks 12/13; Requirements
+    /// 9.5, 10.3). Empty → no rasterizer is installed at all, so an export of a
+    /// project with a visible text clip or caption cue fails with
+    /// FailedPrecondition, exactly like an export with a visible video clip and
+    /// no frame provider would. The composition root binds this to the SAME
+    /// `ui::QtTextRasterizer` instance installed on the live preview
+    /// compositor, which is what makes Requirement 9.5's "export produces
+    /// identical text to preview" literally true: one rasterizer, not two.
+    gpu::TextRasterizer textRasterizer{};
 
     /// Builds the EXPORT-LOCAL GPU context on the worker. Empty → the software
     /// fallback when the live context is the software fallback, otherwise a fresh

@@ -22,7 +22,7 @@
 //
 //   {
 //     "format": "palmier-project",   // magic string; identifies the document kind
-//     "version": "1.2",              // SchemaVersion (major.minor) the doc was written at
+//     "version": "1.3",              // SchemaVersion (major.minor) the doc was written at
 //     "project": { ...Project... }   // the serialized Project (see below)
 //   }
 //
@@ -37,16 +37,18 @@
 //   assets      : [ MediaAssetRef, ... ]
 //   clipGroups  : [ ClipGroup, ... ]    (1.1; optional on read, default [])
 //
-//   Track       : { id, kind ("video"|"audio"|"text"), name, muted, locked,
-//                   clips: [Clip,...] }
+//   Track       : { id, kind ("video"|"audio"|"text"|"caption"), name, muted,
+//                   locked, clips: [Clip,...] }
 //                 (name is 1.1, optional on read, default ""; "text" as a kind
-//                 value is 1.2, Requirement 9)
+//                 value is 1.2, Requirement 9; "caption" is 1.3, Requirement 10)
 //   Clip        : { id, assetRef, timelineStart, sourceIn, sourceOut,
 //                   effects: [Effect,...], transitionIn: Transition|null,
-//                   gain, opacity, textStyle: TextStyle|null }
-//                 (textStyle is 1.2; absent entirely on a 1.1 document, or
-//                 present-but-null on a 1.2 document's own non-text clip — both
-//                 mean "not a text clip")
+//                   gain, opacity, textStyle: TextStyle|null,
+//                   captionText: string|null }
+//                 (textStyle is 1.2, captionText is 1.3; each is absent
+//                 entirely on an older document, or present-but-null on a
+//                 clip that is not that kind — both mean "not a text clip" /
+//                 "not a caption cue")
 //   Effect      : { id, type (stable key), parameters: { name: number, ... } }
 //   Transition  : { id, kind (stable key), duration }
 //   MediaAssetRef : { assetId: string, sourcePath: string }
@@ -86,6 +88,14 @@
 // track kind it does not recognise (trackKindFromKey returns std::nullopt,
 // which fails the whole read) — the same cross-version behaviour 1.1's own
 // additions established for a 1.0 reader, just triggered by a different field.
+//
+// Schema 1.3 addition (usable-editor task 13; Requirement 10)
+// ------------------------------------------------------------
+// 1.3 adds Clip::captionText and the "caption" TrackKind value it requires,
+// following the identical absent-or-null convention 1.2 established for
+// textStyle: a non-caption clip writes `"captionText": null`, a 1.2 reader
+// never sees the key at all, and a 1.2 build rejects a 1.3 document the
+// moment it meets a "caption" track kind it does not recognise.
 //
 // All Duration fields (timelineStart, sourceIn, sourceOut, transition duration)
 // are written as integer nanosecond tick counts, matching Duration's internal,

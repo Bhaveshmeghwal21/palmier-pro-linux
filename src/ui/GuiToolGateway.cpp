@@ -52,9 +52,10 @@ std::string_view transitionKindName(TransitionKind kind) noexcept {
 /// TrackKind -> the string the `add_track` tool declares (trackKindValues()).
 std::string_view trackKindName(TrackKind kind) noexcept {
     switch (kind) {
-        case TrackKind::Audio: return "audio";
-        case TrackKind::Text:  return "text";
-        case TrackKind::Video: return "video";
+        case TrackKind::Audio:   return "audio";
+        case TrackKind::Text:    return "text";
+        case TrackKind::Caption: return "caption";
+        case TrackKind::Video:   return "video";
     }
     return "video";
 }
@@ -267,6 +268,51 @@ Result<Json> GuiToolGateway::setTextStyle(ClipId clipId, std::optional<std::stri
     if (x) args.set("x", *x);
     if (y) args.set("y", *y);
     return executor_.executeTool("timeline.set_text_style", args, services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::addCaptionCue(Uuid trackId, Duration timelineStart,
+                                           Duration duration, const std::string& text) {
+    Json args = Json::object();
+    args.set("trackId", trackId.toString());
+    args.set("timelineStartNs", timelineStart.nanoseconds());
+    args.set("durationNs", duration.nanoseconds());
+    args.set("text", text);
+    return executor_.executeTool("timeline.add_caption_cue", args,
+                                 services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::setCaptionText(ClipId clipId, const std::string& text) {
+    Json args = Json::object();
+    args.set("clipId", clipId.toString());
+    args.set("text", text);
+    return executor_.executeTool("timeline.set_caption_text", args,
+                                 services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::retimeCaptionCue(ClipId clipId,
+                                              std::optional<Duration> newTimelineStart,
+                                              std::optional<Duration> newDuration) {
+    Json args = Json::object();
+    args.set("clipId", clipId.toString());
+    if (newTimelineStart) args.set("timelineStartNs", newTimelineStart->nanoseconds());
+    if (newDuration) args.set("durationNs", newDuration->nanoseconds());
+    return executor_.executeTool("timeline.retime_caption_cue", args,
+                                 services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::removeCaptionCue(ClipId clipId) {
+    Json args = Json::object();
+    args.set("clipId", clipId.toString());
+    return executor_.executeTool("timeline.remove_caption_cue", args,
+                                 services::InvocationSource::Gui);
+}
+
+Result<Json> GuiToolGateway::transcribeToCaptions(ClipId sourceClipId, Uuid captionTrackId) {
+    Json args = Json::object();
+    args.set("sourceClipId", sourceClipId.toString());
+    args.set("captionTrackId", captionTrackId.toString());
+    return executor_.executeTool("timeline.transcribe_to_captions", args,
+                                 services::InvocationSource::Gui);
 }
 
 Result<Json> GuiToolGateway::importMedia(const std::string& path) {

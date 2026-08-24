@@ -109,6 +109,7 @@ struct ClipInspectorView {
     double                       opacity = 1.0;
     std::vector<EffectView>      effects;
     std::optional<TextStyleView> textStyle;  ///< Present iff this is a text clip.
+    std::optional<std::string>  captionText; ///< Present iff this is a caption cue.
 };
 
 // ---------------------------------------------------------------------------
@@ -241,6 +242,20 @@ public:
                                              std::optional<double> colorA,
                                              std::optional<TextAlignment> alignment,
                                              std::optional<double> x, std::optional<double> y);
+
+    /// Change the selected caption cue's displayed text (SetCaptionTextCommand,
+    /// via `timeline.set_caption_text` when a gateway is installed;
+    /// usable-editor task 13, Requirement 10.2). Refused when the selection is
+    /// not a caption cue.
+    [[nodiscard]] CommandResult setCaptionText(std::string text);
+
+    /// Change the selected caption cue's start position and/or duration
+    /// (RetimeCaptionCueCommand, via `timeline.retime_caption_cue`;
+    /// Requirement 10.2). Either left as std::nullopt leaves that field exactly
+    /// as it was; at least one must be given. Refused when the selection is not
+    /// a caption cue.
+    [[nodiscard]] CommandResult retimeCaptionCue(std::optional<Duration> newTimelineStart,
+                                                 std::optional<Duration> newDuration);
 
     // --- Change notification (for the thin Qt view) ------------------------
 

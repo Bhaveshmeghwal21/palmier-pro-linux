@@ -352,9 +352,10 @@ TEST(ParityCheckFalsifiability, DetectsAStatusOutsideItsValueSet) {
 
 TEST(ParityCheckFalsifiability, DetectsAPriorityOutsideItsValueSet) {
     const std::vector<Defect> defects = checkParity(
-        mutated(parityMarkdown(), "| captions | absent | none | should |",
-                "| captions | absent | none | urgent |"));
-    EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::InvalidPriority, "captions"))
+        mutated(parityMarkdown(), "| audio scrub and metering | absent | none | should |",
+                "| audio scrub and metering | absent | none | urgent |"));
+    EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::InvalidPriority,
+                                       "audio scrub and metering"))
         << testsupport::toString(defects);
 }
 

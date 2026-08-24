@@ -95,9 +95,10 @@ std::string idLabel(const Uuid& id) {
 // rejected `kind` argument is named the way the caller supplied it.
 std::string_view trackKindLabel(TrackKind kind) {
     switch (kind) {
-        case TrackKind::Audio: return "audio";
-        case TrackKind::Text:  return "text";
-        case TrackKind::Video: return "video";
+        case TrackKind::Audio:   return "audio";
+        case TrackKind::Text:    return "text";
+        case TrackKind::Caption: return "caption";
+        case TrackKind::Video:   return "video";
     }
     return "video";
 }
@@ -1269,6 +1270,116 @@ Result<void> SetTextStyleCommand::revert(Project& project) {
                                       " is not a text clip"));
     }
     *clip.textStyle = prior_;
+    return ok();
+}
+
+// ===========================================================================
+// Captions and transcription (usable-editor task 13; Requirement 10)
+// ===========================================================================
+
+SetCaptionTextCommand::SetCaptionTextCommand(ClipId clipId, std::string text)
+    : clipId_(clipId), text_(std::move(text)) {}
+
+Result<void> SetCaptionTextCommand::apply(Project& project) {
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("SetCaptionTextCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    Clip& clip = loc->track->clips[loc->index];
+    if (!clip.isCaptionCue()) {
+        return err(failedPrecondition("SetCaptionTextCommand: clip " + idLabel(clipId_) +
+                                      " is not a caption cue"));
+    }
+    if (text_.empty()) {
+        return err(invalidArgument("SetCaptionTextCommand: captionText must not be empty"));
+    }
+    prior_ = *clip.captionText;
+    captured_ = true;
+    clip.captionText = text_;
+    return ok();
+}
+
+Result<void> SetCaptionTextCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition("SetCaptionTextCommand: revert before a successful apply"));
+    }
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("SetCaptionTextCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    Clip& clip = loc->track->clips[loc->index];
+    if (!clip.isCaptionCue()) {
+        return err(failedPrecondition("SetCaptionTextCommand: clip " + idLabel(clipId_) +
+                                      " is not a caption cue"));
+    }
+    clip.captionText = prior_;
+    return ok();
+}
+
+RetimeCaptionCueCommand::RetimeCaptionCueCommand(ClipId clipId,
+                                                 std::optional<Duration> newTimelineStart,
+                                                 std::optional<Duration> newDuration)
+    : clipId_(clipId), newTimelineStart_(newTimelineStart), newDuration_(newDuration) {}
+
+Result<void> RetimeCaptionCueCommand::apply(Project& project) {
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("RetimeCaptionCueCommand: clip " + idLabel(clipId_) + " not found"));
+    }
+    Clip& clip = loc->track->clips[loc->index];
+    if (!clip.isCaptionCue()) {
+        return err(failedPrecondition("RetimeCaptionCueCommand: clip " + idLabel(clipId_) +
+                                      " is not a caption cue"));
+    }
+
+    const Duration candidateStart = newTimelineStart_.value_or(clip.timelineStart);
+    const Duration candidateDuration = newDuration_.value_or(clip.duration());
+    if (candidateStart.isNegative()) {
+        return err(failedPrecondition(
+            "RetimeCaptionCueCommand: destination position must be >= 0"));
+    }
+    if (!candidateDuration.isPositive()) {
+        return err(failedPrecondition(
+            "RetimeCaptionCueCommand: the resulting duration must be > 0"));
+    }
+
+    Track* track = loc->track;
+    trackId_ = track->id;
+    priorClips_ = track->clips;  // capture for an exact revert / rollback
+    captured_ = true;
+
+    Clip& target = track->clips[loc->index];
+    target.timelineStart = candidateStart;
+    target.sourceIn = Duration::zero();
+    target.sourceOut = candidateDuration;
+    std::stable_sort(track->clips.begin(), track->clips.end(),
+                     [](const Clip& a, const Clip& b) {
+                         return a.timelineStart < b.timelineStart;
+                     });
+
+    // Requirement 10.2 (mirrors MoveClipCommand's Requirement 2.3 rejection):
+    // a retime that would overlap another cue on the same track is rejected
+    // and the track restored to its prior contents.
+    if (!trackOrderedAndNonOverlapping(*track)) {
+        track->clips = priorClips_;
+        return err(failedPrecondition(
+            "RetimeCaptionCueCommand: the new timing overlaps another cue on the "
+            "track; retime rejected"));
+    }
+    return ok();
+}
+
+Result<void> RetimeCaptionCueCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition(
+            "RetimeCaptionCueCommand: revert before a successful apply"));
+    }
+    Track* track = findTrack(project, trackId_);
+    if (track == nullptr) {
+        return err(notFound("RetimeCaptionCueCommand: track " + idLabel(trackId_) +
+                            " not found"));
+    }
+    track->clips = priorClips_;
     return ok();
 }
 

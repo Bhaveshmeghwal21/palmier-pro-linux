@@ -234,6 +234,20 @@ public:
             out.set("providers", std::move(providers));
             return out;
         };
+        // timeline.transcribe_to_captions's real hook is bound to
+        // UnavailableTranscriptionBackend in this build (no recognizer is
+        // bundled), which would always fail run()'s EXPECT_TRUE(isOk()) below.
+        // Stubbed here for the identical reason listModels is stubbed above:
+        // this fixture observes the REGISTRY'S OWN rendering of a result shape,
+        // not whether a particular backend is configured — the shape stubbed
+        // here matches ApplicationComposition's own makeTranscribeToCaptionsHook
+        // documented success shape ({status, cuesAdded}).
+        hooks.transcribeToCaptions = [](const services::Json&) -> Result<services::Json> {
+            services::Json out = services::Json::object();
+            out.set("status", std::string{"transcribed"});
+            out.set("cuesAdded", static_cast<std::int64_t>(1));
+            return out;
+        };
         registry_ = services::buildDefaultToolRegistry(session_, std::move(hooks));
     }
 
@@ -514,6 +528,44 @@ private:
     setTextStyle.set("pointSize", 40.0);
     setTextStyle.set("alignment", std::string{"left"});
     observer.run("timeline.set_text_style", setTextStyle);
+
+    // Captions and transcription (usable-editor Phase 4 task 13; Requirement
+    // 10), on a dedicated caption track for the identical reason the text
+    // clip above needs a dedicated text track.
+    const services::Json captionTrack = observer.run(
+        "timeline.add_track", with("kind", services::Json(std::string{"caption"})));
+    const std::string captionTrackId = captionTrack.stringOr("trackId");
+
+    services::Json addCaptionCue = object();
+    addCaptionCue.set("trackId", captionTrackId);
+    addCaptionCue.set("timelineStartNs", static_cast<std::int64_t>(0));
+    addCaptionCue.set("durationNs", 2 * kSecond);
+    addCaptionCue.set("text", std::string{"Hello, world!"});
+    const services::Json captionCueResult =
+        observer.run("timeline.add_caption_cue", addCaptionCue);
+    const std::string captionCueId = captionCueResult.stringOr("clipId");
+
+    services::Json setCaptionText = object();
+    setCaptionText.set("clipId", captionCueId);
+    setCaptionText.set("text", std::string{"Hello, Palmier!"});
+    observer.run("timeline.set_caption_text", setCaptionText);
+
+    services::Json retimeCaptionCue = object();
+    retimeCaptionCue.set("clipId", captionCueId);
+    retimeCaptionCue.set("timelineStartNs", kSecond);
+    observer.run("timeline.retime_caption_cue", retimeCaptionCue);
+
+    // No recognizer backend is bundled in this build (Requirement 10.5), so
+    // this reports "not available" by name rather than the ToolsCallSuccessShape
+    // a real backend would produce; it is observed here purely so the tool's
+    // OWN existence and argument names are cross-checked against docs/TOOLS.md,
+    // exactly like every other observer.run call in this scenario.
+    services::Json transcribeToCaptions = object();
+    transcribeToCaptions.set("sourceClipId", firstClip);
+    transcribeToCaptions.set("captionTrackId", captionTrackId);
+    observer.run("timeline.transcribe_to_captions", transcribeToCaptions);
+
+    observer.run("timeline.remove_caption_cue", with("clipId", services::Json(captionCueId)));
 
     observer.run("timeline.delete_clip", with("clipId", services::Json(secondClip)));
     observer.run("edit.undo", object());

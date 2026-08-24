@@ -353,6 +353,17 @@ public:
     [[nodiscard]] static std::vector<VisibleLayer> gatherVisibleTextClips(const Project& project,
                                                                           Duration position);
 
+    /// Gather the visible caption-cue layers at `position` (non-muted CAPTION
+    /// tracks only), each tagged with its z = track index, sorted ascending by
+    /// z (usable-editor task 13; Requirement 10.3 — a burned-in caption
+    /// composites in the same painter's-order layering every video/text track
+    /// already uses). A clip on a CAPTION track that carries no captionText
+    /// (which ProjectValidation forbids, but this gathering step is
+    /// deliberately as defensive as gatherVisibleClips/gatherVisibleTextClips
+    /// are about track kind) is skipped rather than treated as an empty cue.
+    [[nodiscard]] static std::vector<VisibleLayer> gatherVisibleCaptionCues(
+        const Project& project, Duration position);
+
 private:
     GpuContext&                    context_;
     FramePool&                     pool_;

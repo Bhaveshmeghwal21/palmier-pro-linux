@@ -132,6 +132,33 @@ public:
 };
 
 // ---------------------------------------------------------------------------
+// UnavailableTranscriptionBackend
+// ---------------------------------------------------------------------------
+
+/// The backend installed when no real recognizer is bundled — mirrors
+/// `UnavailableGenerativeHttpTransport` (services/GenerativeHttpTransport.cpp)
+/// exactly: it always fails with `Unsupported`, naming what is missing, rather
+/// than the Composition_Root simply never constructing a `TranscriptionService`
+/// at all. This is what lets Requirement 10.4's "the Composition_Root SHALL
+/// construct services::TranscriptionService" hold literally even in a build
+/// with no recognizer configured, while Requirement 10.5's "report that
+/// precondition by name... and SHALL NOT prevent captions from being authored
+/// by hand" is exactly the failure this class reports (`transcribe()`'s own
+/// EditCommand path — SetCaptionTextCommand and friends — never touches this
+/// class at all, so hand-authoring is never affected by whether a real
+/// backend is installed).
+class UnavailableTranscriptionBackend final : public ITranscriptionBackend {
+public:
+    [[nodiscard]] Result<std::vector<TextSegment>> transcribe(
+        const TranscriptionAudioSource&) override {
+        return err<std::vector<TextSegment>>(makeError(
+            ErrorCode::Unsupported,
+            "no recognizer backend is available in this build; no transcription was "
+            "attempted"));
+    }
+};
+
+// ---------------------------------------------------------------------------
 // TranscriptionService
 // ---------------------------------------------------------------------------
 

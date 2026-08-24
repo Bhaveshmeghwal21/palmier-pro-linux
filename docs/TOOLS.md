@@ -538,6 +538,63 @@ Refused, with the project unchanged, when the named clip does not exist or is no
 
 Result: `clipId` (string), *(command result)*.
 
+## `timeline.add_caption_cue`
+
+Add a caption cue onto a caption track at a timeline position (usable-editor Phase 4 task 13;
+Requirement 10). The cue carries no source media and no styling of its own: it is placed through
+the same `AddClipCommand` every media/text clip uses, but with no asset reference, and it must land
+on a `TrackKind::Caption` track (create one with `timeline.add_track` and `kind: "caption"`).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `trackId` | string *uuid* | **yes** | must name a caption track |
+| `clipId` | string *uuid* | no | generated when omitted |
+| `timelineStartNs` | integer | no | ≥ 0; default 0 |
+| `durationNs` | integer | **yes** | ≥ 1 |
+| `text` | string | **yes** | must not be empty |
+
+Result: `clipId` (string), *(command result)*.
+
+## `timeline.set_caption_text`
+
+Change a caption cue's displayed text.
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | must name a caption cue |
+| `text` | string | **yes** | must not be empty |
+
+Refused, with the project unchanged, when the named clip does not exist, is not a caption cue, or
+`text` is empty.
+
+Result: `clipId` (string), *(command result)*.
+
+## `timeline.retime_caption_cue`
+
+Change a caption cue's start position and/or duration in one undoable edit. At least one of
+`timelineStartNs` or `durationNs` must be given; either changes in the same single edit.
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | must name a caption cue |
+| `timelineStartNs` | integer | no | ≥ 0 |
+| `durationNs` | integer | no | ≥ 1 |
+
+Refused, with the project unchanged, when neither argument is given, when the resulting duration
+would be non-positive, or when the new timing would overlap another cue on the same track.
+
+Result: `clipId` (string), *(command result)*.
+
+## `timeline.remove_caption_cue`
+
+Remove a caption cue by id from whichever track holds it.
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | |
+
+Result: `clipId` (string), *(command result)*.
+
 ## `edit.undo`
 
 Revert the most recently applied edit; reports a no-op when the undo history is empty.
@@ -602,6 +659,24 @@ Result: `providers` (object) — each member key is a provider name and its valu
 provider's models. Each model entry carries the fields id, mediaType and servesUpscale and, only for an
 audio-generation model, minDurationTicks and maxDurationTicks (integer nanosecond values).
 
+## `timeline.transcribe_to_captions`
+
+Transcribe a clip's audio and place the resulting segments as caption cues on a caption track
+(usable-editor Phase 4 task 13; Requirement 10.4). Hook-backed: requires a configured recognizer
+backend; absent one, refused by name — hand-authored caption editing through the other four caption
+tools remains available either way (Requirement 10.5).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `sourceClipId` | string *uuid* | **yes** | must name a clip with decodable audio |
+| `captionTrackId` | string *uuid* | **yes** | must name a caption track |
+
+A clip with no detectable audio track produces zero cues and `status: "no_audio_found"` rather than
+an error (mirroring `services::TranscriptionService`'s own Requirement 4.4 indication) — a caption
+track with nothing to transcribe is a normal outcome, not a failure.
+
+Result: `status` (string — `"transcribed"` or `"no_audio_found"`), `cuesAdded` (integer).
+
 ## `timeline.export`
 
 Render the timeline to an output file at a selected container, codec, resolution, frame rate and bit
@@ -625,6 +700,12 @@ preserved and the request refused. The container vocabulary, the parent director
 writability, and whether the destination already exists are all checked by the coordinator, which
 owns the message naming the parameter.
 
+Any `TrackKind::Caption` cue in the project is burned into the exported video unconditionally (no
+argument gates this) and is also written out as a sidecar SubRip (`.srt`) file next to `outputPath`
+(same base name, `.srt` extension); the two derive their timing from the identical clip fields, so
+they cannot disagree about when a cue is on screen. A project with no caption cues writes no
+sidecar file and reports no `captionsSidecarPath`.
+
 Result:
 
 | Field | Type | Notes |
@@ -640,6 +721,7 @@ Result:
 | `audioFrames` | integer | present only when `containsAudio` is `true` |
 | `durationNs` | integer | |
 | `projectModified` | boolean | always `false` — the worker runs on a value-copy snapshot |
+| `captionsSidecarPath` | string | present only when the exported project had at least one non-muted caption cue and the sidecar `.srt` file was written successfully alongside `outputPath` |
 
 `preferHardware: true` is a request, not a guarantee. Which encoder actually runs, and what a
 `fallbackReason` can say, is [`HARDWARE_ENCODE.md`](HARDWARE_ENCODE.md).

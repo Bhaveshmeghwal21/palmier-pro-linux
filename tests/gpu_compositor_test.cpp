@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "core/Duration.hpp"
@@ -334,6 +335,96 @@ TEST(CompositorRender, RenderedFrameHoldsFrameUntilDestroyed) {
     }
     // RenderedFrame destroyed -> frame returned to the pool.
     EXPECT_EQ(ctx.framePool().stats().inUseBytes, 0u);
+}
+
+// --- Captions (usable-editor task 13; Requirement 10.3's burn-in mode) -----
+
+Track makeCaptionTrack(std::vector<Clip> clips, bool muted = false) {
+    Track t;
+    t.id = Uuid::generateV4();
+    t.kind = TrackKind::Caption;
+    t.muted = muted;
+    t.clips = std::move(clips);
+    return t;
+}
+
+/// A caption cue covering [0, 10s), mirroring makeClip's own geometry.
+Clip makeCaptionCue(std::string text = "Hello") {
+    Clip c;
+    c.id = Uuid::generateV4();
+    c.timelineStart = Duration::zero();
+    c.sourceIn = Duration::zero();
+    c.sourceOut = Duration::fromSeconds(10.0);
+    c.captionText = std::move(text);
+    return c;
+}
+
+TEST(CompositorGather, GatherVisibleCaptionCuesPicksCoveringCuesWithTrackIndexAsZ) {
+    Project p = makeProject({
+        makeVideoTrack({makeClip()}),           // z=0: video, not a caption
+        makeCaptionTrack({makeCaptionCue()}),   // z=1: covers -> included
+    });
+
+    auto layers = Compositor::gatherVisibleCaptionCues(p, kAt);
+    ASSERT_EQ(layers.size(), 1u);
+    EXPECT_EQ(layers[0].z, 1u);
+    EXPECT_TRUE(layers[0].clip->isCaptionCue());
+}
+
+TEST(CompositorGather, GatherVisibleCaptionCuesSkipsMutedTracksAndNonCoveringCues) {
+    Clip late = makeCaptionCue();
+    late.timelineStart = Duration::fromSeconds(5.0);
+
+    Project p = makeProject({
+        makeCaptionTrack({makeCaptionCue()}),         // z=0: covers -> included
+        makeCaptionTrack({makeCaptionCue()}, true),   // z=1: muted -> skipped
+        makeCaptionTrack({late}),                     // z=2: not covering kAt -> skipped
+    });
+
+    auto layers = Compositor::gatherVisibleCaptionCues(p, kAt);
+    ASSERT_EQ(layers.size(), 1u);
+    EXPECT_EQ(layers[0].z, 0u);
+}
+
+TEST(CompositorGather, GatherVisibleCaptionCuesEmptyWhenNoCueCoversPosition) {
+    Project p = makeProject({makeCaptionTrack({makeCaptionCue()})});
+    auto layers = Compositor::gatherVisibleCaptionCues(p, Duration::fromSeconds(20.0));
+    EXPECT_TRUE(layers.empty());
+}
+
+TEST(CompositorRender, RendersACaptionCueThroughTheTextRasterizerSeam) {
+    auto ctx = GpuContext::softwareFallback();
+    Compositor comp(ctx);
+    Project p = makeProject({makeCaptionTrack({makeCaptionCue("Burn me in")})});
+
+    // A fake rasterizer that returns a distinctive color and records the
+    // TextStyle it was asked to render — proving renderAt synthesized a style
+    // from captionText rather than requiring one already on the clip.
+    TextStyle observedStyle;
+    bool rasterizerCalled = false;
+    comp.setTextRasterizer(
+        [&](const TextStyle& style, std::uint32_t w, std::uint32_t h) -> Result<SourceFrame> {
+            observedStyle = style;
+            rasterizerCalled = true;
+            return SourceFrame::solid(w, h, RgbaColor{9, 9, 9, 255});
+        });
+
+    RenderTarget target(4, 4, RgbaColor::opaqueBlack());
+    auto rf = comp.renderAt(p, kAt, target);
+    ASSERT_TRUE(rf.isOk());
+    EXPECT_TRUE(rasterizerCalled);
+    EXPECT_EQ(observedStyle.content, "Burn me in");
+    EXPECT_EQ(firstPixel(rf.value()), RgbaColor{9, 9, 9, 255});
+}
+
+TEST(CompositorRender, FailsWhenVisibleCaptionCueButNoTextRasterizer) {
+    auto ctx = GpuContext::softwareFallback();
+    Compositor comp(ctx); // no rasterizer installed
+    Project p = makeProject({makeCaptionTrack({makeCaptionCue()})});
+
+    auto rf = comp.renderAt(p, kAt, RenderTarget(4, 4));
+    ASSERT_TRUE(rf.isError());
+    EXPECT_EQ(rf.error().code(), ErrorCode::FailedPrecondition);
 }
 
 } // namespace
