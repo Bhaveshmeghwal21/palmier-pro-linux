@@ -414,7 +414,8 @@ TEST(CompositorRender, RendersACaptionCueThroughTheTextRasterizerSeam) {
     ASSERT_TRUE(rf.isOk());
     EXPECT_TRUE(rasterizerCalled);
     EXPECT_EQ(observedStyle.content, "Burn me in");
-    EXPECT_EQ(firstPixel(rf.value()), RgbaColor{9, 9, 9, 255});
+    const RgbaColor expected{9, 9, 9, 255};
+    EXPECT_EQ(firstPixel(rf.value()), expected);
 }
 
 TEST(CompositorRender, FailsWhenVisibleCaptionCueButNoTextRasterizer) {
