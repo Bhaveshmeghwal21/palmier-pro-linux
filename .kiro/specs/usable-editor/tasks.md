@@ -1077,4 +1077,151 @@ BOTH known fragile-anchor shapes — the numbered build-order lines, and now als
 `"| name | status | ... |"` literals — for every row whose status text changes, run once *before*
 the first push rather than discovered by a second failed CI run.
 
-Phase 4 Tasks 13–15 and Phase 5 Tasks 16–17 remain unstarted.
+## Task 13 — captions and transcription (Requirement 10)
+
+**Status: complete.** Final commit `c62b31a` (run `32727201834`): **"100% tests passed, 0 tests
+failed out of 1356"**, 5300 distinct colours.
+
+A caption cue is an ordinary `Clip` carrying a new `captionText: std::optional<std::string>` field
+(`core::Clip::isCaptionCue()`), mirroring the Task 12 text-clip precedent exactly but without any
+styling field at all — Requirement 10 asks for none. Delivered:
+
+- **`core::TrackKind::Caption`** (`core/Track.hpp`) — the 4th enum value, alongside `Clip
+  ::captionText`. Creation reuses `AddClipCommand` unchanged, for the identical reason a text clip
+  does: a default-constructed `Clip`'s `assetRef` is nil, which `AddClipCommand::apply()`'s own
+  asset-registration step already treats as "no asset to register".
+- **Core commands** `SetCaptionTextCommand` (refuses empty text) and `RetimeCaptionCueCommand`
+  (`core/EditCommands.{hpp,cpp}`) — the latter changes `timelineStart` and/or `duration` together
+  in ONE undoable edit (Requirement 10.2's own wording), deliberately not two separate
+  `MoveClipCommand`+`TrimClipCommand` calls, and rejects a resulting overlap with another cue on
+  the same track by restoring the track's prior contents from a captured snapshot, mirroring
+  `MoveClipCommand`'s own rollback pattern.
+- **5 tools** in `services::ToolRegistry.cpp`: `timeline.add_caption_cue`, `.set_caption_text`,
+  `.retime_caption_cue` (requires at least one of `timelineStartNs`/`durationNs` — a Class 1
+  cross-field rule, registered in `tool_schema_conformance_property_test.cpp`), `.remove_caption_cue`
+  (reuses `DeleteClipCommand` directly), and `timeline.transcribe_to_captions` — a hook-backed
+  bridge from `services::TranscriptionService::transcribe()` (an existing service from an earlier
+  spec, previously unreachable from any tool and never constructed by the composition root) to
+  caption cues placed on a target track, one `AddClipCommand` per returned `TextSegment` with the
+  source clip's own `timelineStart` as the ms-to-timeline offset. `services
+  ::UnavailableTranscriptionBackend` (`TranscriptionService.hpp`, mirroring
+  `UnavailableGenerativeHttpTransport`) is the backend `app::ApplicationComposition` binds the
+  service to unconditionally — no recognizer is bundled in this build, so the hook always reports
+  `Unsupported` by name, which is exactly Requirement 10.5's "report that precondition by name...
+  and SHALL NOT prevent captions from being authored by hand": the other four tools never touch
+  this backend at all.
+- **Burn-in export** (Requirement 10.3, first half): `gpu::Compositor::gatherVisibleCaptionCues()`
+  mirrors `gatherVisibleTextClips()`, and `renderAt()` now merges three layer kinds (video, text,
+  caption) into one z-ordered sequence; a caption cue's rasterized frame comes from a `TextStyle`
+  *synthesized* on the fly from its plain `captionText` (`captionCueStyle()`: white, bottom-centred
+  at `y = 0.9`, the default point size) through the identical `TextRasterizer` seam Task 12 built,
+  so a burned-in caption uses the same `QPainter`-backed renderer preview and export already share.
+- **Sidecar export** (Requirement 10.3, second half): a new `services::CaptionExport.{hpp,cpp}`
+  (pure functions `projectHasCaptions()`/`renderSrt()`) renders every non-muted caption track's
+  cues into a standard SubRip document, timestamped from the identical `timelineStart`/
+  `timelineEnd()` fields the burn-in path's own visibility check uses — the two outputs cannot
+  disagree about when a cue is on screen. `services::ExportCoordinator` writes this unconditionally
+  next to the video output (same base name, `.srt` extension) whenever the exported project has at
+  least one caption cue, reported back as the new `ExportOutcome::captionsSidecarPath`
+  (`timeline.export`'s new optional result field).
+- **A pre-existing Task 12 gap, found and fixed along the way**: `ExportCoordinatorOptions` had no
+  text-rasterizer field at all, so a *real* export's export-local `gpu::Compositor` (constructed
+  fresh on the worker thread, never the live preview one) could never have rendered a text clip or
+  caption cue — Requirement 9.5's "export produces identical text to preview" was true only for the
+  live-preview path, never for an actual export, and nothing had exercised this until a caption cue
+  needed the same seam. Fixed by adding `ExportCoordinatorOptions::textRasterizer`, wired from
+  `app::main.cpp` to the SAME `ui::QtTextRasterizer` instance the live preview installs (constructed
+  once, before `ApplicationComposition`, and handed to both the `AppConfig` the composition root
+  reads at construction and the live compositor afterward) — one rasterizer, not two, now genuinely
+  true of both paths.
+- **UI wiring**: `ui::GuiToolGateway` gained the 5 gateway methods mirroring the text-clip ones
+  exactly; `ui::InspectorViewModel`/`InspectorPanel` gained a caption-cue editing section (one text
+  edit, no styling controls, since Requirement 10 asks for none); `ui::MainWindow` gained a
+  symmetric "Add &Caption Track" menu action; `ui::TimelineModel::addTrack()`'s `"caption"` case.
+- **`services::ProjectStore`** (schema **1.3**): `writeClip`/`readClip` gained `captionText`,
+  null-when-absent, identical convention to `textStyle`'s own 1.2 addition; `trackKindKey`/
+  `trackKindFromKey` gained `"caption"`.
+- **Tests**: 13 new domain cases in `tests/core/edit_commands_test.cpp` (creation, text-change +
+  undo, empty-text refusal, retime's combined-field change, its overlap rejection, its
+  non-caption-cue refusal, deletion through the shared `DeleteClipCommand` path, and four
+  `ProjectValidation` rules); a new `tests/services/caption_export_test.cpp` (11 cases covering
+  `projectHasCaptions`/`renderSrt`'s formatting, ordering, muting and the timing-agreement premise
+  itself); 5 new `gpu_compositor_test.cpp` cases for `gatherVisibleCaptionCues`/the caption
+  render/error paths; 2 new `export_coordinator_test.cpp` cases proving the sidecar path end to end
+  (with, and pointedly without, a caption cue in the project); `project_store_property_test.cpp`'s
+  round-trip generator now also draws caption tracks/cues; 4 new `inspector_viewmodel_test.cpp`
+  cases; a new "Add Caption Track" case in `shell_unit_test.cpp`.
+
+### Verification evidence
+
+CI run `32723953529` (commit `7d1a835`, the implementation once every incident below was fixed):
+**"100% tests passed, 0 tests failed out of 1356"**. CI run `32727201834` (commit `c62b31a`, the
+parity re-score): the same **1356/1356**, confirming the doc-only change introduced no regression.
+
+### CI incidents 20–24
+
+- **Incident 20 — a macro-argument-count compile error in my own test, not a production bug (run
+  `32719818225`, commit `177e910`).** `EXPECT_EQ(firstPixel(rf.value()), RgbaColor{9, 9, 9, 255})`
+  in the new `gpu_compositor_test.cpp` case fails to compile: `EXPECT_EQ` is a macro, and the
+  un-parenthesized braced-init-list's three commas are each read as a macro-argument separator, so
+  the preprocessor sees 5 arguments where the macro takes 2. This exact codebase already carries
+  the fix idiom a few lines above the new case (`EXPECT_EQ(firstPixel(rf.value()),
+  (RgbaColor{0, 0, 0, 255}))`, extra parentheses), but the new case used a plain named local
+  instead, which resolves the identical issue just as directly.
+- **Incident 21 — undefined references in three standalone-compiling test targets (run
+  `32720916276`, commit `8c6a655`).** `palmier_app_composition_tests`,
+  `palmier_services_offline_mode_tests` and `palmier_e2e_tests` each compile
+  `ApplicationComposition.cpp` and/or `ExportCoordinator.cpp` directly as sources rather than
+  linking `Palmier::services`, the same class of requirement `OpenSslGenerativeHttpTransport.cpp`
+  already documents on the first of the three. `ApplicationComposition.cpp` now constructs a
+  `services::TranscriptionService` unconditionally and `ExportCoordinator.cpp` now calls
+  `services::projectHasCaptions`/`renderSrt` unconditionally, so `TranscriptionService.cpp` and
+  `CaptionExport.cpp` had to join every target that compiles their respective caller standalone.
+  Fixed by adding both sources to all three targets' `add_executable()` lists in
+  `tests/CMakeLists.txt`.
+- **Incident 22 — `McpProtocolProperties.ToolsCallSuccessShape`'s two premises, exposed by 5 new
+  tools the same way incident 19 (Task 12) exposed one for 3 (run `32722359154`, commit `cb8bd83`).**
+  RapidCheck's shrunk counterexample crashed with "basic_string: construction from null is not
+  valid". `drawValidInvocation()` had no special case for any of the 4 caption-cue tools, so each
+  fell through to the generic schema-only fallback and drew a random, schema-valid-but-nonexistent
+  UUID — the identical trap incident 19 already named, now hit by a different tool family. Fixed
+  by adding a guaranteed caption track + cue to `drawSeedProject()` (mirroring the guaranteed text
+  track/clip exactly) and special-casing all 4 in `drawValidInvocation()`. The 5th tool,
+  `timeline.transcribe_to_captions`, needed the OPPOSITE fix: it is hook-backed, and even in a real
+  build its hook is bound to `UnavailableTranscriptionBackend`, so it always reports `Unsupported`
+  regardless of its arguments — the identical shape `generation.generate`/`.list_models`/
+  `timeline.export`/`media.import` already have. It had been left out of `isHookBacked()`
+  entirely, so `ToolsCallSuccessShape`'s `else` branch wrongly demanded it *succeed*. Fixed by
+  adding it to `isHookBacked()`'s list, which routes it back to the generic fallback correctly
+  (any schema-valid UUID is fine for a tool whose hook will refuse regardless) and makes the
+  property's own `isHookBacked()` branch check its actual result shape instead.
+- **Incident 23 — a real, checked-in document defect, not a test-anchor fragility (run
+  `32725455797`, commit `0322bae`).** `ParityReportDocument.TheCheckedInReportHasNoDefects` failed
+  with three `MissingRationale` defects: the new `captions`/`transcription`/`transcription and
+  captions` rationale strings were 225/211/210 characters, each over `checkParity`'s own
+  `kMaxRationale = 200`-Unicode-code-point bound (`tests/support/ReportParser.cpp`) — a genuine,
+  previously-unencountered rule this task's rationale-writing simply had not looked up, rather
+  than assuming "readable in a table cell" was the only constraint. Fixed by shortening all three
+  to 191/197/193 characters, this time verified directly against the checked-in file's own text
+  (not merely estimated) before the next push.
+- **Incident 24 — none; the row-content literal anchor for the previous `captions` row (fixed
+  proactively, before the first push, unlike incidents 9/13/16/19's own row-content sibling).**
+  `ParityCheckFalsifiability.DetectsAPriorityOutsideItsValueSet` anchored on the exact literal
+  `"| captions | absent | none | should |"`, which would have stopped existing verbatim once
+  `captions` became `partial`. Caught by the standing proactive sweep BEFORE the implementation
+  commit (`177e910`) rather than by a failed run, and fixed by switching the anchor to a different
+  still-`absent`/`should` row (`audio scrub and metering`) in that same commit — the fourth time
+  this exact anchor class has needed a fix, and the first time it was caught proactively instead
+  of by CI.
+
+The lesson recorded for later phases, extending incident 19's own: a hook-backed tool whose
+capability can *never* be configured in this build (no bundled backend at all, unlike
+`generation.*`'s account-gated-but-configurable one) still belongs in `isHookBacked()` — the
+property's contract is about whether the CAPABILITY is wired, not about whether a real backend
+could theoretically exist. And `docs/UPSTREAM_PARITY.md`'s rationale cells have a real, enforced
+200-code-point ceiling (`tests/support/ReportParser.cpp`'s `kMaxRationale`), not just a soft
+readability guideline — check the actual length against that number, not merely against "seems
+reasonable," before every future re-score's first push.
+
+Phase 4 Task 14 (still-frame capture) and Task 15 (media organisation), and Phase 5 Tasks 16–17,
+remain unstarted.
