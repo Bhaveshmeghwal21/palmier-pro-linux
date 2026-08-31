@@ -1232,15 +1232,42 @@ TEST_F(ExportCoordinatorTest, ADestroyedCoordinatorCancelsAndLeavesNoPartialFile
 
     // Park the worker in the first frame, then destroy the coordinator: its
     // destructor cancels and joins, and the guard removes the partial output.
-    std::promise<void> reached;
+    //
+    // "Park" has to mean BLOCK, not merely signal. An earlier version of this
+    // test only set `reached` from the hook and returned immediately, which left
+    // the worker free to finish all four frames and call guard.commit() before
+    // the main thread got to reset() — and a committed guard deliberately keeps
+    // its file, so the final assertion failed intermittently depending on
+    // scheduling (seen on CI run 33417375130, against a docs-only commit that
+    // could not have caused it). The hook therefore holds the worker inside
+    // encode() until `release` is set, which is what actually guarantees an
+    // export is still in flight when the destructor runs.
+    std::promise<void>       reached;
     std::shared_future<void> hasReached(reached.get_future());
+    std::promise<void>       release;
+    std::shared_future<void> mayContinue(release.get_future());
     script.hookOnFrame = 0;
-    script.hook = [&reached]() mutable { reached.set_value(); };
+    script.hook = [&reached, mayContinue]() mutable {
+        reached.set_value();
+        // Bounded, so a mistake here fails the test rather than hanging the suite
+        // (and so the destructor's join below can never deadlock on this hook).
+        (void)mayContinue.wait_for(kWaitBudget);
+    };
 
     ASSERT_TRUE(coordinator_->begin(request(out)).isOk());
     ASSERT_EQ(hasReached.wait_for(kWaitBudget), std::future_status::ready);
+    ASSERT_TRUE(script.created.load()) << "the backend must have created the file to clean up";
 
-    coordinator_.reset(); // cancels, joins — must not hang.
+    // Destroy on a helper thread: the destructor requests cancellation and then
+    // joins the worker, and the worker is parked in the hook, so the release has
+    // to come from outside both. Releasing only after the destructor has been
+    // entered is what makes the worker observe cancellation at its next frame
+    // boundary rather than racing to completion.
+    std::thread destroyer([this]() { coordinator_.reset(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+    release.set_value();
+    destroyer.join();  // must not hang
+
     EXPECT_FALSE(std::filesystem::exists(out));
     EXPECT_TRUE(script.created.load());
 }
