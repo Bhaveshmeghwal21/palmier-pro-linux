@@ -97,3 +97,12 @@ include(PalmierSummary)
 # ---------------------------------------------------------------------------
 include(PalmierOptionsManifest)
 palmier_write_options_manifest("${PROJECT_BINARY_DIR}/palmier_options.txt")
+
+# ---------------------------------------------------------------------------
+# Packaging (usable-editor tasks.md task 16.1, 16.3; Requirement 13.1, 13.4).
+#
+# Included unconditionally: `cpack` only does anything when actually invoked,
+# and declaring the configuration here (rather than only when UI/tests are on)
+# keeps `cpack --list-generators`/`cpack --help` well-defined on every configure.
+# ---------------------------------------------------------------------------
+include(PalmierPackaging)

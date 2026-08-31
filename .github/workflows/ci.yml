@@ -64,6 +64,8 @@ on:
   push:
     branches:
       - '**'
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - main
@@ -630,6 +632,252 @@ jobs:
             grep -E "Audio sink" configure-no-sdk.log || true
             exit 1
           fi
+
+
+  # ---------------------------------------------------------------------------
+  # usable-editor tasks.md task 16 (Requirement 13) — build the installable
+  # Debian package and verify it launches and renders once installed.
+  #
+  # 13.1: "publish at least one self-contained installable artifact for a
+  #        documented set of distributions, bundling or declaring every
+  #        runtime dependency" — cmake/PalmierPackaging.cmake's CPack DEB
+  #        generator with CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON declares them.
+  # 13.3: "produced by CI from a tagged commit, and CI SHALL verify that the
+  #        produced artifact launches and renders, reusing the launch smoke
+  #        test already in ci.yml." Gated on a `v*` tag push so an ordinary
+  #        push or pull request never builds or publishes a release artifact.
+  # 13.4: the installed application carries the GPLv3 LICENCE text and NOTICE
+  #        — src/app/CMakeLists.txt's install() rules place both in
+  #        share/doc/palmier-pro, verified below by inspecting the installed
+  #        tree rather than only the .deb's own file list.
+  #
+  # This job configures and builds its OWN tree (rather than reusing
+  # build-and-test's) because CPack packages exactly what CMAKE_INSTALL_PREFIX
+  # receives, and this job installs into a throwaway prefix under $PWD to
+  # inspect it directly (`dpkg-deb -c`/-x`), independent of whatever else the
+  # first job's tree contains.
+  # ---------------------------------------------------------------------------
+  package:
+    name: Build and verify the installable .deb (Requirement 13)
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install native build dependencies
+        run: |
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            xvfb \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-declarative-dev \
+            qt6-tools-dev \
+            qt6-tools-dev-tools \
+            qml6-module-qtquick \
+            qml6-module-qtquick-controls \
+            qml6-module-qtquick-window \
+            qml6-module-qtqml-workerscript \
+            libgl1-mesa-dev \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libavfilter-dev \
+            libswscale-dev \
+            libswresample-dev \
+            libavdevice-dev \
+            libvulkan-dev \
+            libshaderc-dev \
+            liblcms2-dev \
+            libsecret-1-dev
+
+      - name: Configure (CMake + Ninja, tests off)
+        run: |
+          set -o pipefail
+          cmake -S . -B build-pkg -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DPALMIER_BUILD_TESTS=OFF \
+            -DPALMIER_BUILD_UI=ON \
+            2>&1 | tee configure-pkg.log
+
+      - name: Build
+        run: cmake --build build-pkg
+
+      # `dpkg-shlibdeps` (CPACK_DEBIAN_PACKAGE_SHLIBDEPS) needs it on PATH; it
+      # ships in dpkg-dev, which is not part of build-essential.
+      - name: Install packaging tools
+        run: |
+          sudo apt-get install -y --no-install-recommends dpkg-dev
+
+      - name: Package (cpack, DEB generator)
+        run: |
+          set -o pipefail
+          cd build-pkg
+          cpack -G DEB 2>&1 | tee ../cpack.log
+
+      - name: Locate the built package
+        id: locate
+        run: |
+          deb=$(find build-pkg -maxdepth 1 -name '*.deb' | head -n1)
+          if [ -z "$deb" ]; then
+            echo "::error::cpack produced no .deb file; see the uploaded cpack.log"
+            exit 1
+          fi
+          echo "path=${deb}" >> "$GITHUB_OUTPUT"
+          echo "Built: ${deb}"
+          dpkg-deb --info "${deb}"
+
+      # Requirement 13.1's declared dependencies: fail loudly if shlibdeps found
+      # nothing to declare (a sign the binary was stripped of NEEDED entries or
+      # packaged wrong) rather than silently shipping a Depends-less package.
+      - name: Verify the package declares its runtime dependencies
+        run: |
+          deb="${{ steps.locate.outputs.path }}"
+          depends=$(dpkg-deb -f "$deb" Depends || true)
+          echo "Depends: ${depends}"
+          if [ -z "$depends" ]; then
+            echo "::error::the built package declares no Depends: at all; dpkg-shlibdeps likely did not run"
+            exit 1
+          fi
+
+      # Requirement 13.4: the GPLv3 text and NOTICE must be present in the
+      # INSTALLED tree the package carries, not merely in the source checkout.
+      - name: Verify LICENSE and NOTICE are packaged
+        run: |
+          deb="${{ steps.locate.outputs.path }}"
+          mkdir -p pkg-contents
+          dpkg-deb -x "$deb" pkg-contents
+          for f in LICENSE NOTICE; do
+            if [ ! -s "pkg-contents/usr/share/doc/palmier-pro/${f}" ]; then
+              echo "::error::pkg-contents/usr/share/doc/palmier-pro/${f} is missing or empty in the built package"
+              find pkg-contents/usr/share/doc -type f || true
+              exit 1
+            fi
+            echo "OK: ${f} is present in the package"
+          done
+          if [ ! -x "pkg-contents/usr/bin/palmier-pro" ]; then
+            echo "::error::pkg-contents/usr/bin/palmier-pro is missing or not executable in the built package"
+            exit 1
+          fi
+
+      # Requirement 13.3: install the package for real with dpkg (exercising the
+      # SAME Depends: resolution a user's apt/dpkg would), then run the identical
+      # launch-and-render smoke test build-and-test's job already runs — reused
+      # here rather than re-invented — against the INSTALLED /usr/bin/palmier-pro
+      # rather than a build-tree binary, so the artifact under test is the one a
+      # user who ran `apt install ./palmier-pro_*.deb` would actually get.
+      - name: Install the package with dpkg
+        run: |
+          deb="${{ steps.locate.outputs.path }}"
+          sudo apt-get install -y --no-install-recommends "$(readlink -f "$deb")"
+          command -v palmier-pro
+          dpkg -L palmier-pro | grep -E '/(LICENSE|NOTICE)$'
+
+      - name: Install the launch smoke-test tools
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            imagemagick \
+            xdotool \
+            x11-utils
+
+      - name: Launch the installed package headlessly and capture a screenshot
+        run: |
+          set -uo pipefail
+          mkdir -p smoke
+          export DISPLAY=:99
+
+          Xvfb "$DISPLAY" -screen 0 1600x1000x24 -nolisten tcp >smoke/xvfb.log 2>&1 &
+          xvfb_pid=$!
+          cleanup() {
+            if [ -n "${app_pid:-}" ]; then kill "$app_pid" 2>/dev/null || true; fi
+            kill "$xvfb_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 40); do
+            xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break
+            sleep 0.25
+          done
+          if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+            echo "::error::Xvfb never accepted connections on $DISPLAY"
+            cat smoke/xvfb.log || true
+            exit 1
+          fi
+
+          export HOME="$PWD/smoke/home"
+          mkdir -p "$HOME"
+
+          # The installed binary, resolved via PATH (/usr/bin), not the build tree.
+          palmier-pro --mcp-port=19899 >smoke/app.log 2>&1 &
+          app_pid=$!
+
+          window=""
+          for _ in $(seq 1 60); do
+            kill -0 "$app_pid" 2>/dev/null || break
+            window=$(xdotool search --name '^Palmier Pro' 2>/dev/null | head -n1 || true)
+            [ -n "$window" ] && break
+            sleep 0.5
+          done
+
+          if ! kill -0 "$app_pid" 2>/dev/null; then
+            app_status=0
+            wait "$app_pid" || app_status=$?
+            echo "::error::the installed palmier-pro exited during startup with status ${app_status}"
+            cat smoke/app.log || true
+            exit 1
+          fi
+          if [ -z "$window" ]; then
+            echo "::error::no window titled 'Palmier Pro' mapped within 30 seconds"
+            cat smoke/app.log || true
+            exit 1
+          fi
+          echo "mapped window id: ${window}"
+
+          sleep 3
+          import -display "$DISPLAY" -window root smoke/palmier-pro-installed-launch.png
+          colours=$(identify -format '%k' smoke/palmier-pro-installed-launch.png)
+          echo "unique colours in the capture: ${colours}"
+          if [ "${colours}" -lt 16 ]; then
+            echo "::error::the capture holds only ${colours} unique colour(s); the installed package's window mapped but appears to have painted nothing"
+            cat smoke/app.log || true
+            exit 1
+          fi
+
+          if ! kill -0 "$app_pid" 2>/dev/null; then
+            echo "::error::the installed palmier-pro died before the smoke test finished"
+            cat smoke/app.log || true
+            exit 1
+          fi
+
+          echo "OK: the installed .deb's palmier-pro launched, mapped its main window and painted ${colours} distinct colours"
+
+          {
+            echo "### Installed-package launch smoke test"
+            echo
+            echo "The Debian package built by this job was installed with \`dpkg\`/\`apt\`"
+            echo "and \`palmier-pro\` (resolved from \`/usr/bin\` via \`PATH\`) launched under"
+            echo "Xvfb, mapped its main window and painted ${colours} distinct colours."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the package, its log, and the launch screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: palmier-pro-deb-package
+          path: |
+            build-pkg/*.deb
+            cpack.log
+            smoke/palmier-pro-installed-launch.png
+            smoke/app.log
+            smoke/xvfb.log
+          if-no-files-found: warn
 
 
   # ---------------------------------------------------------------------------

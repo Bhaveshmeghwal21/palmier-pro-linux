@@ -72,6 +72,19 @@ if(PALMIER_BUILD_UI AND TARGET Qt6::Widgets)
         target_compile_options(palmier-pro PRIVATE
             $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic -Werror>)
     endif()
+
+    # usable-editor tasks.md task 16.1/16.3 (Requirement 13.1, 13.4): install the
+    # executable into the standard FHS binary directory and the GPLv3 LICENSE
+    # text plus the NOTICE file (the licensing split the repository documents)
+    # into the package's own doc directory, so a distribution package built from
+    # this tree (see the top-level CMakeLists.txt's CPack configuration) carries
+    # both without a separate packaging step reaching outside the build tree.
+    install(TARGETS palmier-pro
+        RUNTIME DESTINATION bin)
+    install(FILES
+        "${PROJECT_SOURCE_DIR}/LICENSE"
+        "${PROJECT_SOURCE_DIR}/NOTICE"
+        DESTINATION "share/doc/palmier-pro")
 endif()
 
 
