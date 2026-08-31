@@ -108,22 +108,85 @@ What shipped, and the two decisions that shaped it:
   into a race that passes for as long as the scheduler is kind, and then fails against an unrelated
   commit — which is the worst time to debug it, because every instinct points at the innocent change.
 
-- [ ] 2. Clip audio waveforms in the timeline (Requirement 2) — **M**
-  - [ ] 2.1 Add a peak-envelope computation producing min/max pairs over fixed-width source-time
+- [x] 2. Clip audio waveforms in the timeline (Requirement 2) — **M**
+  - [x] 2.1 Add a peak-envelope computation producing min/max pairs over fixed-width source-time
         buckets, reading through the same decoder path playback uses.
-  - [ ] 2.2 Run the computation off the project/UI thread, reusing the existing worker/teardown-queue
+  - [x] 2.2 Run the computation off the project/UI thread, reusing the existing worker/teardown-queue
         idiom rather than introducing a new threading model, and keep the shell responsive while it runs.
-  - [ ] 2.3 Add a bounded, LRU-evicting per-asset envelope cache shared by every clip referencing that
+  - [x] 2.3 Add a bounded, LRU-evicting per-asset envelope cache shared by every clip referencing that
         asset.
-  - [ ] 2.4 Draw the envelope inside each audio clip rectangle in `ui::TimelineGraphView`, mapped
+  - [x] 2.4 Draw the envelope inside each audio clip rectangle in `ui::TimelineGraphView`, mapped
         through the clip's `sourceIn` and trim so a horizontal position corresponds to the source time
         actually played there — not merely to the clip's width.
-  - [ ] 2.5 Redraw within 200 ms on trim/move/split without re-reading the file; draw nothing and report
+  - [x] 2.5 Redraw within 200 ms on trim/move/split without re-reading the file; draw nothing and report
         nothing for an asset with no audio stream; report a computation failure once, keep the clip
         editable, and do not retry per repaint.
-  - [ ] 2.6 Tests: bucket boundaries and min/max values against a synthesised asset with known content;
+  - [x] 2.6 Tests: bucket boundaries and min/max values against a synthesised asset with known content;
         a trimmed clip draws the correct source window; the cache is reused across clips and evicts under
         pressure; an audio-less asset yields no envelope and no error; a failing asset is reported once.
+
+Completed across four commits, each green first try — **zero CI incidents for this task**:
+
+| Commit | What landed | Suite |
+|---|---|---|
+| `f878bcc` (run `33421008474`) | `media::PeakEnvelope`, `PeakEnvelopeBuilder`, `PeakEnvelopeCache` | **1428/1428** (+31) |
+| `37fb7f0` (run `33421827252`) | `extractPeakEnvelope` through `MediaDecoder`'s audio surface | **1440/1440** (+12) |
+| `576b266` (run `33423157259`) | `PeakEnvelopeService` (worker + dedup), cache entries to `shared_ptr` | **1454/1454** (+14) |
+| `08f8800` (run `33424699310`) | `sourceWindowForColumn`, the drawing, and the composition wiring | **1464/1464** (+10) |
+
+It was deliberately split into four verified commits rather than one large one: the arithmetic had to be
+right before anything was built on it, and a green baseline after each step meant a later failure could
+only have come from the step that introduced it.
+
+The decisions worth keeping:
+
+- **Buckets are min/max pairs in SOURCE time, not magnitudes in clip time.** Both bounds are kept
+  because audio is signed and often asymmetric — collapsing a bucket to one magnitude draws a symmetric
+  shape that no longer corresponds to the signal and loses DC offset entirely. Positions are source time
+  so one envelope serves every clip referencing the asset however each was placed or trimmed
+  (Requirement 2.5).
+- **Bucket boundaries come from the absolute frame counter, never accumulated per buffer.** A decoder
+  hands over ragged blocks whose sizes are an artefact of the container; if boundaries drifted with block
+  size the same asset would draw differently on different days. Asserted directly, twice — once on the
+  builder with eight ragged chunk sizes, once end-to-end through the extractor with two very different
+  block layouts producing identical envelopes.
+- **`frameToSourceTime` splits into whole seconds plus a remainder.** The obvious
+  `frame * kTicksPerSecond / sampleRate` overflows a signed 64-bit tick count within a day of 48 kHz
+  audio and wraps into negative source times.
+- **Three outcomes, and only one of them is an error.** An envelope; an EMPTY envelope reported as
+  *success* for an asset with no audio (Requirement 2.6); an error only for a file that would not open, a
+  stream the build refuses, or a failed decode (Requirement 2.7). Conflating the middle with the last
+  would put an error in front of the user for a video with no soundtrack, so the cache stores silence as
+  an *answer* rather than as an absence — otherwise the cheapest case would become the most expensive
+  one, re-decoding a silent asset on every repaint forever.
+- **`lookup()` never blocks and never decodes.** That single rule shapes the whole service interface and
+  is how Requirement 2.2 became a precondition rather than an aspiration. It also makes deduplication
+  load-bearing rather than an optimisation: a repaint asks about every visible clip many times a second,
+  so an asset already in flight is not re-queued and a failure is remembered. Both suppressions are
+  counted, so 20 lookups yield 1 scheduled job and 19 suppressions, and 50 repaints of a failed asset
+  yield 1 attempt and 1 decoder open.
+- **The trim mapping is a named, separately-tested function.** `sourceWindowForColumn` is Requirement 2.3
+  as arithmetic. Interpolating over the clip's width alone looks entirely plausible and is wrong — it
+  draws the whole asset squeezed into every clip, so two clips cut from different points draw the same
+  shape. The tests pin exactly that: a clip trimmed to 40–60 ms starts at 40 ms and not at 0.
+- **The read is bounded.** A decode loop that trusts the backend to report end-of-stream hangs forever if
+  it never does — a stuck worker in an editor, an expired job in CI. Frame and decode-call limits turn
+  that into an ordinary reported failure, and the endless-backend case is tested because without the
+  bound that test does not fail, it never returns.
+- **Cache entries hold the envelope by `shared_ptr`.** A renderer resolves an asset once per repaint and
+  then reads per pixel column; if eviction could free it mid-loop the only safe alternatives would be
+  copying the whole envelope per clip per frame or holding the cache's lock for the entire paint.
+- **The ready callback is guarded by a liveness token.** The composition, and therefore the worker, can
+  outlive the window, so a late completion must not dereference a destroyed view. The token is a
+  `MainWindow` member, and members are destroyed before the `QWidget` base destroys its children — so by
+  the time the view could dangle, the `weak_ptr` has already expired. This was designed in, not found by
+  a crash.
+- **Digital silence draws a centre line, not nothing.** "Silent" and "no waveform available yet" must not
+  look identical to the user.
+
+Applying the lesson from incident 1: every place a test needed the worker parked mid-flight, the gate
+genuinely **blocks** (bounded, so a mistake fails rather than hangs). A gate that only signalled would
+let the worker finish and turn every "while in flight" assertion into a coin toss.
 
 - [ ] 3. Scrub audio (Requirement 3) — **S/M**
   - [ ] 3.1 Play programme audio at the dragged position while the playhead is dragged in
