@@ -197,19 +197,19 @@ dependency and the repository already contains TLS code for the MCP server to mo
 
 ## Phase 5 — Distribution and documentation
 
-- [ ] 16. Installable artifact (Requirement 13) — **M**
-  - [ ] 16.1 Package as a self-contained artifact for a documented distribution set, declaring or
+- [x] 16. Installable artifact (Requirement 13) — **M**
+  - [x] 16.1 Package as a self-contained artifact for a documented distribution set, declaring or
         bundling every dependency `PlatformCompatibility` requires.
-  - [ ] 16.2 Build it in CI from a tagged commit and verify it launches and renders by reusing the
+  - [x] 16.2 Build it in CI from a tagged commit and verify it launches and renders by reusing the
         existing launch smoke test against the installed artifact.
-  - [ ] 16.3 Ship the GPLv3 text and `NOTICE`, preserving the documented licensing split.
-  - [ ] 16.4 Tests: a host missing a required dependency is told which one, by name.
+  - [x] 16.3 Ship the GPLv3 text and `NOTICE`, preserving the documented licensing split.
+  - [x] 16.4 Tests: a host missing a required dependency is told which one, by name.
 
-- [ ] 17. Re-score the parity report (Requirement 14) — **S**
-  - [ ] 17.1 Re-score `docs/UPSTREAM_PARITY.md` against the tree, removing every stale
+- [x] 17. Re-score the parity report (Requirement 14) — **S**
+  - [x] 17.1 Re-score `docs/UPSTREAM_PARITY.md` against the tree, removing every stale
         "MainWindow is still a placeholder" and "panel is unmounted" rationale.
-  - [ ] 17.2 Record, per changed row, why the status changed.
-  - [ ] 17.3 Keep the documentation-consistency tests green.
+  - [x] 17.2 Record, per changed row, why the status changed.
+  - [x] 17.3 Keep the documentation-consistency tests green.
 
 ---
 
@@ -1490,5 +1490,68 @@ error from this task's own edits); and a minimal standalone CMake project mirror
 files, which configured cleanly and produced a `CPackConfig.cmake` carrying every setting
 (`CPACK_GENERATOR "DEB"`, `CPACK_DEBIAN_PACKAGE_SHLIBDEPS "ON"`, `CPACK_PACKAGE_NAME "palmier-pro"`)
 exactly as written.
+
+## Task 17 — final parity report re-score
+
+**Status: complete. This closes out the entire usable-editor spec.** Implementation commit
+`a388582` (run `33399357125`) FAILED — see the one CI incident (29) below — fixed by commit
+`199f2e4` (run `33400322466`): **"100% tests passed, 0 tests failed out of 1371."**
+
+Requirement 14's four acceptance criteria, verified against a full re-read of
+`docs/UPSTREAM_PARITY.md` (not only the rows tasks 12–16 touched):
+
+- **14.1** (no placeholder/unmounted language): the ONLY surviving mention of either phrase in the
+  whole document is the 2026-08-20 Phase-1 narrative entry, itself a historical record of a PAST
+  state ("`src/ui/` is byte-identical to the previous ref... stage 11 remains unbuilt") that the
+  very next entry in the same section describes closing. No current table row states either thing.
+- **14.2** (record why each changed row's status changed): one genuinely stale rationale was found
+  and corrected — `timeline` (Table 1) said "no marker or zoom tool exists yet", but task 11's
+  `ui::TimelineGraphView` (Phase 3, already landed) added Ctrl+wheel zoom that keeps the playhead
+  visible; the row stays `partial` (no marker tool exists regardless) with its rationale rewritten
+  to name only the surviving gap. A new dated Known-limits entry records this and every row that
+  was checked and found unchanged (color/color and effects, multicam, layout, beats, media, audio
+  scrub and metering, search, sync, words, telemetry, auto-update). `organize` and `project
+  browser and search` were already re-scored when task 15 landed; this pass confirms both remain
+  accurate rather than re-deriving them. Task 16 (installable distribution) added no capability any
+  of the 34 entries measures, so no row needed a change for it — recorded explicitly rather than
+  left silent.
+- **14.3** (GUI editing blocked by unwired affordances, not absent panels): no current row makes
+  the absent-panels claim either; that finding is likewise confined to the same historical entry
+  Phase 1's own follow-up entry already superseded.
+- **14.4** (update parity + backlog in the same change; keep documentation-consistency tests
+  green): `docs/PORT_BACKLOG.md` needed no change (confirmed by re-reading it; nothing in tasks
+  15–17 maps to a backlog entry). `docs/UPSTREAM_PARITY.md`'s own checker
+  (`tests/support/ReportParser`, `tests/docs/report_parser_test.cpp`,
+  `tests/docs/parity_report_property_test.cpp`) passed at 1371/1371 after incident 29's fix.
+
+### CI incidents (29)
+
+29. **A document-length-dependent fragility in `ReportParserTotality.ATruncatedDocumentYields-
+    DefectsAndDoesNotThrow`, not a defect in the re-score's content.** This test truncates the real
+    `docs/UPSTREAM_PARITY.md` at `size()/2`, `size()/3` and `size()/7` and asserts every truncation
+    is reported as defective. Its three fractions were never anchored to anything the checker
+    actually inspects — they assumed half the file would land mid-table. This task's Known-limits
+    narrative addition (which the checker enforces nothing about — it is free prose, unlike the
+    tables and the build-order list) lengthened the document enough that `size()/2` moved PAST the
+    end of both tables and the entire 23-item build-order list, landing only mid-sentence in the
+    trailing "Counts" paragraph — a cut point that is, correctly per every rule the checker applies,
+    defect-free, since every row and every build-order item ahead of it is complete and internally
+    consistent. This was not a mistake in the re-score itself; the test's assumption could not have
+    survived any sufficiently large future addition to a section that grows by design on every task
+    that changes a row. Fixed by anchoring all three fractions to the byte offset of the "## Known
+    limits" heading — the boundary of the last structurally-checked content — rather than to the
+    whole file's length, so every cut lands inside the tables/build-order list regardless of how
+    long the trailing prose grows in any future task.
+
+**New standing lesson**: a test that truncates or samples a real, checked document at a FRACTION of
+its total byte length is only as robust as the assumption that the fraction lands inside the
+content the checker actually inspects — an assumption that silently erodes as free-form narrative
+sections (which every past task's own "Known limits"/completion-record entries keep adding to)
+grow relative to the structured content. Any future test of this shape should anchor its cut
+points to a structural boundary (a heading, a table's own row count) rather than to the document's
+raw length.
+
+This completes every task in `.kiro/specs/usable-editor/tasks.md` — Phases 1 through 5.
+
 
 
