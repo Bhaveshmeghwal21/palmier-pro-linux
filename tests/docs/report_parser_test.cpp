@@ -306,9 +306,27 @@ TEST(ReportParserTotality, ATruncatedDocumentYieldsDefectsAndDoesNotThrow) {
     ASSERT_FALSE(parity.empty());
     ASSERT_FALSE(backlog.empty());
 
+    // Truncate relative to where each document's checkable STRUCTURE ends
+    // (the tables and the build-order list for the parity report; the
+    // entries for the backlog), not relative to the whole file's length.
+    // "## Known limits" is free-form prose the checker enforces nothing
+    // about, and it only ever grows (a new dated re-check entry is added on
+    // every task that changes a row) -- anchoring on the whole document's
+    // length meant a large enough prose section could push every fraction
+    // past the last row/list item the checker inspects, at which point a
+    // truncation this test draws would (correctly, per the checker's own
+    // rules) yield zero defects: not a false negative in the checker, but a
+    // cut point this test had stopped landing inside checkable content at
+    // all. Anchoring on the "## Known limits" heading keeps every cut inside
+    // the tables and the build-order list regardless of how long that prose
+    // section grows.
+    const std::size_t parityBound = parity.find("## Known limits");
+    ASSERT_NE(parityBound, std::string::npos) << "the parity report's own heading moved";
+    const std::size_t backlogBound = backlog.size();
+
     for (const std::size_t fraction : {2U, 3U, 7U}) {
-        EXPECT_FALSE(checkParity(parity.substr(0, parity.size() / fraction)).empty());
-        EXPECT_FALSE(checkBacklog(backlog.substr(0, backlog.size() / fraction)).empty());
+        EXPECT_FALSE(checkParity(parity.substr(0, parityBound / fraction)).empty());
+        EXPECT_FALSE(checkBacklog(backlog.substr(0, backlogBound / fraction)).empty());
     }
 }
 
