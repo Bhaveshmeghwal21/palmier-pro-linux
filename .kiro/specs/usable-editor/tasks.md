@@ -1292,3 +1292,125 @@ commit as the re-score) held on the first attempt this time, closing out the run
 CI incident per task that had held since task 8.
 
 Phase 4 Task 15 (media organisation) and Phase 5 Tasks 16–17 remain unstarted.
+
+## Task 15 — media organisation
+
+**Status: complete.** Final commit `7660ea4` (run `33394437444`): **"100% tests passed, 0 tests
+failed out of 1371"**, 5793 distinct colours. Like task 14, task 15 carries no numbered
+Requirement of its own in `requirements.md` — its acceptance criteria are exactly its own three
+tasks.md subtasks: bins or tags over the flat media library that round-trip through save/open, a
+filter field in the Media_Browser, and tests that organisation survives save/open while filtering
+never changes project state.
+
+- **Tags, not bins**: `core::MediaAssetRef::tags` (`std::vector<std::string>`) is a flat,
+  unvalidated label list, deliberately mirroring `sourcePath`'s own informational status —
+  excluded from `MediaAssetRef::operator==`/`!=`, since an asset's identity is still `assetId`
+  alone. Schema bumped to **1.4**: the first addition in the whole chain that needs no older
+  reader to reject a newer document, since an extra array key is harmlessly skippable rather than
+  a new track/clip kind.
+- **`services::ProjectStore`**: `writeMediaAssetRef` always writes `"tags"` as an array (empty
+  when none — the array always-present convention, not the null-when-absent convention
+  `textStyle`/`captionText` use for optional objects); `readMediaAssetRef` tolerates the key being
+  entirely absent (every pre-1.4 document) as well as present-but-empty.
+- **`core::MediaManager::setAssetTags(assetId, tags) -> Result<void>`** (`NotFound` if the asset
+  is absent) mutates the library in place via the existing `assetIndex_` map. Deliberately not an
+  `EditCommand` — tags are informational project state, like `sourcePath`, not a timeline edit.
+- **`media.set_tags`** (`assetId` uuid, `tags` array of string, both required) in
+  `services::ToolRegistry.cpp` — a third distinct tool category alongside "always-unavailable
+  hook" (`transcribe_to_captions`) and "configurable-in-a-real-build hook" (`capture_frame`,
+  `generation.*`): a complete, always-working default implementation with no external backend at
+  all, so it needed no hook field, registered directly like `timeline.add_track`. `media.list`'s
+  result gained a `tags` array per asset.
+- **`ui::MediaBrowserViewModel`**: `setFilterText`/`filterText`/`matchesFilter` (case-insensitive
+  ASCII substring match against display name, source path, or any tag); `library()` now returns
+  only matching rows, with an empty filter accepting every row — a strict extension of the old
+  behaviour; `libraryCount()` stays deliberately unfiltered. `setAssetTags`/`assetTags` delegate to
+  `MediaManager`.
+- **`ui::MediaBrowserPanel`**: a `QLineEdit` filter field above the library list, wired to
+  `setFilterText` on `textChanged`, re-rendering the (now-filtered) list on every keystroke. No
+  tag-editing control was added — task 15.1 only demands round-trip through save/open, which the
+  domain and tool layer alone satisfy; tags remain reachable through `media.set_tags` via
+  MCP/agent, a scope boundary chosen deliberately rather than discovered.
+- **Docs**: `docs/TOOLS.md` gained the `media.set_tags` section and the `tags` field on
+  `media.list`'s result; also opportunistically fixed a stale, unrelated gap found along the way —
+  `timeline.add_track`'s `kind` argument was documented as only `video, audio`, though `text` and
+  `caption` have been accepted since tasks 12/13.
+- **Tests**: `tests/services/project_store_test.cpp`'s hardcoded current-schema-version test moved
+  to 1.4; `project_store_property_test.cpp`'s asset round-trip generator now draws 0–3 arbitrary
+  tags; `tests/core/media_manager_test.cpp` gained 2 cases (`setAssetTags` replaces the tag list
+  wholesale; rejects an unknown asset); `tests/ui/media_browser_viewmodel_test.cpp` gained 8 cases
+  covering tag round-trip, tag-not-found rejection, and every filter shape (empty, display-name,
+  source-path substring, tag, no-match), including task 15.3's own explicit premise that filtering
+  changes no project state; `tests/ui/shell_unit_test.cpp` gained a case driving the real
+  `QLineEdit` through `MediaBrowserPanel::findChild` and checking `MediaManager::assetCount()` is
+  identical before and after filtering.
+- `docs/PORT_BACKLOG.md` has no entry mapping to media organisation, bins or tags — confirmed by
+  grep, no backlog update needed. `docs/UPSTREAM_PARITY.md`'s `organize` row (Table 1) re-scored
+  absent→partial (tags exist and round-trip; still no bin/folder/rating/colour-label structure);
+  `project browser and search` (Table 2, already partial) had its rationale updated to name what's
+  now present rather than only what's absent — neither row's build-order position or priority
+  changed. `linux-ref` → `2e39602`.
+
+### Verification evidence
+
+CI run `32750193345` (commit `2e39602`, the implementation): **99% tests passed, 11 tests failed
+out of 1371** — see incidents 25–27 below. CI run `33392183767` (commit `9372f95`, the first
+fix): **99% tests passed, 1 test failed out of 1371** — see incident 28. CI run `33393504435`
+(commit `39ec888`, the second fix): **100% tests passed, 0 tests failed out of 1371**, 5793
+distinct colours — the implementation finally green. CI run `33394437444` (commit `7660ea4`, the
+parity re-score): the same **1371/1371**, confirming the doc-only change introduced no regression.
+
+### CI incidents (25–28)
+
+25. **A real Class 2 (array item shape) gap, not a Class 1 relation, missed on the first
+    pre-push sweep.** `media.set_tags`'s `tags` argument is declared `JsonKind::Array` — expressing
+    only item *count*, never item *type* — so `ToolSchemaConformanceProperties.TheAdvertised-
+    SchemaAndTheHandlerAgree` fuzzed `{"tags":[3]}`: schema-valid, handler-rejected
+    (`"field 'tags' must contain strings"`). I had checked the file's Class 1 (cross-field) list
+    before the first push and found nothing, but never checked Class 2 — the exact category
+    `timeline.reorder_clips`/`reorder_effects`'s own `order` argument already occupies for the
+    identical reason. Fixed by adding an `allItemsAreStrings` helper alongside the existing
+    `allItemsAreUuidStrings` and a `media.set_tags` case in `documentedGap()`. **Standing check
+    #1 in the doctrine below is amended**: a new array-of-primitive argument needs its OWN look at
+    Class 2, not only Class 1 — the two are unrelated categories that happen to sit in the same
+    function.
+26. **A test-fixture bug in `documentation_consistency_test.cpp`'s own `media.set_tags`
+    scenario**, discovered by the same CI run: it looked its asset up by an id from
+    `registerAssets()`, which mutates `Project.assets` through a raw `engine().reset()` and never
+    rebuilds the separate `ProjectSession::mediaLibrary()` the tool actually reads from (see
+    `ProjectSession.hpp`'s own documented split between the two). Added
+    `registerMediaLibraryAsset()`, which imports directly into `mediaLibrary()`, and used it
+    instead.
+27. **`docs/TOOLS.md` documented `tags`'s type as "array of string"**, but `ToolSchema` only ever
+    publishes the bare JSON Schema type `"array"` — item type is not expressible, the same Class 2
+    shape `order` already has, documented there as plain `array` with the UUID-string requirement
+    described only in prose. Corrected `tags`'s row the same way, moving the string-ness into the
+    description.
+28. **The identical `ProjectSession::mediaLibrary()` gap as incident 26, in a second, independent
+    fixture** — `mcp_protocol_property_test.cpp`'s own `Stack` class, shared by every
+    `McpProtocolProperties` case, also calls `engine().reset(project)` directly without ever
+    importing `project.assets` into `mediaLibrary()`. Every `media.set_tags` draw in
+    `ToolsCallSuccessShape` therefore always failed with `NotFound`, regardless of which asset was
+    picked — and, for reasons a re-run after incidents 25–27 did not change, that failure surfaced
+    as a raw `basic_string: construction from null` exception rather than a readable `RC_ASSERT`
+    message, which is why this fixture bug took a second CI cycle to isolate from incident 25's
+    schema/handler gap rather than being fixed in the same push. Fixed by importing
+    `project.assets` into `session_->mediaLibrary()` in `Stack`'s constructor before the raw
+    engine reset, mirroring what `createProject`/`openProject` themselves do — after which the
+    tool call succeeds outright rather than needing to be excused as a documented failure shape.
+
+**New standing lesson added for future tasks**: a new array-typed tool argument needs its own
+explicit look at `tool_schema_conformance_property_test.cpp`'s Class 2 (array item shape) list,
+independently of whatever Class 1 (cross-field relation) check is already routine — the two gap
+classes live in the same function but are otherwise unrelated, and checking one is no evidence
+about the other. Separately: any test fixture that seeds a project by calling
+`engine().reset(project)` directly (bypassing `ProjectSession::createProject`/`openProject`) never
+populates the session's separate `mediaLibrary()` — `ProjectSession::observeEngine()` explicitly
+no-ops on `ChangeOrigin::Reset`. Any tool a fixture drives that reads through `mediaLibrary()`
+(currently only `media.set_tags`) needs that fixture to import its assets there too, not merely
+into `Project.assets`; this bit twice in the same task (`documentation_consistency_test.cpp` and
+`mcp_protocol_property_test.cpp`) because the two fixtures are independent, so fixing one is no
+evidence the other is fixed.
+
+Phase 5 Tasks 16–17 remain unstarted.
+
