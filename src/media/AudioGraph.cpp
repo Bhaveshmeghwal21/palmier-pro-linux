@@ -93,6 +93,39 @@ Result<AudioBuffer> mix(int sampleRate, int channels, std::size_t frameCount,
     return out;
 }
 
+AudioLevels measureLevels(const AudioBuffer& buffer) noexcept {
+    AudioLevels levels;
+    const int channels = buffer.channels();
+    const std::size_t frames = buffer.frameCount();
+    if (channels <= 0 || frames == 0) {
+        return levels;  // empty rather than an error: see the header's contract
+    }
+
+    const auto channelCount = static_cast<std::size_t>(channels);
+    levels.peak.assign(channelCount, 0.0f);
+    levels.rms.assign(channelCount, 0.0f);
+
+    // One pass over the interleaved samples accumulating both figures per
+    // channel. Sum of squares is accumulated in double so a long quantum of
+    // loud audio cannot lose precision before the square root.
+    std::vector<double> sumSquares(channelCount, 0.0);
+    const std::vector<float>& samples = buffer.samples();
+    const std::size_t usable = frames * channelCount;
+    for (std::size_t i = 0; i < usable && i < samples.size(); ++i) {
+        const std::size_t channel = i % channelCount;
+        const float sample = samples[i];
+        const float magnitude = std::fabs(sample);
+        if (magnitude > levels.peak[channel]) levels.peak[channel] = magnitude;
+        sumSquares[channel] += static_cast<double>(sample) * static_cast<double>(sample);
+    }
+
+    for (std::size_t channel = 0; channel < channelCount; ++channel) {
+        levels.rms[channel] =
+            static_cast<float>(std::sqrt(sumSquares[channel] / static_cast<double>(frames)));
+    }
+    return levels;
+}
+
 Result<std::vector<std::byte>> pack(const AudioBuffer& buffer, SampleFormat format) {
     AudioFormat fmt{buffer.sampleRate(), buffer.channels(), format};
     if (!fmt.isValid()) {

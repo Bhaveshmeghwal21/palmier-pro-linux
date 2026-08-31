@@ -44,6 +44,7 @@
 #include "core/Clip.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Uuid.hpp"
+#include "ui/AudioMeterWidget.hpp"
 #include "ui/GuiToolGateway.hpp"
 #include "ui/PreviewController.hpp"
 #include "ui/TimelineGraphView.hpp"
@@ -87,6 +88,12 @@ public:
     /// track's lane names that track as the placement target. std::nullopt only
     /// when nothing at all is selected.
     [[nodiscard]] std::optional<Uuid> selectedTrackId() const;
+
+    /// The programme level meter in the transport bar (monitoring-and-grading
+    /// Requirement 1.4). Exposed so MainWindow — which is the only class that can
+    /// reach the AudioEngine — installs its data providers, keeping this panel
+    /// and the meter itself ignorant of the composition root.
+    [[nodiscard]] AudioMeterWidget* levelMeter() const noexcept { return levelMeter_; }
 
 signals:
     /// A clip row became the tree's current selection.
@@ -145,6 +152,7 @@ private:
     QToolButton* undoButton_ = nullptr;
     QToolButton* redoButton_ = nullptr;
     QLabel*      playheadLabel_ = nullptr;
+    AudioMeterWidget* levelMeter_ = nullptr;  ///< monitoring-and-grading task 1.
     QSlider*     scrubSlider_ = nullptr;
     QLineEdit*   timecodeEdit_ = nullptr;
     QToolButton* stepBackButton_ = nullptr;

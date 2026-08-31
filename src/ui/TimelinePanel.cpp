@@ -81,6 +81,14 @@ void TimelinePanel::buildLayout() {
 
     playheadLabel_ = new QLabel(QStringLiteral("00:00:00.000"), transportBar);
 
+    // Programme level meter (monitoring-and-grading Requirement 1.4). It lives in
+    // the transport bar rather than in a dock of its own for two reasons: a meter
+    // belongs beside the transport an editor is already looking at, and the shell
+    // asserts an exact dock count, so a sixth dock would be a behaviour change
+    // dressed up as an addition. MainWindow installs its data providers.
+    levelMeter_ = new AudioMeterWidget(transportBar);
+    levelMeter_->setFixedWidth(120);
+
     transportLayout->addWidget(playButton_);
     transportLayout->addWidget(pauseButton_);
     transportLayout->addWidget(stopButton_);
@@ -88,6 +96,8 @@ void TimelinePanel::buildLayout() {
     transportLayout->addWidget(undoButton_);
     transportLayout->addWidget(redoButton_);
     transportLayout->addStretch(1);
+    transportLayout->addWidget(levelMeter_);
+    transportLayout->addSpacing(8);
     transportLayout->addWidget(playheadLabel_);
 
     // Playhead bar (usable-editor Requirement 4): a scrub slider spanning the

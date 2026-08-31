@@ -37,6 +37,35 @@ target_link_libraries(palmier_ui_preview_vm PUBLIC
     Palmier::gpu)
 
 # ---------------------------------------------------------------------------
+# palmier_ui_audio_meter_vm — the Qt-free programme level meter logic
+# (monitoring-and-grading task 1; Requirement 1.4-1.7).
+#
+# AudioMeterViewModel holds the meter's BEHAVIOUR — peak-hold decay, the
+# at-or-above-full-scale latch, and falling to zero on a stopped transport —
+# with no painting and no clock of its own: update() is told both the levels and
+# the instant they belong to. That is what lets the two real-time rules
+# (a >= 1 second clip indication, a <= 20 dB/s hold decay) be tested by driving
+# simulated time rather than by sleeping.
+#
+# Defined ABOVE the PALMIER_BUILD_UI guard, like palmier_ui_preview_vm above, so
+# it is built and unit-tested in BOTH trees — including hosts with no Qt. It
+# links Palmier::media for media::AudioLevels, the measurement type
+# media::measureLevels() produces.
+# ---------------------------------------------------------------------------
+add_library(palmier_ui_audio_meter_vm STATIC
+    AudioMeterViewModel.cpp)
+add_library(Palmier::ui_audio_meter_vm ALIAS palmier_ui_audio_meter_vm)
+
+target_include_directories(palmier_ui_audio_meter_vm PUBLIC
+    "${PROJECT_SOURCE_DIR}/src")
+
+target_compile_features(palmier_ui_audio_meter_vm PUBLIC cxx_std_20)
+
+target_link_libraries(palmier_ui_audio_meter_vm PUBLIC
+    Palmier::core
+    Palmier::media)
+
+# ---------------------------------------------------------------------------
 # palmier_ui_gateway — the Qt-free GUI-to-tool-surface gateway (task 11.1;
 # Requirements 1.7, 9.4, 11.5).
 #
@@ -123,6 +152,7 @@ if(TARGET Qt6::Widgets)
         MainWindow.cpp
         TimelinePanel.cpp
         TimelineGraphView.cpp
+        AudioMeterWidget.cpp
         ExportDialog.cpp
         ProjectSettingsDialog.cpp)
     add_library(Palmier::ui_shell ALIAS palmier_ui_shell)
@@ -154,6 +184,7 @@ if(TARGET Qt6::Widgets)
         Palmier::ui_gateway
         Palmier::ui_project_file_actions
         Palmier::ui_preview_vm
+        Palmier::ui_audio_meter_vm
         Palmier::ui_inspector_vm
         Palmier::ui_media_browser_vm
         Palmier::ui_agent_chat_vm

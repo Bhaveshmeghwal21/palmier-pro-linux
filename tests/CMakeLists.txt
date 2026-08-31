@@ -337,12 +337,35 @@ palmier_register_test(palmier_services_transcription_tests)
 # seam. Links Palmier::media (which brings in Palmier::gpu and Palmier::core).
 # ---------------------------------------------------------------------------
 add_executable(palmier_media_audio_tests
-    media_audio_graph_test.cpp)
+    media_audio_graph_test.cpp
+    media_audio_levels_test.cpp)
 target_link_libraries(palmier_media_audio_tests PRIVATE
     Palmier::media
     Palmier::test_support)
 
 palmier_register_test(palmier_media_audio_tests)
+
+
+# ---------------------------------------------------------------------------
+# Programme level meter logic tests (monitoring-and-grading task 1;
+# Requirements 1.5, 1.6, 1.7). Exercise the Qt-free ui::AudioMeterViewModel: the
+# peak-hold decay bound, the at-or-above-full-scale latch duration, and falling
+# to zero on a stopped transport. Both timing rules are driven with simulated
+# time (update() takes the instant as an argument), so these need no display, no
+# audio device and no sleeping. Links Palmier::ui_audio_meter_vm, which is
+# defined above src/ui's PALMIER_BUILD_UI guard precisely so this runs in the
+# headless tree too.
+# ---------------------------------------------------------------------------
+add_executable(palmier_ui_audio_meter_tests
+    ui/audio_meter_viewmodel_test.cpp)
+target_include_directories(palmier_ui_audio_meter_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_ui_audio_meter_tests PRIVATE
+    Palmier::ui_audio_meter_vm
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_ui_audio_meter_tests)
 
 
 # ---------------------------------------------------------------------------

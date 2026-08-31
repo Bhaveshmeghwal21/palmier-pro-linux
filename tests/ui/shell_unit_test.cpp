@@ -17,6 +17,7 @@
 
 #ifdef PALMIER_HAVE_QT
 
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -62,6 +63,7 @@
 #include "services/McpToolExecutor.hpp"
 #include "services/ProjectSession.hpp"
 #include "services/ToolRegistry.hpp"
+#include "ui/AudioMeterWidget.hpp"
 #include "ui/GuiToolGateway.hpp"
 #include "ui/MediaBrowserPanel.hpp"
 #include "ui/PreviewController.hpp"
@@ -391,6 +393,52 @@ TEST_F(ShellUnitTest, MediaBrowserFilterFieldNarrowsTheLibraryWithoutChangingIt)
 
     // The library itself, and the project it lives in, are untouched.
     EXPECT_EQ(composition.mediaLibrary().assetCount(), assetCountBefore);
+}
+
+// monitoring-and-grading task 1 (Requirement 1.4, 1.7): the programme level meter
+// is mounted in the transport bar rather than in a dock of its own, so the shell's
+// asserted dock count is deliberately unchanged by it.
+TEST_F(ShellUnitTest, TheProgrammeLevelMeterIsMountedInTheTransportBar) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+
+    TimelinePanel* timeline = window.findChild<TimelinePanel*>();
+    ASSERT_NE(timeline, nullptr);
+    AudioMeterWidget* meter = timeline->levelMeter();
+    ASSERT_NE(meter, nullptr) << "the transport bar must carry a level meter";
+
+    // Found through the widget tree as well, not merely through the accessor, so
+    // this fails if the meter is constructed but never parented into the panel.
+    EXPECT_NE(window.findChild<AudioMeterWidget*>(), nullptr);
+
+    // The dock count is the invariant this placement was chosen to preserve.
+    EXPECT_EQ(window.findChildren<QDockWidget*>().size(), 4u);
+}
+
+TEST_F(ShellUnitTest, TheLevelMeterFallsToZeroWhenTheTransportIsNotPlaying) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+
+    TimelinePanel* timeline = window.findChild<TimelinePanel*>();
+    ASSERT_NE(timeline, nullptr);
+    AudioMeterWidget* meter = timeline->levelMeter();
+    ASSERT_NE(meter, nullptr);
+
+    const auto t0 = std::chrono::steady_clock::now();
+
+    // A loud reading while playing registers...
+    media::AudioLevels loud;
+    loud.peak = {0.9f, 0.9f};
+    loud.rms = {0.7f, 0.7f};
+    meter->sampleAt(loud, /*playing=*/true, t0);
+    ASSERT_EQ(meter->viewModel().channelCount(), 2u);
+    EXPECT_NEAR(meter->viewModel().channels()[0].peak, 0.9f, 1.0e-5f);
+
+    // ...and the same reading with the transport stopped reads as silence
+    // (Requirement 1.7), rather than freezing at the last loud value.
+    meter->sampleAt(loud, /*playing=*/false, t0 + std::chrono::milliseconds{100});
+    EXPECT_FLOAT_EQ(meter->viewModel().channels()[0].peak, 0.0f);
+    EXPECT_FLOAT_EQ(meter->viewModel().channels()[0].rms, 0.0f);
 }
 
 

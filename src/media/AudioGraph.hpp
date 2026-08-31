@@ -170,6 +170,57 @@ struct MixSource {
 [[nodiscard]] Result<AudioBuffer> mix(int sampleRate, int channels, std::size_t frameCount,
                                       const std::vector<MixSource>& sources);
 
+// ---------------------------------------------------------------------------
+// Programme levels (monitoring-and-grading Requirement 1)
+// ---------------------------------------------------------------------------
+
+/// Per-channel programme levels for one buffer, in normalised units where 1.0 is
+/// full scale. Both vectors carry exactly one entry per channel of the measured
+/// buffer, so `peak.size() == rms.size() == buffer.channels()` for any buffer
+/// with a positive channel count, and both are empty otherwise.
+///
+/// These are a MEASUREMENT, never a stage: measureLevels() reads a buffer and
+/// returns this, changing nothing (Requirement 1.8). Keeping the type here — in
+/// the pure, FFmpeg-free, Qt-free buffer-math section — is what lets a meter be
+/// tested without a sink, a device or a display (Requirement 1.9).
+struct AudioLevels {
+    /// Per-channel maximum absolute sample value in the measured buffer.
+    std::vector<float> peak{};
+    /// Per-channel root mean square over the same samples.
+    std::vector<float> rms{};
+
+    /// True when a channel reached or exceeded full scale, which is what a
+    /// meter's clip indication latches on (Requirement 1.5).
+    [[nodiscard]] bool clippedOn(int channel) const noexcept {
+        const auto index = static_cast<std::size_t>(channel);
+        return channel >= 0 && index < peak.size() && peak[index] >= 1.0f;
+    }
+
+    /// The loudest channel's peak, or 0 when there are no channels.
+    [[nodiscard]] float peakAcrossChannels() const noexcept {
+        float loudest = 0.0f;
+        for (const float value : peak) {
+            if (value > loudest) loudest = value;
+        }
+        return loudest;
+    }
+};
+
+/// Measure `buffer`'s per-channel peak and RMS (Requirement 1.1, 1.2).
+///
+/// Peak is the maximum absolute sample value for that channel; RMS is the root
+/// mean square over the same samples. A buffer with no frames, or a non-positive
+/// channel count, measures as empty rather than as an error: a quantum the engine
+/// suppressed because no device is available is zero-filled silence, so it
+/// measures zero on both figures without a special case (Requirement 1.3), and
+/// "no device" stays distinguishable from "silent timeline" through
+/// AudioQuantumReport's own `suppressed` flag rather than through the levels.
+///
+/// Pure and total: no I/O, no dependency on a sink or a device, and no path that
+/// can fail. Its only allocations are the two returned vectors and one
+/// channel-sized scratch accumulator, all bounded by the channel count.
+[[nodiscard]] AudioLevels measureLevels(const AudioBuffer& buffer) noexcept;
+
 /// Pack an interleaved float buffer into `format`'s interleaved PCM byte layout,
 /// clamping to the format's representable range. The buffer's channel count must
 /// equal `format.channels`. Errors: InvalidArgument on a channel-count mismatch

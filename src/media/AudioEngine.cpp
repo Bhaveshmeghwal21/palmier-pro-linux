@@ -169,10 +169,15 @@ Result<std::size_t> AudioEngine::pump() {
         report.frames = buffer.frameCount();
     }
 
+    // Requirement 1.2: measured from the exact buffer this quantum submits, so
+    // the reported levels cannot diverge from what was heard. Read-only — the
+    // samples and the frame count handed to the sink below are untouched
+    // (Requirement 1.8).
+    report.levels = measureLevels(buffer);
+
     if (auto submitted = active_->submit(buffer); submitted.isError()) {
         return err<std::size_t>(std::move(submitted).error());
     }
-
     // Dropout accounting on the injected clock (Requirement 6.2).
     const auto now = clock_();
     if (lastDeliveryAt_.has_value()) {
@@ -207,6 +212,10 @@ Result<AudioBuffer> AudioEngine::renderRange(const Project& project, Duration fr
     AudioQuantumReport report{};
     auto               mixed = mixWindow(&project, from, to, report);
     if (mixed.isError()) return mixed;
+    // The export path publishes lastQuantum() too, so it reports levels on the
+    // same terms the playback path does rather than leaving them at zero and
+    // making a reader guess whether that meant silence.
+    report.levels = measureLevels(mixed.value());
     lastQuantum_ = std::move(report);
     return mixed;
 }

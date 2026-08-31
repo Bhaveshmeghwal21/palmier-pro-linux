@@ -37,6 +37,7 @@
 #include "core/MediaManager.hpp"
 #include "core/Project.hpp"
 #include "core/Uuid.hpp"
+#include "media/AudioEngine.hpp"
 #include "media/ImportValidation.hpp"
 #include "services/AgentOrchestrator.hpp"
 #include "services/Json.hpp"
@@ -126,6 +127,24 @@ void MainWindow::buildDocks() {
             &MainWindow::onTimelineSelectionCleared);
     connect(timelinePanel_, &TimelinePanel::placementTrackChanged, this,
             &MainWindow::onPlacementContextChanged);
+
+    // Programme level meter data seams (monitoring-and-grading Requirement 1.4).
+    // MainWindow is the only class here that can reach both the AudioEngine and
+    // the transport, so it supplies the two closures; the meter and the timeline
+    // panel stay ignorant of the composition root. The levels come from the
+    // engine's own last submitted quantum, so the meter reports what was heard
+    // rather than a second, separately-computed figure.
+    //
+    // Thread affinity: AudioEngine documents single-thread affinity for its
+    // mixing calls and spawns no threads of its own, and the playback pump that
+    // drives it runs on the GUI thread (PreviewView's timer), as does this
+    // meter's timer. The read below is therefore same-thread, not a race.
+    if (AudioMeterWidget* meter = timelinePanel_->levelMeter(); meter != nullptr) {
+        app::ApplicationComposition* composition = &composition_;
+        meter->setProviders(
+            [composition] { return composition->audioEngine().lastQuantum().levels; },
+            [composition] { return composition->playbackEngine().isPlaying(); });
+    }
 
     // Preview (central) — binds to the composition's SHARED PreviewController,
     // not a second independently-constructed one (Requirement 1.1).

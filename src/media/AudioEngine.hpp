@@ -167,6 +167,16 @@ struct AudioQuantumReport {
     /// True when the window was silence because no output device is available
     /// (Requirement 6.7) rather than because the timeline is silent.
     bool                           suppressed = false;
+    /// Per-channel peak and RMS of the buffer this window submitted, measured by
+    /// media::measureLevels() (monitoring-and-grading Requirement 1.1, 1.2).
+    ///
+    /// Reported here rather than through a separate observation channel because
+    /// this report is already the established way audio behaviour is made
+    /// inspectable rather than merely audible. A suppressed window submits
+    /// zero-filled silence, so its levels measure zero (Requirement 1.3) — the
+    /// `suppressed` flag above, not the levels, is what distinguishes "no output
+    /// device" from "the timeline is genuinely silent here".
+    AudioLevels                    levels{};
     std::vector<AudioContribution> contributions{};
 };
 
