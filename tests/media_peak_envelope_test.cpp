@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -358,8 +359,9 @@ TEST(PeakEnvelopeCache, AStoredEnvelopeIsReturnedAndSharedByEveryLookup) {
         const EnvelopeCacheEntry* entry = cache.find(asset);
         ASSERT_NE(entry, nullptr);
         EXPECT_FALSE(entry->failed);
-        ASSERT_EQ(entry->envelope.buckets.size(), 3u);
-        EXPECT_FLOAT_EQ(entry->envelope.buckets[0].max, 1.0f);
+        ASSERT_NE(entry->envelope, nullptr);
+        ASSERT_EQ(entry->envelope->buckets.size(), 3u);
+        EXPECT_FLOAT_EQ(entry->envelope->buckets[0].max, 1.0f);
     }
     EXPECT_EQ(cache.stats().hits, 3u);
     EXPECT_EQ(cache.size(), 1u);
@@ -376,7 +378,9 @@ TEST(PeakEnvelopeCache, AnAudiolessAssetCachesAsSilentAndIsNeverRecomputed) {
     ASSERT_NE(entry, nullptr) << "silence must be cached, not absent";
     EXPECT_TRUE(entry->isSilent());
     EXPECT_FALSE(entry->failed);
-    EXPECT_TRUE(entry->envelope.empty());
+    ASSERT_NE(entry->envelope, nullptr) << "a silent answer is still a stored answer";
+    EXPECT_TRUE(entry->envelope->empty());
+    EXPECT_EQ(entry->drawable(), nullptr) << "nothing to draw, and the renderer branches once";
     EXPECT_TRUE(entry->failure.empty());
 }
 
@@ -409,7 +413,8 @@ TEST(PeakEnvelopeCache, AReimportCanReplaceAFailureWithARealEnvelope) {
     ASSERT_NE(entry, nullptr);
     EXPECT_FALSE(entry->failed);
     EXPECT_TRUE(entry->failure.empty());
-    EXPECT_EQ(entry->envelope.buckets.size(), 3u);
+    ASSERT_NE(entry->envelope, nullptr);
+    EXPECT_EQ(entry->envelope->buckets.size(), 3u);
     EXPECT_EQ(cache.size(), 1u) << "replaced, not duplicated";
 }
 
@@ -480,6 +485,41 @@ TEST(PeakEnvelopeCache, PeekNeitherDisturbsRecencyNorMovesTheCounters) {
     const EnvelopeCacheStats after = cache.stats();
     EXPECT_EQ(before.hits, after.hits);
     EXPECT_EQ(before.misses, after.misses);
+}
+
+TEST(PeakEnvelopeCache, AHeldEnvelopeStaysValidAfterItsEntryIsEvicted) {
+    // The reason entries hold a shared_ptr. A renderer resolves an asset once per
+    // repaint and then reads the envelope per pixel column; if eviction freed it
+    // underneath that loop the only safe alternatives would be copying the whole
+    // envelope per clip per frame or holding the cache's lock for the whole paint.
+    PeakEnvelopeCache cache(1);
+    const Uuid        a = Uuid::generateV4();
+    const Uuid        b = Uuid::generateV4();
+
+    cache.store(a, threeBucketEnvelope());
+    std::shared_ptr<const PeakEnvelope> held = cache.find(a)->envelope;
+    ASSERT_NE(held, nullptr);
+
+    cache.store(b, threeBucketEnvelope());  // capacity 1: evicts a
+    ASSERT_FALSE(cache.contains(a));
+
+    // The evicted asset's envelope is still intact and still readable.
+    ASSERT_EQ(held->buckets.size(), 3u);
+    EXPECT_FLOAT_EQ(held->buckets[0].max, 1.0f);
+    EXPECT_FLOAT_EQ(held->hullOver(Duration::zero(), Duration::fromMilliseconds(3)).min, -1.0f);
+}
+
+TEST(PeakEnvelopeCache, EveryLookupOfOneAssetSharesOneEnvelopeRatherThanCopyingIt) {
+    // Requirement 2.5 concretely: forty clips from one interview hold one
+    // envelope, so the pointers must be identical, not merely equal in content.
+    PeakEnvelopeCache cache;
+    const Uuid        asset = Uuid::generateV4();
+    cache.store(asset, threeBucketEnvelope());
+
+    const PeakEnvelope* first = cache.find(asset)->envelope.get();
+    const PeakEnvelope* second = cache.find(asset)->envelope.get();
+    EXPECT_EQ(first, second);
+    EXPECT_NE(first, nullptr);
 }
 
 TEST(PeakEnvelopeCache, ForgetAndClearDropEntries) {

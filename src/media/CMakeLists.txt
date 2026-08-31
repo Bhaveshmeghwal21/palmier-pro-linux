@@ -30,7 +30,10 @@ add_library(palmier_media STATIC
     # Envelope extraction reads through MediaDecoder's audio surface — the same
     # path playback uses (Requirement 2.8), so what is drawn and what is heard
     # cannot disagree about an asset's content.
-    PeakEnvelopeExtractor.cpp)
+    PeakEnvelopeExtractor.cpp
+    # The service that puts the cache in front of the extractor and the extractor
+    # on a worker thread, so a repaint never waits for a decoder (Requirement 2.2).
+    PeakEnvelopeService.cpp)
 add_library(Palmier::media ALIAS palmier_media)
 
 # Public headers are included as "media/<Header>.hpp" / "core/<Header>.hpp".

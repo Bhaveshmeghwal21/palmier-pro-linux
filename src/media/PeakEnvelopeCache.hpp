@@ -40,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <list>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -51,17 +52,34 @@ namespace palmier::media {
 
 /// What the cache knows about one asset. Presence of this entry means the answer
 /// is known; the entry says what the answer is.
+///
+/// The envelope is held by `shared_ptr` so a reader can keep using it across an
+/// eviction. A renderer resolves an asset once per repaint and then queries the
+/// envelope per pixel column; if eviction could free it underneath that loop, the
+/// only safe alternatives would be copying the whole envelope per clip per frame
+/// or holding the cache's lock for the entire paint. Shared ownership costs one
+/// atomic and removes the choice.
 struct EnvelopeCacheEntry {
-    /// The computed envelope. Empty both for a failure and for an asset that
-    /// genuinely carries no audio — `failed` is what separates the two.
-    PeakEnvelope envelope{};
+    /// The computed envelope. Null or empty both mean "nothing to draw"; `failed`
+    /// is what separates an asset with no audio from one that would not read.
+    std::shared_ptr<const PeakEnvelope> envelope{};
     /// True when computation failed. The clip still draws (Requirement 2.7).
-    bool         failed = false;
+    bool                                failed = false;
     /// The failure's message, for the single report Requirement 2.7 allows.
-    std::string  failure{};
+    std::string                         failure{};
 
     /// Known, succeeded, and there was no audio to draw (Requirement 2.6).
-    [[nodiscard]] bool isSilent() const noexcept { return !failed && envelope.empty(); }
+    [[nodiscard]] bool isSilent() const noexcept {
+        return !failed && (envelope == nullptr || envelope->empty());
+    }
+
+    /// The envelope, or nullptr when there is nothing to draw for any reason.
+    /// Lets a renderer branch once instead of testing `failed` and emptiness
+    /// separately.
+    [[nodiscard]] const PeakEnvelope* drawable() const noexcept {
+        if (failed || envelope == nullptr || envelope->empty()) return nullptr;
+        return envelope.get();
+    }
 };
 
 /// Observability counters, monotonic over the cache's lifetime.

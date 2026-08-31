@@ -379,7 +379,8 @@ palmier_register_test(palmier_ui_audio_meter_tests)
 # ---------------------------------------------------------------------------
 add_executable(palmier_media_waveform_tests
     media_peak_envelope_test.cpp
-    media_peak_envelope_extractor_test.cpp)
+    media_peak_envelope_extractor_test.cpp
+    media_peak_envelope_service_test.cpp)
 target_link_libraries(palmier_media_waveform_tests PRIVATE
     Palmier::media
     Palmier::test_support)

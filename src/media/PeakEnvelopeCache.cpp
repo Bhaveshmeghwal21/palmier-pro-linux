@@ -38,7 +38,7 @@ const EnvelopeCacheEntry* PeakEnvelopeCache::peek(const Uuid& assetId) const noe
 
 void PeakEnvelopeCache::store(const Uuid& assetId, PeakEnvelope envelope) {
     EnvelopeCacheEntry entry;
-    entry.envelope = std::move(envelope);
+    entry.envelope = std::make_shared<const PeakEnvelope>(std::move(envelope));
     entry.failed = false;
 
     const auto it = entries_.find(assetId);
@@ -60,7 +60,7 @@ void PeakEnvelopeCache::store(const Uuid& assetId, PeakEnvelope envelope) {
 void PeakEnvelopeCache::storeFailure(const Uuid& assetId, std::string reason) {
     const auto it = entries_.find(assetId);
     if (it != entries_.end()) {
-        it->second.entry.envelope = PeakEnvelope{};
+        it->second.entry.envelope.reset();
         it->second.entry.failed = true;
         it->second.entry.failure = std::move(reason);
         touch(assetId);
