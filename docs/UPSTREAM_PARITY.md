@@ -16,8 +16,8 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: 2e3960202fcf3eaff2add98cc64700eae1aaee41 (branch `main`)
-- comparison-date: 2026-08-21
+- linux-ref: 4ecc030b29c641e82a031616e71d456ba823e519 (branch `main`)
+- comparison-date: 2026-08-31
 
 ## Status definitions (Requirement 13.7)
 
@@ -64,7 +64,7 @@ every `N. ` line as a build-order item.
 | category | status | linux-components | priority | rationale | macos-framework | linux-replacement |
 |---|---|---|---|---|---|---|
 | clips | present | core::EditCommands, services::ToolRegistry timeline.add_clip/delete_clip/move_clip/trim_clip/split_clip/reorder_clips/ripple_delete/ripple_trim/close_gap | - | - | - | - |
-| timeline | partial | core::TimelineEngine, services::ToolRegistry timeline.read/add_track/remove_track/set_track_muted, edit.undo, edit.redo, ui::TimelinePanel | should | Read, track add/remove/mute, undo/redo, a scrub/step/timecode playhead control and Add Video/Audio Track menu actions are reachable from the mounted TimelinePanel; no marker or zoom tool exists yet. | - | - |
+| timeline | partial | core::TimelineEngine, services::ToolRegistry timeline.read/add_track/remove_track/set_track_muted, edit.undo, edit.redo, ui::TimelinePanel, ui::TimelineGraphView | should | Read, track add/remove/mute, undo/redo, a scrub/step/timecode playhead, track actions and Ctrl+wheel zoom (keeps playhead visible) are reachable from Timeline_Panel/GraphView; no marker tool exists. | - | - |
 | texts | present | core::TextStyle, core::Clip::textStyle, services::ToolRegistry timeline.add_text_clip/set_text_content/set_text_style, gpu::Compositor, ui::QtTextRasterizer | - | - | - | - |
 | captions | partial | core::TrackKind::Caption, core::Clip::captionText, services::ToolRegistry timeline.add_caption_cue/set_caption_text/retime_caption_cue/remove_caption_cue/transcribe_to_captions, gpu::Compositor, services::CaptionExport | should | core::TrackKind::Caption, Clip::captionText and four cue tools plus burn-in and sidecar SRT export all work; transcribe_to_captions always reports Unsupported, since no recognizer is bundled. | - | - |
 | transcription | partial | services::TranscriptionService, services::ToolRegistry timeline.transcribe_to_captions | should | services::TranscriptionService is now constructed and reachable through timeline.transcribe_to_captions, but no recognizer backend is bundled or pluggable, so it always reports Unsupported by name. | - | - |
@@ -292,3 +292,20 @@ those claims rest on weaker evidence than the rest.
   no numbered Requirement of its own, this row's own two tasks.md subtasks — the operation and its
   test, both delivered in full — are what "present" is scored against here. No other row's
   Linux-side facts moved at this ref.
+- **2026-08-31 re-check (`.kiro/specs/usable-editor` Phase 4 task 15, Phase 5 task 16).** A full
+  re-read of this document against the current tree (Requirement 14.1-14.3): no row currently
+  states the shell is a placeholder or that any panel is unmounted — the one surviving mention of
+  either phrase is the 2026-08-20 Phase-1 entry above, itself a historical record of a PAST state
+  the very next entry describes closing, not a claim about the present tree. `organize` (tool
+  category) moved from `absent` to `partial` and `project browser and search` (capability area)
+  had its rationale rewritten to name what is now present, both already recorded when task 15
+  landed: `core::MediaAssetRef::tags` and `media.set_tags` let an asset carry free-form labels
+  round-tripping through save/open, and a name/path/tag filter narrows the Media_Browser's library
+  list. Re-reading every other row against the current tree surfaced one further stale rationale
+  this pass corrects: `timeline` (tool category) said "no marker or zoom tool exists yet", but
+  task 11's `ui::TimelineGraphView` (Phase 3) already added Ctrl+wheel zoom that keeps the playhead
+  visible — the row stays `partial` (no marker tool exists regardless) with its rationale rewritten
+  to name only the gap that is actually still open. Task 16 (installable distribution, Requirement
+  13) added no product capability any of the 34 entries measures — it packages the existing
+  binary, so no row's status or rationale needed a change for it. No other row's Linux-side facts
+  moved at this ref.
