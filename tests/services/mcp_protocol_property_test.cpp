@@ -442,6 +442,17 @@ public:
     explicit Stack(Project project, RegistryBuilder builder = {},
                    McpSessionRegistry::Options sessionOptions = {})
         : session_(std::make_unique<ProjectSession>()), sessions_(std::move(sessionOptions)) {
+        // media.set_tags (usable-editor tasks.md task 15) looks its asset up
+        // through ProjectSession::mediaLibrary() — a separate MediaManager the
+        // session normally rebuilds from the project on create/open (see
+        // ProjectSession.hpp's own documented split) — not through
+        // Project.assets directly. A raw engine().reset() below never
+        // triggers that rebuild, so every asset the drawn project carries is
+        // imported into the library here too, exactly as createProject and
+        // openProject themselves would.
+        for (const MediaAssetRef& asset : project.assets) {
+            (void)session_->mediaLibrary().importAsset(asset);
+        }
         (void)session_->engine().reset(std::move(project));
         registry_ = builder ? builder(*session_) : buildDefaultToolRegistry(*session_);
         executor_ = std::make_unique<McpToolExecutor>(registry_, session_.get());
