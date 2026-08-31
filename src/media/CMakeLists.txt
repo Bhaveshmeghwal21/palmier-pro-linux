@@ -26,7 +26,11 @@ add_library(palmier_media STATIC
     # reduction and the bounded LRU store — with no decoder, thread or Qt
     # dependency, so they build and are unit-tested wherever palmier_media does.
     PeakEnvelope.cpp
-    PeakEnvelopeCache.cpp)
+    PeakEnvelopeCache.cpp
+    # Envelope extraction reads through MediaDecoder's audio surface — the same
+    # path playback uses (Requirement 2.8), so what is drawn and what is heard
+    # cannot disagree about an asset's content.
+    PeakEnvelopeExtractor.cpp)
 add_library(Palmier::media ALIAS palmier_media)
 
 # Public headers are included as "media/<Header>.hpp" / "core/<Header>.hpp".
