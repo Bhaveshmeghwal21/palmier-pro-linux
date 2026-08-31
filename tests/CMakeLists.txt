@@ -369,6 +369,24 @@ palmier_register_test(palmier_ui_audio_meter_tests)
 
 
 # ---------------------------------------------------------------------------
+# Peak-envelope tests (monitoring-and-grading task 2; Requirements 2.1, 2.3,
+# 2.5, 2.6, 2.7). Exercise the pure data layer behind timeline audio waveforms:
+# the bucketed min/max reduction (including that bucket boundaries are a
+# function of the asset rather than of the decoder's block sizes), the per-pixel
+# hull query a renderer calls, and the bounded LRU cache's three-way
+# distinction between not-computed, computed-and-silent, and failed. No FFmpeg,
+# no media file, no device, no Qt. Links Palmier::media.
+# ---------------------------------------------------------------------------
+add_executable(palmier_media_waveform_tests
+    media_peak_envelope_test.cpp)
+target_link_libraries(palmier_media_waveform_tests PRIVATE
+    Palmier::media
+    Palmier::test_support)
+
+palmier_register_test(palmier_media_waveform_tests)
+
+
+# ---------------------------------------------------------------------------
 # Media encoder tests — unit tests for MediaEncoder's create/submit/finish
 # surface and its HW-preferred / SW-fallback-on-init routing, GPU-vs-CPU frame
 # acceptance, and the resolution / presentation-order guards (task 8.3;

@@ -20,7 +20,13 @@ add_library(palmier_media STATIC
     MediaProbe.cpp
     MediaDecoder.cpp
     MediaEncoder.cpp
-    AudioGraph.cpp)
+    AudioGraph.cpp
+    # Peak envelopes for timeline waveform drawing (monitoring-and-grading
+    # Requirement 2). Both are pure standard library — the bucketed min/max
+    # reduction and the bounded LRU store — with no decoder, thread or Qt
+    # dependency, so they build and are unit-tested wherever palmier_media does.
+    PeakEnvelope.cpp
+    PeakEnvelopeCache.cpp)
 add_library(Palmier::media ALIAS palmier_media)
 
 # Public headers are included as "media/<Header>.hpp" / "core/<Header>.hpp".
