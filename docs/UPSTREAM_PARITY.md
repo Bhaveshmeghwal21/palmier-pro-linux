@@ -16,7 +16,7 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: dce602318f0f866996455f5559d6d16c3304ec6d (branch `main`)
+- linux-ref: 2e3960202fcf3eaff2add98cc64700eae1aaee41 (branch `main`)
 - comparison-date: 2026-08-21
 
 ## Status definitions (Requirement 13.7)
@@ -72,7 +72,7 @@ every `N. ` line as a build-order item.
 | effects | present | core::EffectType, gpu::EffectKernels, gpu::Compositor, services::ToolRegistry timeline.add_effect/remove_effect/reorder_effects/set_effect_parameter, ui::InspectorPanel | - | - | - | - |
 | denoise | absent | none | later | No denoise effect type and no denoise kernel exist in core::Effect or gpu::EffectKernels, so noise reduction is unavailable on every surface. | - | - |
 | multicam | partial | core::ClipGroup, core::EditCommands::RippleTrimCommand, services::ToolRegistry timeline.ripple_trim | should | A ripple-trim on a grouped clip propagates the same source-time delta to every clipGroups member (PR 397); no angle-switching tool exists, so angles trim in sync but cannot be cut between. | - | - |
-| organize | absent | none | later | The media library is a flat list; no bin, folder, tag, rating or colour-label operation exists, so a project cannot be organised. | - | - |
+| organize | partial | core::MediaAssetRef::tags, services::ToolRegistry media.set_tags, ui::MediaBrowserViewModel | later | MediaAssetRef::tags lets an asset carry free-form labels, round-tripping through save/open, and media.set_tags publishes this; no bin, folder, rating or colour-label structure exists. | - | - |
 | layout | partial | core::EffectType::CropTransform, gpu::EffectKernels | later | Only crop_transform changes clip geometry; no multi-clip layout or picture-in-picture operation exists, so composing more than one clip on screen is not possible. | - | - |
 | media | partial | services::MediaImportService, core::MediaManager, services::ToolRegistry media.import/media.list, ui::MediaBrowserPanel | should | Import and list are reachable and the media browser panel is mounted, showing the library and a selected clip's retained versions and key moments; no tool removes, relinks or re-probes an asset. | - | - |
 | import | present | services::MediaImportService, media::MediaProbe, media::ImportValidation, services::ToolRegistry media.import | - | - | - | - |
@@ -97,7 +97,7 @@ every `N. ` line as a build-order item.
 | color and effects | partial | gpu::EffectKernels, gpu::Compositor, core::EffectType, services::ToolRegistry timeline.add_effect/remove_effect/reorder_effects/set_effect_parameter | should | Six effects including invert_colors render on both paths, and remove/reorder/re-parameterise are all reachable; there is still no curve, wheel, scope, LUT or denoise. | - | - |
 | audio scrub and metering | absent | none | should | The audio pipeline mixes and outputs, but no level meter, waveform or scrub-audio component exists, so levels cannot be monitored while editing. | SwiftUI | Qt 6 Widgets |
 | generation and upscaling | present | services::GenerationModelCatalog, services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::OpenSslGenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator, services::ToolRegistry generation.list_models/generation.generate | - | - | - | - |
-| project browser and search | partial | ui::MediaBrowserViewModel, ui::MediaBrowserPanel | later | The media browser panel is mounted and lists the library as a flat list; no bin, folder or tag structure and no search index exist, so assets cannot be organised or searched. | SwiftUI | Qt 6 Widgets |
+| project browser and search | partial | ui::MediaBrowserViewModel, ui::MediaBrowserPanel, core::MediaAssetRef::tags | later | The media browser panel lists the library with per-asset tags and a name/path/tag filter field now; no bin, folder structure or indexed search exists, so assets cannot be organised hierarchically. | SwiftUI | Qt 6 Widgets |
 | MCP and agent chat | partial | services::McpServer, services::McpProtocolHandler, services::McpSessionRegistry, services::RemoteAccessGate, services::AgentOrchestrator, services::OfflineIntentInterpreter, ui::AgentChatPanel | must | initialize, tools/list and tools/call work over JSON-RPC 2.0, the offline interpreter maps utterances, and the agent chat panel is mounted; no SSE stream or tools/list_changed. | SwiftUI | Qt 6 Widgets |
 | settings | partial | app::AppSettings, app::AppConfig | should | Defaults, config file, environment and flags are honoured at startup only; nothing changes a setting at runtime and there is no preferences surface. | SwiftUI | Qt 6 Widgets |
 | telemetry | absent | none | later | No telemetry, metrics or crash-reporting component exists in the tree, and Requirements 1 to 16 do not ask for one, so nothing is collected or reported. | - | - |
@@ -140,8 +140,8 @@ Each item is written `<name> (<table>) — <priority>` because `multicam` appear
 22. telemetry (capability area) — later
 23. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 11 `present`, 14 `partial`, 9 `absent`; 23 in this list, of which 1 `must`, 12 `should` and 10 `later`. Per table:
-table 1 holds 22 entries (9 `present`, 7 `partial`, 6 `absent`, so 13 appear below) and table 2
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 11 `present`, 15 `partial`, 8 `absent`; 23 in this list, of which 1 `must`, 12 `should` and 10 `later`. Per table:
+table 1 holds 22 entries (9 `present`, 8 `partial`, 5 `absent`, so 13 appear below) and table 2
 holds 12 (2 `present`, 7 `partial`, 3 `absent`, so 10 appear below).
 
 ## Known limits of this comparison
