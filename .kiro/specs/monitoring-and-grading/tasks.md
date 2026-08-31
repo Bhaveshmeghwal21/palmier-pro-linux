@@ -37,21 +37,76 @@ specs apply throughout, in particular:
 Blocker A. Nothing here needs a GPU or a new render path. Task 1 is deliberately first because it is
 a pure reduction over a buffer the mixer already produces.
 
-- [ ] 1. Programme output level metering (Requirement 1) — **S**
-  - [ ] 1.1 Add a pure, Qt-free level computation over an `media::AudioBuffer` returning per-channel
+- [x] 1. Programme output level metering (Requirement 1) — **S**
+  - [x] 1.1 Add a pure, Qt-free level computation over an `media::AudioBuffer` returning per-channel
         peak and RMS in normalised units, with no dependency on a sink or a device.
-  - [ ] 1.2 Report the levels on the existing `media::AudioQuantumReport` (extending it rather than
+  - [x] 1.2 Report the levels on the existing `media::AudioQuantumReport` (extending it rather than
         adding a second observation channel), computed from the exact buffer `AudioEngine::pump()`
         submits, so the measurement cannot diverge from what was heard.
-  - [ ] 1.3 Report zero levels for a `suppressed` quantum, keeping "no device" distinguishable from
+  - [x] 1.3 Report zero levels for a `suppressed` quantum, keeping "no device" distinguishable from
         "silent timeline" by the existing flag rather than by the levels.
-  - [ ] 1.4 Add a Qt level-meter widget to the Editor_Shell showing per-channel peak and RMS, with a
+  - [x] 1.4 Add a Qt level-meter widget to the Editor_Shell showing per-channel peak and RMS, with a
         distinct at-or-above-full-scale indication held for at least 1 second, a peak-hold decaying no
         faster than 20 dB/s, and a fall to zero when the transport stops.
-  - [ ] 1.5 Tests: peak and RMS of hand-computable buffers (silence, full-scale DC, a known sine,
+  - [x] 1.5 Tests: peak and RMS of hand-computable buffers (silence, full-scale DC, a known sine,
         asymmetric channels); a suppressed quantum reports zero; metering changes neither the submitted
         sample values nor the submitted frame count; the clip indication persists across repaints; the
         meter zeroes on stop.
+
+Completed at `dbadeeb` (run `33419535167`, **1397/1397**, +26 cases over the 1371 baseline), with **zero
+CI incidents of its own** — it went green first try. The one incident of this phase belonged to the
+spec commit that preceded it and is recorded below.
+
+What shipped, and the two decisions that shaped it:
+
+- `media::measureLevels()` (new) reduces an `AudioBuffer` to the new `media::AudioLevels` — per-channel
+  peak as the maximum absolute sample, RMS as the root mean square. It sits in `AudioGraph`'s existing
+  pure buffer-math section beside `mix()`, because audit finding 1 held: the mixer already produces
+  exactly the samples a meter needs, so no new decode, no second pass and no separate tap were required.
+  It is read-only and total — a degenerate buffer measures **empty rather than erroring**, which is what
+  lets Requirement 1.3 fall out with no special case, since a suppressed quantum is zero-filled silence
+  and therefore measures zero naturally. `AudioQuantumReport::suppressed`, not the levels, remains the
+  discriminator between "no output device" and "the timeline is genuinely silent here".
+- **The meter's timing rules live in a Qt-free view model, and time is an argument.**
+  `ui::AudioMeterViewModel::update()` is *told* the instant its levels belong to rather than reading a
+  clock. Requirement 1.5 (a ≥ 1 s clip indication) and Requirement 1.6 (a ≤ 20 dB/s hold decay) are both
+  stated in real time, and this is the only reason they are asserted by driving simulated time instead of
+  by sleeping — the suite gains 14 timing cases that run in microseconds. Because the decay depends only
+  on elapsed time, a caller that repaints twice as often cannot decay twice as fast; that is asserted
+  directly (ten 100 ms updates decay exactly as much as one 1000 ms update).
+- **The meter went into the existing transport bar, not a fifth dock.** `shell_unit_test.cpp` asserts the
+  shell has exactly four docks, and that assertion is correct: a level meter is not a panel. This was
+  found *before* pushing, by checking the assertion rather than discovering it in CI, and the new shell
+  cases re-assert the dock count alongside the meter's presence so the choice stays deliberate.
+- `ui::AudioMeterWidget` takes its data through two `std::function` seams rather than a reference to the
+  composition root, so it depends on neither `ApplicationComposition` nor `AudioEngine`; `MainWindow` —
+  the only class that can reach both the engine and the transport — installs the closures. Thread
+  affinity was checked rather than assumed: `AudioEngine` documents single-thread affinity for its mixing
+  calls and spawns no threads, and the pump that drives it runs on the GUI thread, as does the meter's
+  timer, so the read is same-thread.
+
+### CI incident 1 — a latent race in an unrelated test, surfaced by a documentation-only commit
+
+- **Incident 1 — `ExportCoordinatorTest.ADestroyedCoordinatorCancelsAndLeavesNoPartialFile` (run
+  `33417375130`, commit `f03f269`, 1 failure).** The failing commit added *only* this specification —
+  three files under `.kiro/specs/`, no source, no CMake, no test — so it could not have caused a test of
+  export cancellation to fail. The test carried a latent race and lost the coin toss. Its own comment
+  claimed it "parks the worker in the first frame, then destroys the coordinator", but the hook merely
+  set a `std::promise` and returned immediately, which parks nothing: the worker was free to encode all
+  four frames and call `guard.commit()` before the main thread reached `reset()`. A committed
+  `OutputGuard` deliberately keeps its file, so the closing `EXPECT_FALSE(exists(out))` failed — the
+  export was no longer in flight, which is the single precondition the test needs. Fixed at `2f19717`
+  (run `33418699369`, 1371/1371) by making the hook genuinely **block**: it signals `reached`, then waits
+  — bounded, so a mistake fails the test rather than hanging the suite — until released. `reset()` now
+  runs on a helper thread so the release can come from outside the destructor's `join()`, and because
+  `~ExportCoordinator` does `cancel()` then `joinWorker()`, the cancel flag is already set when the
+  worker is released, so it observes cancellation at its next frame boundary and the uncommitted guard
+  removes the partial file. Pushed on its own, ahead of any Task 1 code, so the metering work started
+  from a confirmed-green 1371 baseline instead of an ambiguous one.
+- **The lesson, added to the standing pre-push doctrine:** a test whose comment says it *parks* or
+  *blocks* a worker must actually block it. A hook that only signals converts a deterministic ordering
+  into a race that passes for as long as the scheduler is kind, and then fails against an unrelated
+  commit — which is the worst time to debug it, because every instinct points at the innocent change.
 
 - [ ] 2. Clip audio waveforms in the timeline (Requirement 2) — **M**
   - [ ] 2.1 Add a peak-envelope computation producing min/max pairs over fixed-width source-time
