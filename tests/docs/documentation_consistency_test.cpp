@@ -296,6 +296,19 @@ public:
         return ids;
     }
 
+    /// Register one asset in `session_.mediaLibrary()` itself, not merely in
+    /// `Project.assets` (`registerAssets()` above only does the latter, via a
+    /// raw `engine().reset()` that never rebuilds the separate MediaManager —
+    /// see ProjectSession.hpp's own documented split). media.set_tags looks
+    /// the asset up through `mediaLibrary()`, so it needs this instead.
+    Uuid registerMediaLibraryAsset() {
+        const Uuid id = Uuid::generateV4();
+        EXPECT_TRUE(session_.mediaLibrary()
+                        .importAsset(MediaAssetRef(id, "/media/tagged.mp4"))
+                        .isOk());
+        return id;
+    }
+
     /// The clip identifiers currently on `trackId`, read through `timeline.read`.
     [[nodiscard]] std::vector<std::string> clipIdsOf(const std::string& trackId) {
         std::vector<std::string> ids;
@@ -360,9 +373,11 @@ private:
     observer.run("generation.list_models", object());
 
     // Media organisation (usable-editor tasks.md task 15; no dedicated
-    // Requirement).
+    // Requirement). media.set_tags looks its asset up through mediaLibrary(),
+    // not Project.assets, so it needs its own real asset registered there.
+    const Uuid taggedAsset = observer.registerMediaLibraryAsset();
     services::Json setTags = object();
-    setTags.set("assetId", assets[0].toString());
+    setTags.set("assetId", taggedAsset.toString());
     services::Json tags = services::Json::array();
     tags.push_back(services::Json(std::string{"b-roll"}));
     setTags.set("tags", std::move(tags));

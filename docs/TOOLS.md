@@ -234,7 +234,7 @@ Requirement). Not an undoable edit: tags are informational project state, like a
 | Argument | Type | Required | Accepted values |
 |---|---|---|---|
 | `assetId` | string *uuid* | **yes** | must name an asset in `Project.assets` |
-| `tags` | array of string | **yes** | the asset's complete new tag list; replaces any existing tags |
+| `tags` | array | **yes** | the asset's complete new tag list (strings); replaces any existing tags |
 
 Result: `assetId` (string).
 

@@ -126,6 +126,7 @@ constexpr const char* kReorderEffects = "timeline.reorder_effects";
 constexpr const char* kGenerate = "generation.generate";
 constexpr const char* kSetProjectSettings = "project.set_settings";
 constexpr const char* kRetimeCaptionCue = "timeline.retime_caption_cue";
+constexpr const char* kMediaSetTags = "media.set_tags";
 
 // ---------------------------------------------------------------------------
 // The `ArgSpec` type predicate, mirrored
@@ -568,6 +569,14 @@ enum class SharedRule { None, MissingRequired, WrongTypedRequired, OutOfEnumRequ
     return true;
 }
 
+[[nodiscard]] bool allItemsAreStrings(const Json& value) {
+    if (!value.isArray()) return false;
+    for (const Json& item : value.asArray()) {
+        if (!item.isString()) return false;
+    }
+    return true;
+}
+
 [[nodiscard]] const char* documentedGap(const Tool& tool, const ToolSchema& schema,
                                         const Json& args, const Error& error) {
     // Class 4 — a state-dependent rule enforced by the core command.
@@ -618,6 +627,13 @@ enum class SharedRule { None, MissingRequired, WrongTypedRequired, OutOfEnumRequ
         if (order != nullptr && !allItemsAreUuidStrings(*order)) {
             return "class 2: array item shape — 'order' can only be declared an array, "
                    "not an array of canonical UUID strings";
+        }
+    }
+    if (tool.name == kMediaSetTags) {
+        const Json* tags = args.find("tags");
+        if (tags != nullptr && !allItemsAreStrings(*tags)) {
+            return "class 2: array item shape — 'tags' can only be declared an array, "
+                   "not an array of strings";
         }
     }
 
