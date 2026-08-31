@@ -1412,5 +1412,83 @@ into `Project.assets`; this bit twice in the same task (`documentation_consisten
 `mcp_protocol_property_test.cpp`) because the two fixtures are independent, so fixing one is no
 evidence the other is fixed.
 
-Phase 5 Tasks 16–17 remain unstarted.
+Phase 5 Task 16 (installable distribution) is now complete; Task 17 (final parity re-score)
+remains unstarted.
+
+## Task 16 — installable distribution
+
+**Status: complete.** Implementation commit `4ecc030` (run `33396420598`, an ordinary branch
+push): **"100% tests passed, 0 tests failed out of 1371"**, 5793 distinct colours — the packaging
+job correctly `skipped` on this push, since it is gated on a `v*` tag (Requirement 13.3's "produced
+by CI from a tagged commit"). The tag push itself (`v0.1.0`, run `33396936297`) then exercised that
+job for real: **all three real jobs (`Build & Test`, `Configure without vendor SDKs`, `Build and
+verify the installable .deb`) succeeded**, with the L4 job correctly `skipped` (it needs a
+self-hosted runner this repository has none of).
+
+Requirement 13's five acceptance criteria, each with its own evidence from the tag-triggered run:
+
+- **13.1** (a self-contained artifact for a documented distribution set, bundling or declaring
+  every runtime dependency): `cmake/PalmierPackaging.cmake` configures CPack's `DEB` generator with
+  `CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON`. The built package is `palmier-pro_0.1.0_amd64.deb`, and its
+  real, auto-detected `Depends:` field reads exactly `libavcodec60 (>= 7:6.0), libavformat60 (>=
+  7:6.0), libavutil58 (>= 7:6.0), libc6 (>= 2.38), libgcc-s1 (>= 3.0), libqt6core6t64 (>= 6.4.0),
+  libqt6gui6t64 (>= 6.1.2), libqt6widgets6t64 (>= 6.3.0), libssl3t64 (>= 3.0.0), libstdc++6 (>=
+  13.1), libswresample4 (>= 7:6.0), libswscale7 (>= 7:6.0), libvulkan1 (>= 1.2.131.2)` — read from
+  the real built package via `dpkg-deb -f`, not asserted. Debian/Ubuntu is one of docs/BUILD.md's
+  already-documented distribution families (Ubuntu 22.04+, Debian 12+, Fedora 38+, RHEL/Alma/Rocky
+  9+, Arch), and the one with direct CI evidence, satisfying "a documented set of distributions"
+  without needing every family packaged at once.
+- **13.2** (appears within the 15-second budget with no manual dependency installation): the launch
+  smoke test below ran against the package installed purely through `apt`/`dpkg`'s own dependency
+  resolution — no manual step supplied anything `Depends:` did not already pull in.
+- **13.3** (produced by CI from a tagged commit; CI verifies it launches and renders, reusing the
+  existing smoke test): the `package` job in `.github/workflows/ci.yml`, gated on
+  `startsWith(github.ref, 'refs/tags/v')`, builds the package, installs it for real with `apt-get
+  install "$(readlink -f "$deb")"` (exercising real `Depends:` resolution against the runner's apt
+  sources, not a bypass), then reuses the identical Xvfb/`xdotool`/ImageMagick launch-and-render
+  logic `build-and-test`'s own smoke test already uses — against the INSTALLED `/usr/bin/palmier-pro`
+  resolved via `PATH`, not a build-tree binary. Real output: **"OK: the installed .deb's palmier-pro
+  launched, mapped its main window and painted 5569 distinct colours."**
+- **13.4** (the installed application carries the GPLv3 licence text and NOTICE): `src/app/CMakeLists.txt`
+  gained `install(FILES LICENSE NOTICE DESTINATION "share/doc/palmier-pro")`, landing at
+  `/usr/share/doc/palmier-pro/` under CPack DEB's own default `/usr` install prefix. Verified against
+  the actual built package (`dpkg-deb -x` into a scratch directory, not merely the package's file
+  list): **"OK: LICENSE is present in the package"**, **"OK: NOTICE is present in the package."**
+- **13.4, missing-dependency naming** (task 16.4): already fully satisfied before this task by
+  `tests/app/platform_compatibility_test.cpp`'s pre-existing `MissingSingleDependencyIsNamed` and
+  `EveryMissingDependencyIsNamedIndividually` cases (from an earlier phase of this project, predating
+  the usable-editor spec) — confirmed present by reading the file's test list; no new test needed.
+  `PlatformCompatibility`'s launch-time `dlopen` gate remains a second, independent check for a host
+  whose package manager was bypassed (a copied binary, or a library removed after installation),
+  distinct from `dpkg`'s own `Depends:` refusal at install time.
+
+Also updated: `docs/BUILD.md` gained an "Installable package" section (outside the
+`palmier-options` extraction-contract markers, confirmed by reading that region first) describing
+the `cpack -G DEB` invocation and what the CI `package` job verifies. `docs/PORT_BACKLOG.md` has no
+entry mapping to Requirement 13/installable distribution — confirmed by grep, no update needed.
+
+### CI incidents: none
+
+Both the implementation push and the verification tag push went green on the first attempt.
+Applied proactively before the first push: `cmake/PalmierPackaging.cmake` needed the same
+`SPDX-License-Identifier: GPL-3.0-or-later` leading-comment-block header every other `.cmake` file
+under `cmake/` carries — caught by re-reading `tests/docs/repository_hygiene_property_test.cpp`'s
+own scanned-file rule (`cmake/`, extension `.cmake`) BEFORE writing the file, having initially
+mis-read `PalmierOptions.cmake`'s own first line as unheadered (an off-by-one in a tool's line
+numbering, caught by re-reading the literal first line directly) — this second read is what
+surfaced the requirement in time. `CPACK_PACKAGE_DESCRIPTION_SUMMARY` was deliberately set to a
+plain-ASCII string rather than reused from `PROJECT_DESCRIPTION` (which carries an em dash),
+avoiding a Debian control-file encoding warning before it could occur. The CMake changes were
+verified syntactically valid THREE independent ways before the first push, none of which this
+project's standard tool stack (no Qt/FFmpeg/Vulkan on the Windows dev host) would otherwise allow:
+`cmake --trace-expand -P cmake/PalmierPackaging.cmake` in script mode (exercises every line up to
+and including `include(CPack)`); a real `cmake -S . -B` configure of the actual top-level tree
+(fails at the pre-existing, unrelated `PalmierDependencies.cmake` dependency-discovery step, since
+this Windows host has none of FFmpeg/Vulkan/etc. — but reaches that point with no earlier syntax
+error from this task's own edits); and a minimal standalone CMake project mirroring the real
+`project()` + `install()` + `include(PalmierPackaging)` sequence with the real `LICENSE`/`NOTICE`
+files, which configured cleanly and produced a `CPackConfig.cmake` carrying every setting
+(`CPACK_GENERATOR "DEB"`, `CPACK_DEBIAN_PACKAGE_SHLIBDEPS "ON"`, `CPACK_PACKAGE_NAME "palmier-pro"`)
+exactly as written.
+
 
