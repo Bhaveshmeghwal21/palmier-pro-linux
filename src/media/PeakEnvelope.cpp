@@ -119,13 +119,41 @@ void PeakEnvelopeBuilder::add(const AudioBuffer& buffer) noexcept {
     }
 }
 
-PeakEnvelope PeakEnvelopeBuilder::finish() const {
-    PeakEnvelope envelope;
+PeakEnvelope PeakEnvelopeBuilder::finish() const {    PeakEnvelope envelope;
     if (!valid_) return envelope;  // stays empty: silent, not failed
     envelope.bucketDuration = bucketDuration_;
     envelope.sampleRate = sampleRate_;
     envelope.buckets = buckets_;
     return envelope;
+}
+
+// ---------------------------------------------------------------------------
+// Clip trim -> source time mapping (Requirement 2.3)
+// ---------------------------------------------------------------------------
+
+ClipSourceWindow sourceWindowForColumn(Duration sourceIn, Duration sourceOut, int column,
+                                       int widthPx) noexcept {
+    if (widthPx <= 0 || column < 0 || column >= widthPx) return ClipSourceWindow{};
+    if (sourceOut <= sourceIn) return ClipSourceWindow{};
+
+    const std::int64_t span = sourceOut.ticks() - sourceIn.ticks();
+    const auto         width = static_cast<std::int64_t>(widthPx);
+
+    // Interpolated in ticks with the multiply first, so a clip narrower than its
+    // source span does not collapse every column onto the same instant through
+    // integer truncation. span <= ~1e17 for any real asset and width <= ~1e4, so
+    // the product stays inside int64.
+    const std::int64_t from = sourceIn.ticks() + (span * static_cast<std::int64_t>(column)) / width;
+    const std::int64_t to =
+        sourceIn.ticks() + (span * (static_cast<std::int64_t>(column) + 1)) / width;
+
+    ClipSourceWindow window;
+    window.from = Duration::fromNanoseconds(from);
+    // A column narrower than one tick would otherwise be empty; keep it
+    // non-degenerate so hullOver() reports the bucket it lands in rather than
+    // silence, which is what makes an extreme zoom hold a value instead of gapping.
+    window.to = Duration::fromNanoseconds(to > from ? to : from + 1);
+    return window;
 }
 
 } // namespace palmier::media

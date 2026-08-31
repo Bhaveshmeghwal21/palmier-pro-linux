@@ -27,6 +27,7 @@
 #include <QMessageBox>
 #include <QStatusBar>
 #include <QString>
+#include <QMetaObject>
 #include <QTimer>
 #include <QUrl>
 #include <QDesktopServices>
@@ -39,6 +40,7 @@
 #include "core/Uuid.hpp"
 #include "media/AudioEngine.hpp"
 #include "media/ImportValidation.hpp"
+#include "media/PeakEnvelopeService.hpp"
 #include "services/AgentOrchestrator.hpp"
 #include "services/Json.hpp"
 #include "services/KeyMomentMarkers.hpp"
@@ -144,6 +146,40 @@ void MainWindow::buildDocks() {
         meter->setProviders(
             [composition] { return composition->audioEngine().lastQuantum().levels; },
             [composition] { return composition->playbackEngine().isPlaying(); });
+    }
+
+    // Timeline audio waveforms (monitoring-and-grading Requirement 2.3, 2.4).
+    //
+    // The graph view asks for an envelope once per audio clip per repaint; the
+    // service answers from its cache and schedules a decode on a miss, so this
+    // closure never blocks the paint. A miss returns null and the clip draws with
+    // no waveform, which is also what an audio-less asset looks like — nothing
+    // drawn, nothing reported (Requirement 2.6).
+    if (TimelineGraphView* graph = timelinePanel_->graphView(); graph != nullptr) {
+        media::PeakEnvelopeService* envelopes = &composition_.peakEnvelopeService();
+        graph->setEnvelopeProvider(
+            [envelopes](const Uuid& assetId, const std::string& sourcePath) {
+                return envelopes->lookup(assetId, sourcePath).envelope;
+            });
+
+        // When an envelope becomes available the worker fires this from ITS thread,
+        // so the repaint request is marshalled onto the GUI thread rather than
+        // touching a widget across threads. A queued invocation is exactly the
+        // "report a repaint, do not paint" contract the callback documents, and it
+        // is what lets a trim redraw inside Requirement 2.4's 200 ms without the
+        // view polling for completion.
+        //
+        // The token guards a real crash path: the composition (and therefore the
+        // service and its worker) can outlive this window, so a late completion
+        // must not dereference a destroyed view. The token is a MainWindow member,
+        // and members are destroyed before the QWidget base destroys its children —
+        // so by the time `graph` could dangle, the weak_ptr has already expired.
+        std::weak_ptr<int> alive = envelopeCallbackToken_;
+        envelopes->setReadyCallback([graph, alive](const Uuid&) {
+            if (alive.expired()) return;
+            QMetaObject::invokeMethod(graph, [graph] { graph->update(); },
+                                      Qt::QueuedConnection);
+        });
     }
 
     // Preview (central) — binds to the composition's SHARED PreviewController,

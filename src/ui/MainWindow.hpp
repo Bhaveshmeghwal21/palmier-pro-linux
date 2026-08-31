@@ -123,6 +123,13 @@ private:
     AgentChatViewModel            agentChatViewModel_;
     ProjectFileActions            fileActions_;
 
+    /// Liveness token for the envelope service's ready callback, which the
+    /// service's worker thread fires and which must not touch this window's views
+    /// after it is gone (monitoring-and-grading Requirement 2.2). Declared FIRST
+    /// among these members so it is destroyed before them, and — being a member —
+    /// before the QWidget base destroys the child views themselves.
+    std::shared_ptr<int> envelopeCallbackToken_ = std::make_shared<int>(0);
+
     TimelinePanel*      timelinePanel_ = nullptr;
     PreviewView*        previewView_ = nullptr;
     InspectorPanel*     inspectorPanel_ = nullptr;

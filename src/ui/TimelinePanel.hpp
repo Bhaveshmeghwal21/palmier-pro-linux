@@ -95,6 +95,12 @@ public:
     /// and the meter itself ignorant of the composition root.
     [[nodiscard]] AudioMeterWidget* levelMeter() const noexcept { return levelMeter_; }
 
+    /// The graphical timeline view (monitoring-and-grading Requirement 2.3).
+    /// Exposed for the same reason as levelMeter(): MainWindow installs the audio
+    /// envelope provider, so neither this panel nor the view depends on the
+    /// composition root or on the envelope service.
+    [[nodiscard]] TimelineGraphView* graphView() const noexcept { return graph_; }
+
 signals:
     /// A clip row became the tree's current selection.
     void clipSelected(const QString& clipId);

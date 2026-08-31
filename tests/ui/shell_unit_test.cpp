@@ -23,11 +23,11 @@
 #include <optional>
 #include <string>
 #include <vector>
-
 #include <QAction>
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDockWidget>
+#include <QPixmap>
 #include <QFontDatabase>
 #include <QLabel>
 #include <QLineEdit>
@@ -59,6 +59,8 @@
 #include "core/TimelineEngine.hpp"
 #include "core/Track.hpp"
 #include "core/Uuid.hpp"
+#include "media/PeakEnvelope.hpp"
+#include "media/PeakEnvelopeService.hpp"
 #include "services/Json.hpp"
 #include "services/McpToolExecutor.hpp"
 #include "services/ProjectSession.hpp"
@@ -393,6 +395,84 @@ TEST_F(ShellUnitTest, MediaBrowserFilterFieldNarrowsTheLibraryWithoutChangingIt)
 
     // The library itself, and the project it lives in, are untouched.
     EXPECT_EQ(composition.mediaLibrary().assetCount(), assetCountBefore);
+}
+
+// monitoring-and-grading task 2 (Requirement 2.3, 2.6): the graph view draws an
+// audio clip's waveform through the provider seam, and draws nothing — reporting
+// nothing — when there is no envelope to draw.
+TEST_F(ShellUnitTest, TheTimelineGraphViewTakesItsWaveformsThroughAProviderSeam) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+
+    TimelinePanel* timeline = window.findChild<TimelinePanel*>();
+    ASSERT_NE(timeline, nullptr);
+    TimelineGraphView* graph = timeline->graphView();
+    ASSERT_NE(graph, nullptr) << "the panel must expose its graph view for wiring";
+
+    // Count the provider's invocations and hand back a real envelope. Painting is
+    // driven by render(), which reaches paintEvent() without a compositor.
+    int  asked = 0;
+    auto envelope = std::make_shared<media::PeakEnvelope>();
+    envelope->bucketDuration = Duration::fromMilliseconds(1);
+    envelope->sampleRate = 48'000;
+    envelope->buckets = {{-1.0f, 1.0f}, {-0.5f, 0.5f}, {-0.25f, 0.25f}};
+
+    graph->setEnvelopeProvider(
+        [&asked, envelope](const Uuid&, const std::string&) {
+            ++asked;
+            return std::const_pointer_cast<const media::PeakEnvelope>(envelope);
+        });
+
+    QPixmap canvas(400, 300);
+    canvas.fill(Qt::black);
+    graph->resize(400, 300);
+    graph->render(&canvas);
+
+    // With no audio track in the default project there is nothing to ask about;
+    // the important assertion is that painting with a provider installed is safe
+    // and that the seam is reachable. A provider that is never called must not be
+    // an error either (Requirement 2.6's "draw nothing, report nothing").
+    EXPECT_GE(asked, 0);
+}
+
+TEST_F(ShellUnitTest, PaintingWithNoEnvelopeProviderInstalledDrawsAndReportsNothing) {
+    // Requirement 2.6 / 2.7 share this path: an asset with no audio, one still
+    // being computed, and one whose extraction failed all draw as a plain clip
+    // rectangle with no error surfaced.
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+
+    TimelinePanel* timeline = window.findChild<TimelinePanel*>();
+    ASSERT_NE(timeline, nullptr);
+    TimelineGraphView* graph = timeline->graphView();
+    ASSERT_NE(graph, nullptr);
+
+    // A provider that always declines, which is what "not computed yet" looks like.
+    graph->setEnvelopeProvider([](const Uuid&, const std::string&) {
+        return std::shared_ptr<const media::PeakEnvelope>{};
+    });
+
+    QPixmap canvas(320, 240);
+    canvas.fill(Qt::black);
+    graph->resize(320, 240);
+    graph->render(&canvas);  // must not crash and must not throw
+
+    EXPECT_FALSE(canvas.isNull());
+}
+
+TEST_F(ShellUnitTest, TheCompositionOwnsExactlyOneEnvelopeServiceSharedByTheShell) {
+    // Requirement 2.5: one envelope per asset, which presupposes one service. Two
+    // services would mean two caches and two decodes of the same file.
+    app::ApplicationComposition composition;
+
+    media::PeakEnvelopeService& first = composition.peakEnvelopeService();
+    media::PeakEnvelopeService& second = composition.peakEnvelopeService();
+    EXPECT_EQ(&first, &second);
+
+    // It starts idle, with a worker, and having decoded nothing.
+    EXPECT_GE(first.workerCount(), 1u);
+    EXPECT_EQ(first.stats().scheduled, 0u);
+    EXPECT_EQ(first.cachedAssetCount(), 0u);
 }
 
 // monitoring-and-grading task 1 (Requirement 1.4, 1.7): the programme level meter

@@ -14,6 +14,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <memory>
+#include <utility>
 
 #include <QColor>
 #include <QFontMetrics>
@@ -33,6 +35,11 @@
 namespace palmier::ui {
 
 namespace {
+
+// The waveform ink. A fixed colour rather than a palette role: it must read
+// against both the normal and the selected clip fill, and every palette role that
+// contrasts with one of those blends into the other.
+const QColor kWaveformColour{0x1b, 0x3a, 0x2a};
 
 // The trailing filename of a source path, for a short on-rectangle label. An
 // empty or slash-free path is returned as-is.
@@ -229,6 +236,12 @@ void TimelineGraphView::paintEvent(QPaintEvent* /*event*/) {
             }
             Duration start = clip->timelineStart;
             Duration end = clip->timelineEnd();
+            // The clip's SOURCE range, which a trim changes and a move does not.
+            // Tracked alongside the timeline range so the waveform follows a live
+            // trim gesture rather than snapping only once the edit is applied
+            // (monitoring-and-grading Requirement 2.4).
+            Duration sourceIn = clip->sourceIn;
+            Duration sourceOut = clip->sourceOut;
             // While this exact clip is being dragged, paint its LIVE (not yet
             // committed) position/extent instead of the model's — the model
             // only changes once the gesture is actually applied on release.
@@ -241,10 +254,16 @@ void TimelineGraphView::paintEvent(QPaintEvent* /*event*/) {
                     case DragKind::TrimStart:
                         start = clip->timelineStart + drag_->liveDelta;
                         end = clip->timelineEnd();
+                        // Trimming the head consumes source from the front, so the
+                        // waveform must scroll within the asset, not stretch.
+                        sourceIn = drag_->originalSourceIn + drag_->liveDelta;
+                        sourceOut = drag_->originalSourceOut;
                         break;
                     case DragKind::TrimEnd:
                         start = clip->timelineStart;
                         end = clip->timelineEnd() + drag_->liveDelta;
+                        sourceIn = drag_->originalSourceIn;
+                        sourceOut = drag_->originalSourceOut + drag_->liveDelta;
                         break;
                     case DragKind::None:
                         break;
@@ -264,6 +283,16 @@ void TimelineGraphView::paintEvent(QPaintEvent* /*event*/) {
             painter.setPen(selected ? palette().color(QPalette::HighlightedText)
                                     : palette().color(QPalette::Text));
             painter.drawRect(clipRect);
+
+            // Requirement 2.3: the waveform belongs to clips on an AUDIO track.
+            // Drawn after the fill and border so it sits inside the rectangle, and
+            // before the label so the filename stays legible over it.
+            if (track && track->kind == TrackKind::Audio) {
+                paintClipWaveform(painter, clipRect, clip->assetRef.assetId,
+                                  clip->assetRef.sourcePath, sourceIn, sourceOut);
+                painter.setPen(selected ? palette().color(QPalette::HighlightedText)
+                                        : palette().color(QPalette::Text));
+            }
 
             const QString label = shortLabel(clip->assetRef.sourcePath);
             if (!label.isEmpty() && clipRect.width() > 12) {
@@ -289,6 +318,59 @@ void TimelineGraphView::setPlayhead(Duration position) {
     }
     playhead_ = position;
     update();
+}
+
+void TimelineGraphView::setEnvelopeProvider(EnvelopeProvider provider) {
+    envelopeProvider_ = std::move(provider);
+    update();  // whatever is on screen can now carry a waveform
+}
+
+void TimelineGraphView::paintClipWaveform(QPainter& painter, const QRect& clipRect,
+                                          const Uuid& assetId, const std::string& sourcePath,
+                                          Duration sourceIn, Duration sourceOut) {
+    // Requirement 2.6 and the pending case share this exit: no envelope means no
+    // waveform and no error. A clip with no audio, one still being computed, and
+    // one whose extraction failed all simply draw as a plain rectangle.
+    if (!envelopeProvider_) return;
+    if (clipRect.width() <= 2 || clipRect.height() <= 4) return;
+    if (sourceOut <= sourceIn) return;
+
+    // Resolved ONCE per clip per repaint; read per column below. Held by
+    // shared_ptr so the cache behind it may evict this entry mid-paint.
+    const std::shared_ptr<const media::PeakEnvelope> envelope =
+        envelopeProvider_(assetId, sourcePath);
+    if (!envelope || envelope->empty()) return;
+
+    // Only the columns actually on screen are drawn; a clip may extend far beyond
+    // the viewport in either direction.
+    const int firstX = std::max(clipRect.left(), 0);
+    const int lastX = std::min(clipRect.right(), width() - 1);
+    if (lastX < firstX) return;
+
+    const int centreY = clipRect.center().y();
+    const int halfHeight = (clipRect.height() - 2) / 2;
+    if (halfHeight <= 0) return;
+
+    painter.save();
+    painter.setPen(kWaveformColour);
+    for (int x = firstX; x <= lastX; ++x) {
+        // Requirement 2.3: the column's position is converted to SOURCE time
+        // through the clip's trim, not merely scaled across its width.
+        const media::ClipSourceWindow window = media::sourceWindowForColumn(
+            sourceIn, sourceOut, x - clipRect.left(), clipRect.width());
+        if (window.isEmpty()) continue;
+
+        const media::EnvelopeBucket hull = envelope->hullOver(window.from, window.to);
+        const int top = centreY - static_cast<int>(std::clamp(hull.max, -1.0f, 1.0f) *
+                                                   static_cast<float>(halfHeight));
+        const int bottom = centreY - static_cast<int>(std::clamp(hull.min, -1.0f, 1.0f) *
+                                                      static_cast<float>(halfHeight));
+        // Always at least one pixel tall, so digital silence reads as a centre
+        // line rather than as nothing drawn at all — "silent" and "no waveform
+        // available" must not look identical.
+        painter.drawLine(x, std::min(top, bottom), x, std::max(top, bottom) + 1);
+    }
+    painter.restore();
 }
 
 // ---------------------------------------------------------------------------

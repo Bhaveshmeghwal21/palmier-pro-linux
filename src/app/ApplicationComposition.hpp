@@ -108,6 +108,7 @@ class DecoderTeardownQueue;
 class DecoderClipFrameProvider;
 class AudioEngine;
 class IAudioSink;
+class PeakEnvelopeService;
 }  // namespace palmier::media
 
 namespace palmier::ui {
@@ -369,6 +370,15 @@ public:
         return *decoderTeardown_;
     }
 
+    /// The one timeline-waveform envelope service (monitoring-and-grading
+    /// Requirement 2). Built with the same decode backend factory as the playback
+    /// path, so a waveform and the mix cannot disagree about an asset's content
+    /// (Requirement 2.8), and owning its own worker so a repaint never waits on a
+    /// decode (Requirement 2.2).
+    [[nodiscard]] media::PeakEnvelopeService& peakEnvelopeService() noexcept {
+        return *peakEnvelopes_;
+    }
+
     // --- Audio_Engine (task 8.7; Requirements 1.1, 6.3, 6.7) ---------------
     //
     // Exactly one `media::AudioEngine`, constructed with:
@@ -580,6 +590,10 @@ private:
     std::unique_ptr<media::DecoderTeardownQueue>        decoderTeardown_;
     std::unique_ptr<media::DecoderClipFrameProvider>    clipFrameProvider_;
     std::unique_ptr<ui::PreviewController>              playbackEngine_;
+    /// Timeline audio waveforms (monitoring-and-grading Requirement 2). Declared
+    /// after the members above and before the audio engine so its worker is joined
+    /// on destruction in the reverse order it was started.
+    std::unique_ptr<media::PeakEnvelopeService>         peakEnvelopes_;
 
     // --- Audio_Engine: selected sink -> engine -> master clock (task 8.7) --
     // `audioProject_` is the storage behind the engine's ProjectProvider: the

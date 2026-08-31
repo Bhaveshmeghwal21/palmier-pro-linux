@@ -52,6 +52,7 @@
 #include "media/DecoderClipFrameProvider.hpp"
 #include "media/DecoderTeardownQueue.hpp"
 #include "media/MediaDecoder.hpp"
+#include "media/PeakEnvelopeService.hpp"
 
 #include "ui/PreviewController.hpp"
 
@@ -436,6 +437,14 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     playbackEngine_ = std::make_unique<ui::PreviewController>(
         *compositor_, *gpu_,
         [session = session_.get()]() { return session->engine().snapshot(); });
+
+    // --- Timeline audio waveforms (monitoring-and-grading Requirement 2) ----
+    // Built with the same ffmpegDecodeBackendFactory() the playback decode path
+    // uses, which is Requirement 2.8: what is drawn and what is heard read the
+    // asset through one decoder, so they cannot disagree about its content. The
+    // service owns its own worker, so a repaint never waits on a decode.
+    peakEnvelopes_ = std::make_unique<media::PeakEnvelopeService>(
+        media::DecodePrefs{}, media::ffmpegDecodeBackendFactory());
 
     // --- Audio_Engine (task 8.7; Requirements 1.1, 6.3, 6.7) ---------------
     // Startup sink selection in the design's order PipeWire -> ALSA -> Null. A

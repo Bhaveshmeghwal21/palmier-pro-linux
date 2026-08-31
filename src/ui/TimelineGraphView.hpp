@@ -49,7 +49,10 @@
 #ifdef PALMIER_HAVE_QT
 
 #include <cstddef>
+#include <functional>
+#include <memory>
 #include <optional>
+#include <string>
 
 #include <QPoint>
 #include <QWidget>
@@ -57,9 +60,12 @@
 #include "core/Clip.hpp"
 #include "core/Duration.hpp"
 #include "core/Uuid.hpp"
+#include "media/PeakEnvelope.hpp"
 
 class QMouseEvent;
 class QPaintEvent;
+class QPainter;
+class QRect;
 class QResizeEvent;
 class QWheelEvent;
 
@@ -107,6 +113,26 @@ public:
     /// every other playhead-derived widget, keeping this view's marker and the
     /// scrub slider/timecode field in agreement to the same source of truth.
     void setPlayhead(Duration position);
+
+    /// Resolves an asset to its audio peak envelope, or null when there is nothing
+    /// to draw yet (monitoring-and-grading Requirement 2.3, 2.4).
+    ///
+    /// A std::function seam rather than a reference to the envelope service, for
+    /// the same reason AudioMeterWidget takes its levels through one: this view
+    /// stays a presentation surface that depends on no composition root, and a test
+    /// can supply a synthesised envelope with no decoder, no file and no thread.
+    ///
+    /// Called at most ONCE per clip per repaint; the returned envelope is then read
+    /// per pixel column. It is a shared_ptr so the cache behind it may evict the
+    /// entry mid-paint without invalidating what is being drawn.
+    using EnvelopeProvider =
+        std::function<std::shared_ptr<const media::PeakEnvelope>(const Uuid& assetId,
+                                                                 const std::string& sourcePath)>;
+
+    /// Install the envelope seam. Absent, audio clips simply draw no waveform,
+    /// which is also what a still-computing or audio-less asset looks like
+    /// (Requirement 2.6: nothing drawn, nothing reported).
+    void setEnvelopeProvider(EnvelopeProvider provider);
 
 signals:
     /// A clip rectangle was clicked/selected.
@@ -176,7 +202,17 @@ private:
     // --- Zoom -------------------------------------------------------------------
     void zoomBy(double factor, int pivotX);
 
+    // --- Audio waveform (monitoring-and-grading Requirement 2.3, 2.4) --------
+    /// Draw `clip`'s waveform inside `clipRect`, reading the source range
+    /// [`sourceIn`, `sourceOut`) so the shape follows the clip's trim rather than
+    /// its width. `painter` is already positioned; nothing is drawn when there is
+    /// no envelope, no width, or no source extent.
+    void paintClipWaveform(QPainter& painter, const QRect& clipRect, const Uuid& assetId,
+                           const std::string& sourcePath, Duration sourceIn, Duration sourceOut);
+
     TimelineViewModel& viewModel_;
+
+    EnvelopeProvider envelopeProvider_{};
 
     double   pixelsPerSecond_ = 60.0;  ///< horizontal zoom; clamped to a sane range
     Duration scrollOffset_;             ///< timeline position at the widget's left edge

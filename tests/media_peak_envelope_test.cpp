@@ -335,6 +335,110 @@ TEST(PeakEnvelopeHull, BucketAtSelectsBySourceTimeAndClampsOutOfRange) {
 }
 
 // ---------------------------------------------------------------------------
+// sourceWindowForColumn — Requirement 2.3's mapping, as arithmetic
+// ---------------------------------------------------------------------------
+
+TEST(SourceWindowForColumn, ColumnsWalkTheSourceRangeFromInToOut) {
+    const Duration in = Duration::fromMilliseconds(0);
+    const Duration out = Duration::fromMilliseconds(100);
+
+    const ClipSourceWindow first = sourceWindowForColumn(in, out, 0, 10);
+    EXPECT_EQ(first.from, Duration::fromMilliseconds(0));
+    EXPECT_EQ(first.to, Duration::fromMilliseconds(10));
+
+    const ClipSourceWindow middle = sourceWindowForColumn(in, out, 5, 10);
+    EXPECT_EQ(middle.from, Duration::fromMilliseconds(50));
+    EXPECT_EQ(middle.to, Duration::fromMilliseconds(60));
+
+    const ClipSourceWindow last = sourceWindowForColumn(in, out, 9, 10);
+    EXPECT_EQ(last.from, Duration::fromMilliseconds(90));
+    EXPECT_EQ(last.to, Duration::fromMilliseconds(100));
+}
+
+TEST(SourceWindowForColumn, ATrimmedClipDrawsTheMiddleOfTheAssetNotTheWholeOfIt) {
+    // The case that separates a correct implementation from a plausible one. A clip
+    // trimmed to 40ms-60ms of its source must map its columns into THAT window; an
+    // implementation interpolating over the clip's width alone would start at zero
+    // and draw the entire asset squeezed into the clip.
+    const ClipSourceWindow first =
+        sourceWindowForColumn(Duration::fromMilliseconds(40), Duration::fromMilliseconds(60), 0, 20);
+    EXPECT_EQ(first.from, Duration::fromMilliseconds(40)) << "not 0";
+
+    const ClipSourceWindow last =
+        sourceWindowForColumn(Duration::fromMilliseconds(40), Duration::fromMilliseconds(60), 19, 20);
+    EXPECT_EQ(last.from, Duration::fromMilliseconds(59));
+    EXPECT_EQ(last.to, Duration::fromMilliseconds(60)) << "not the asset's end";
+}
+
+TEST(SourceWindowForColumn, TwoEquallyWideClipsCutFromDifferentPointsMapDifferently) {
+    // Same width, same source duration, different sourceIn: the windows must not
+    // coincide, or both clips would draw the same shape.
+    const ClipSourceWindow early =
+        sourceWindowForColumn(Duration::fromMilliseconds(0), Duration::fromMilliseconds(20), 7, 20);
+    const ClipSourceWindow late =
+        sourceWindowForColumn(Duration::fromMilliseconds(80), Duration::fromMilliseconds(100), 7, 20);
+
+    EXPECT_NE(early.from, late.from);
+    EXPECT_EQ(late.from - early.from, Duration::fromMilliseconds(80));
+}
+
+TEST(SourceWindowForColumn, AdjacentColumnsAreContiguousAndCoverTheWholeRange) {
+    // No gaps and no overlaps, so every sample of the source range is drawn exactly
+    // once across the clip.
+    const Duration in = Duration::fromMilliseconds(13);
+    const Duration out = Duration::fromMilliseconds(137);
+    constexpr int  width = 37;
+
+    ClipSourceWindow previous = sourceWindowForColumn(in, out, 0, width);
+    EXPECT_EQ(previous.from, in);
+    for (int column = 1; column < width; ++column) {
+        const ClipSourceWindow current = sourceWindowForColumn(in, out, column, width);
+        EXPECT_EQ(current.from, previous.to) << "gap or overlap before column " << column;
+        previous = current;
+    }
+    EXPECT_EQ(previous.to, out) << "the last column must reach the clip's source end";
+}
+
+TEST(SourceWindowForColumn, AColumnNarrowerThanATickIsStillNonDegenerate) {
+    // An extreme zoom must hold a value rather than produce gaps: an empty window
+    // would make hullOver() report silence.
+    const ClipSourceWindow window = sourceWindowForColumn(
+        Duration::zero(), Duration::fromNanoseconds(3), 1, 100);
+    EXPECT_FALSE(window.isEmpty());
+    EXPECT_GT(window.to.ticks(), window.from.ticks());
+}
+
+TEST(SourceWindowForColumn, OutOfRangeColumnsAndDegenerateGeometryYieldEmptyWindows) {
+    const Duration in = Duration::zero();
+    const Duration out = Duration::fromMilliseconds(100);
+
+    EXPECT_TRUE(sourceWindowForColumn(in, out, -1, 10).isEmpty());
+    EXPECT_TRUE(sourceWindowForColumn(in, out, 10, 10).isEmpty());
+    EXPECT_TRUE(sourceWindowForColumn(in, out, 0, 0).isEmpty());
+    EXPECT_TRUE(sourceWindowForColumn(in, out, 0, -5).isEmpty());
+    // A clip with no source extent (or an inverted one) has nothing to draw.
+    EXPECT_TRUE(sourceWindowForColumn(out, out, 0, 10).isEmpty());
+    EXPECT_TRUE(sourceWindowForColumn(out, in, 0, 10).isEmpty());
+}
+
+TEST(SourceWindowForColumn, TheMappingComposesWithHullOverToDrawTheTrimmedRegion) {
+    // End to end on the two functions a renderer actually calls: three 1ms buckets
+    // of +1, -1, +0.25, drawn by a clip trimmed to the LAST bucket only. Every
+    // column must report 0.25 and none may report the +1 or the -1.
+    const PeakEnvelope envelope = threeBucketEnvelope();
+    const Duration     in = Duration::fromMilliseconds(2);
+    const Duration     out = Duration::fromMilliseconds(3);
+    constexpr int      width = 16;
+
+    for (int column = 0; column < width; ++column) {
+        const ClipSourceWindow window = sourceWindowForColumn(in, out, column, width);
+        const EnvelopeBucket   hull = envelope.hullOver(window.from, window.to);
+        EXPECT_FLOAT_EQ(hull.max, 0.25f) << "column " << column;
+        EXPECT_FLOAT_EQ(hull.min, 0.25f) << "column " << column;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PeakEnvelopeCache
 // ---------------------------------------------------------------------------
 

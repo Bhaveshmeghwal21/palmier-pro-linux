@@ -147,6 +147,32 @@ private:
 /// a day of audio) and would silently wrap into negative source times.
 [[nodiscard]] Duration frameToSourceTime(std::int64_t frame, int sampleRate) noexcept;
 
+/// The source-time range one pixel column of a drawn clip covers.
+struct ClipSourceWindow {
+    Duration from{};
+    Duration to{};
+
+    [[nodiscard]] bool isEmpty() const noexcept { return to <= from; }
+};
+
+/// Map pixel column `column` of a clip `widthPx` wide onto the source-time range
+/// it actually plays, given the clip's trim.
+///
+/// This is Requirement 2.3 reduced to arithmetic, and it is the reason the rule is
+/// stated as "honouring the clip's `sourceIn` and any trim, not merely the clip's
+/// width": a clip trimmed to the middle of an asset must draw the MIDDLE of that
+/// asset's waveform, and two clips of equal width cut from different points must
+/// draw different shapes. Interpolating over the clip's width alone would draw the
+/// whole asset squeezed into every clip — which looks plausible and is wrong, so
+/// the mapping is a named, separately-tested function rather than three lines
+/// inside a paint handler.
+///
+/// `column` is measured from the clip's left edge. A column outside
+/// [0, widthPx) or a non-positive width yields an empty window, so a renderer
+/// clipping to the viewport needs no special cases.
+[[nodiscard]] ClipSourceWindow sourceWindowForColumn(Duration sourceIn, Duration sourceOut,
+                                                     int column, int widthPx) noexcept;
+
 } // namespace palmier::media
 
 #endif // PALMIER_MEDIA_PEAKENVELOPE_HPP
