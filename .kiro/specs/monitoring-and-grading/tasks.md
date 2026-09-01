@@ -289,17 +289,100 @@ task supplies only the missing cadence.
   brace checker, which is only trusted because its output is diffed against `git show HEAD:file` so
   pre-existing false positives cancel and only the delta is read.
 
-- [ ] 3. Scrub audio (Requirement 3) — **S/M**
-  - [ ] 3.1 Play programme audio at the dragged position while the playhead is dragged in
+- [x] 3. Scrub audio (Requirement 3) — **S/M**
+  - [x] 3.1 Play programme audio at the dragged position while the playhead is dragged in
         `ui::TimelineGraphView`, stopping within 200 ms of the drag ending and restoring the transport's
         prior playing/stopped state.
-  - [ ] 3.2 Make scrub audio suppressible by a user-visible setting and suppress it automatically when no
+  - [x] 3.2 Make scrub audio suppressible by a user-visible setting and suppress it automatically when no
         output device is available, in neither case slowing the drag.
-  - [ ] 3.3 Drop audio rather than delay the drag when the decoder cannot keep up, keeping the dragged
+  - [x] 3.3 Drop audio rather than delay the drag when the decoder cannot keep up, keeping the dragged
         playhead visually responsive.
-  - [ ] 3.4 Tests: a drag produces audio and stops on release; the transport state is restored exactly;
+  - [x] 3.4 Tests: a drag produces audio and stops on release; the transport state is restored exactly;
         the setting and the no-device case both suppress it; the project, the undo history and the
         committed playhead are unchanged beyond the drag's own seek.
+
+Landed across three commits (plus the controller, green earlier at `355de83`):
+
+| Commit | What landed | Suite |
+|---|---|---|
+| `355de83` (run `33502760883`) | `ui::ScrubAudioController` — the Qt-free decision logic | **1483/1483** (+19) |
+| `68fc43a` (run `33505681581`) | the playhead drag gesture on the ruler | **1509/1509** (+3) |
+| `f4467d2` (run `33506638866`) | the panel/MainWindow wiring and the menu setting | **1509/1513** — 4 failed |
+| `82eaa92` (run `33507392966`) | the test fix for incident 3 | **1514/1514** (+5) |
+
+The decisions worth keeping:
+
+- **The gesture had to be built before the audio could be attached.** Requirement 3 says audio plays while
+  the playhead "is dragged across the timeline", but the ruler only supported a click that jumped to one
+  point — there was no gesture at all. `DragKind` gained a `Playhead` member and the ruler now emits
+  `playheadDragBegan()` / `playheadDragEnded()` around the `seekRequested` stream it already produced.
+- **Two signals, one job each.** `seekRequested(ms)` keeps moving the playhead; the begin/end pair only
+  delimits the gesture and carries **no position**. The position scrub audio must play at is the clamped,
+  frame-snapped one `movePlayheadToMs()` computes, so emitting a raw coordinate alongside it would invite
+  the audio to sit a fraction of a frame away from the picture. A test asserts the started position equals
+  the transport's actual playhead rather than the pointer's 500 ms.
+- **Dragging is confined to the ruler.** A press on an empty lane also selects that lane as the placement
+  target, so treating that as a scrub would start and stop audio on an ordinary selection.
+- **The motionless case is the one that leaks.** The clip-drag path treats a zero delta as "a click, not a
+  drag" and returns early; a scrub taking that shortcut would never be closed, so audio started on press
+  would run forever. The playhead branch therefore returns *before* that check, and a plain ruler click is
+  asserted to be a closed begin/end pair with exactly the one seek it always produced.
+- **Positions are offered to the controller from inside `movePlayheadToMs()`, guarded on `isDragging()`.**
+  All five playhead-moving gestures converge there, so the guard — rather than connecting only to the drag
+  paths — is what stops a keyboard step or a timecode edit being mistaken for a scrub, and it makes the
+  controller's own state the authority on whether a gesture is running.
+- **The applier is handed only the decision.** Pausing on drag start and resuming after `StopAndResume`
+  stay in the panel, because the panel owns the transport and an applier able to call `play()` could change
+  playback state as a side effect of touching audio. The interruption is deliberately independent of
+  audibility: a suppressed drag still moves the playhead, so it still stops and resumes playback, and
+  `endDrag()` reports `StopAndResume` even when nothing was heard.
+- **`Start` and `Restart` are the same two engine calls.** Repositioning scrub audio *is* stopping and
+  starting it — the engine begins mixing from a given position and has no reposition operation, and
+  pretending otherwise would leave the old position's audio queued ahead of the new one.
+- **Suppression is routed through the panel, not set on the controller.** Either input can change part-way
+  through a drag, and both then return a decision that must be performed at once: a user who switches
+  scrub audio off wants silence *now*, not at the next mouse move. Only the panel can perform a decision,
+  so only the panel is asked to change the inputs.
+- **The shell tests assert the conservation law, not the ratio.** A flood of 30 positions must be fully
+  accounted for as served-or-dropped; the *proportion* served depends on how long 30 synthetic mouse
+  events take on the runner, which is exactly the wall-clock dependency that makes a test pass until it
+  does not. The ratio is pinned deterministically in the controller's own simulated-time case, where 100
+  positions across a second yield exactly 16 repositions and 84 drops.
+
+### CI incident 3 — a real capability check invalidated tests that predated it
+
+- **Incident 3 — 4 tests failed (run `33506638866`, commit `f4467d2`): 1509 of 1513 passed.** One root
+  cause. The new wiring reads `ApplicationComposition::audioOutputAvailable()` and auto-suppresses scrub
+  audio when the host has no output device, which is Requirement 3.3 working exactly as specified. CI
+  runners have no sound card, so scrub audio is suppressed there, `isScrubbing()` never becomes true and no
+  decisions are produced — and four tests asserted the opposite, including
+  `ShellUnitTest.AScrubGestureTakesTheEngineFromThePlaybackDriver`, which had been **green since task 3A
+  precisely because nothing yet asked whether audio output existed**.
+
+- **The product behaviour was right and the tests were wrong.** Each now calls
+  `setScrubAudioOutputAvailable(true)` before driving a gesture, with a comment saying why, so it tests the
+  wiring *above* device availability instead of accidentally testing device availability itself. Fixed at
+  `82eaa92` (run `33507392966`, **1514/1514**).
+
+- **The behaviour that broke them is now a test of its own.**
+  `ScrubAudioFollowsTheHostsActualOutputAvailability` asserts the controller *agrees with*
+  `audioOutputAvailable()` rather than asserting either specific value, so it holds on a runner with no
+  device and on a developer machine with one. It also pins the part that would be a genuine bug:
+  auto-suppression must not flip the user's setting, because a menu item silently unchecked by a missing
+  device would leave scrub audio off once the device appeared, with no indication of why and a double
+  toggle needed to recover.
+
+- **Standing lesson.** Wiring a real capability check into the shell can invalidate tests that were passing
+  only because the capability was never consulted. Expect a capability check to break tests that predate
+  it, and prefer asserting *agreement with the host* over asserting a value the host decides.
+
+Also fixed in passing: `MainWindow.hpp` had two pairs of members glued onto single lines by
+newline-losing edits (`audioDriver_`/`inspectorPanel_`, and `undoAction_`/`redoAction_` when the same
+mistake was repeated while fixing the first). This is incident 2's damage class, but it **compiles**, so CI
+could never have caught it. The checker gained a pattern for it, validated against both real damaged lines
+*and* against legitimate one-liners — a broad version reported 55 hits that were all deliberate idioms
+(`case X: …; break;`, packed struct fields, one-line accessors), which is worth no more than incident 2's
+700-hit sweep.
 
 ## Phase 2 — Colour grading
 
