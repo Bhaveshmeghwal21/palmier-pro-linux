@@ -314,6 +314,19 @@ the last reading, which is the stale display criterion 6 forbids. A waveform's c
 summed* rather than sampled, so a 3840-wide frame in a 200-wide panel drops no pixel — sampling is
 exactly how a waveform loses the overexposed streak being looked for.
 
+**Design constraint (mechanism for criteria 3, 5, 6 and 7).** The panel's rules live in a Qt-free
+`ui::ScopesViewModel`, which owns per-scope visibility (`ScopeKind`, `scopeVisibilitySettingsKey`), the
+explicit empty state, and the cadence decision `shouldRecompute` against a `ScopeBudget`. Criteria 5's two
+halves pull in opposite directions — at least 10 updates a second, and never more than ten percent of the
+Preview's frame interval — so the decision is a pure function of the last computation's instant, the
+current instant and the *measured* cost of the last computation, with time passed in as an argument rather
+than read from a clock. The floor wins over the budget when they conflict, because a panel that stops
+updating is a broken panel while a Preview one frame short is an imperceptible one. The first computation
+is always allowed, or a host on which one computation exceeds the share would show a permanently empty
+panel; a hidden scope is not computed at all, since the cheapest way to honour the budget is not to spend
+it; and `clear()` deliberately keeps its cadence bookkeeping, or the view model would report "nothing
+computed yet" and spin while no frame exists.
+
 ## Requirement 7: LUT Application
 
 **User Story:** As a colourist, I want to apply a `.cube` LUT, so that I can use a look my client

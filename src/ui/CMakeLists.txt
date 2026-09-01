@@ -93,6 +93,35 @@ target_link_libraries(palmier_ui_curve_editor_vm PUBLIC
     Palmier::core)
 
 # ---------------------------------------------------------------------------
+# palmier_ui_scopes_vm — the Qt-free scopes panel logic
+# (monitoring-and-grading task 6; Requirement 6.3, 6.5, 6.6, 6.7).
+#
+# ScopesViewModel owns three rules that are easy to get wrong invisibly: the
+# cadence (at least 10 updates a second, but never more than 10 percent of the
+# Preview's frame interval — two requirements pulling in opposite directions), the
+# empty state (no frame CLEARS rather than keeping a stale reading), and per-scope
+# visibility with the settings keys it persists under. Time is an argument to
+# every call rather than read from a clock, so both real-time rules are tested
+# with simulated instants and no sleeping.
+#
+# Defined ABOVE the PALMIER_BUILD_UI guard like the other view models. Links
+# Palmier::gpu for the three computations in gpu/VideoScopes.hpp, which carry no
+# Vulkan dependency of their own.
+# ---------------------------------------------------------------------------
+add_library(palmier_ui_scopes_vm STATIC
+    ScopesViewModel.cpp)
+add_library(Palmier::ui_scopes_vm ALIAS palmier_ui_scopes_vm)
+
+target_include_directories(palmier_ui_scopes_vm PUBLIC
+    "${PROJECT_SOURCE_DIR}/src")
+
+target_compile_features(palmier_ui_scopes_vm PUBLIC cxx_std_20)
+
+target_link_libraries(palmier_ui_scopes_vm PUBLIC
+    Palmier::core
+    Palmier::gpu)
+
+# ---------------------------------------------------------------------------
 # palmier_ui_audio_transport — the Qt-free audio-transport decision logic
 # (monitoring-and-grading tasks 3 and 3A; Requirements 3 and 3A).
 #

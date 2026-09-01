@@ -403,6 +403,25 @@ target_link_libraries(palmier_ui_curve_editor_tests PRIVATE
 
 palmier_register_test(palmier_ui_curve_editor_tests)
 
+# ---------------------------------------------------------------------------
+# Scopes panel view model tests (monitoring-and-grading task 6; Requirement
+# 6.3, 6.5, 6.6, 6.7) — the update cadence against the Preview's frame budget,
+# the explicit empty state, and per-scope visibility with its settings keys.
+#
+# Links Palmier::ui_scopes_vm and Palmier::gpu: the view model paints nothing, so
+# this runs in the headless tree too.
+# ---------------------------------------------------------------------------
+add_executable(palmier_ui_scopes_tests
+    ui/scopes_viewmodel_test.cpp)
+target_include_directories(palmier_ui_scopes_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_ui_scopes_tests PRIVATE
+    Palmier::ui_scopes_vm
+    Palmier::gpu
+    Palmier::test_support)
+
+palmier_register_test(palmier_ui_scopes_tests)
+
 
 # ---------------------------------------------------------------------------
 # Audio-transport decision tests (monitoring-and-grading tasks 3 and 3A;
