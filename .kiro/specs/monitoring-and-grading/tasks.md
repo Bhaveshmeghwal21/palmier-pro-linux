@@ -747,21 +747,121 @@ dock of its own", which a dock count states only incidentally - it went stale th
 dock appeared and said nothing about where the meter is. It now asserts that no dock's widget *is* the
 meter, which is the actual claim and cannot go stale when a sixth dock is added for some other reason.
 
-- [ ] 7. LUT application (Requirement 7) — **L**
-  - [ ] 7.1 Add one optional string field to `core::Effect` for a resource path and bump the project
+- [x] 7. LUT application (Requirement 7) — **L**
+  - [x] 7.1 Add one optional string field to `core::Effect` for a resource path and bump the project
         schema; absent means "no resource", matching the `captionText` / `tags` precedent. Sweep for
         stale hardcoded schema-version literals immediately after the bump.
-  - [ ] 7.2 Add a `.cube` parser accepting `LUT_3D_SIZE`, the data table, comments and blank lines, and
+  - [x] 7.2 Add a `.cube` parser accepting `LUT_3D_SIZE`, the data table, comments and blank lines, and
         rejecting a malformed file with an error naming the fault — including a declared size that
         disagrees with the actual row count.
-  - [ ] 7.3 Add the LUT effect through all seven sites, applying the table by trilinear interpolation on
+  - [x] 7.3 Add the LUT effect through all seven sites, applying the table by trilinear interpolation on
         both the GPU and software paths within P5's tolerance.
-  - [ ] 7.4 Render un-graded and report the path when a referenced LUT is missing at open, without
+  - [x] 7.4 Render un-graded and report the path when a referenced LUT is missing at open, without
         failing the open, dropping the effect, or blocking editing.
-  - [ ] 7.5 Expose applying a LUT by path on the Tool_Surface as one undoable edit.
-  - [ ] 7.6 Tests: an identity LUT is a no-op within tolerance (the shared parser/interpolator anchor); a
+  - [x] 7.5 Expose applying a LUT by path on the Tool_Surface as one undoable edit.
+  - [x] 7.6 Tests: an identity LUT is a no-op within tolerance (the shared parser/interpolator anchor); a
         known LUT's output on both paths; every malformed-file rejection names its fault; a pre-schema
         project opens unchanged; a missing LUT degrades as specified.
+
+**Complete.** Four commits; three incidents, all compile errors.
+
+| Commit | What landed | Suite |
+|---|---|---|
+| `e260d28` (run `33548800772`) | schema 1.5 and the `.cube` parser | **failed to compile** |
+| `314ebd4` (run `33549604132`) | the braced-macro fix | **1634/1634** (+17) |
+| `a0ba659` (run `33550738444`) | the effect type, kernel and LutCache | **failed to compile** |
+| `fcce820` (run `33551620394`) | the missing include | **failed to compile** |
+| `6f054b3` (run `33552299541`) | the tool, and the generator helper name | **1651/1651** (+17) |
+
+**The bump costs an existing document nothing, and that is enforced from both sides.**
+`ProjectStore` omits `resourcePath` *entirely* when empty rather than writing `""`, so a project with no
+LUT serialises exactly as a 1.4 build wrote it apart from the version string, and a 1.4 reader meets no
+key it does not know. Three tests: the sample project must contain no `resourcePath` at all, a document
+written without the key loads with an empty path, and a round trip must not *invent* it. `expectSameProject`
+compares the field too, so every pre-existing round-trip test covers it -- otherwise one dedicated case
+would be the only thing checking it and a serialiser that dropped the path would still pass the file.
+
+The sweep for stale version literals ran **before** the bump, per the standing lesson. Nine sites mention
+1.4; only two were load-bearing (the constant, and one asserted string). The other seven describe what 1.4
+itself added and remain accurate history, and both compatibility tests derive their version from
+`SchemaVersion::current()` so they adapted with no edit. Worth recording that a bare `1.4` pattern first
+reported 64 hits, almost all "Requirement 1.4" references in other specs -- the narrowing was the work.
+
+**A LUT is a plain string, not a `MediaAssetRef`** (audit finding 14): an asset is timeline content with a
+duration, a decoder and a media library entry, and a LUT is none of those. Reusing the type would put LUTs
+in the media browser with import semantics they cannot satisfy. The field is also not validated at
+construction, because criterion 8 needs a missing LUT to stay in the chain -- a constructor that rejected
+an unreadable path would make that impossible.
+
+**A LUT FAILURE IS A CACHED ANSWER, NOT AN ERROR RETURN.** This is the decision the task turns on.
+Criterion 8 wants four things at once: the clip renders un-graded, the effect stays in the chain, the
+failure is reported naming the path, and the open does not fail. If a lookup returned an error, every
+caller in the render loop would have to decide what to do with it, and the render loop's only correct
+answer is "carry on with no table". So `gpu::LutCache` remembers a failure with its reason and returns an
+empty table -- the same shape `media::PeakEnvelopeCache` uses for a failed envelope, for the same reason.
+A test asserts the file is read exactly once across repeated lookups, because re-reading a missing file
+per frame is the alternative.
+
+**An empty path is not a failure.** "No LUT chosen yet" must not raise the notice "your LUT is missing", or
+every half-configured effect would report a problem the user does not have. Separate cases, separate tests,
+and the reader is asserted never to be called at all for an empty path.
+
+Unlike `PeakEnvelopeCache` this cache is **unbounded and never evicts**, deliberately: a size-33 table is
+36k entries and a project uses a handful, whereas an envelope scales with a clip's duration and a library
+holds hundreds.
+
+**The parser is a pure function of TEXT, not of a path.** Reading the file is the caller's job, which keeps
+every parsing rule testable with no filesystem and keeps criterion 8 a question about I/O. Criterion 4's
+real content is "rather than applying a partially read table" -- a LUT missing its last rows renders most of
+the image correctly and the highlights wrongly, which is far harder to diagnose than a refusal -- so
+seventeen malformed inputs are each asserted to be rejected with an error naming the fault, and criterion
+5's size disagreement is checked in *both* directions (too few rows is a truncated download, too many a
+concatenated file).
+
+A non-default `DOMAIN_MIN`/`DOMAIN_MAX` is **rejected rather than ignored**: silently treating a 0..4 HDR
+domain as 0..1 would apply the look at the wrong scale, which reads as a bad LUT rather than as unsupported
+input.
+
+The table is indexed with **red varying fastest** -- the format's own order, and the single most likely
+thing to get wrong, because a transposed table still renders a plausible image. That is why `at()` exists
+rather than leaving callers to compute the offset, and why a test asserts each primary's *position* rather
+than only the row count. The kernel uploads the cube flattened to a 2D image, `(size*size) x size`, because
+a 3D image would need a sampler binding this compositor does not create; the eight texel reads and seven
+mixes are written out longhand on **both** paths rather than delegated to a hardware sampler, since a
+sampler's filtering precision is a device detail while property P5's 1-LSB tolerance is not.
+
+Criterion 7's identity anchor is asserted as **both halves**: the identity parses as the identity, *and*
+sampling it returns its input -- at sizes 2, 3, 5 and 17, because an off-by-one in the domain scaling shows
+up at one size and not another. Trilinear interpolation is then pinned separately by a table whose midpoint
+must read 0.5 exactly, which a nearest-neighbour lookup would fail while passing every identity test.
+
+`SetEffectResourceCommand`'s `revert()` restores an **empty** prior, which is the common case since an
+effect just added has no resource; treating "no prior" as "nothing to restore" would make the first LUT
+applied to an effect un-undoable. It needs no `hadPrior_` flag of the kind `SetEffectParameterCommand`
+carries, because an absent path is representable as an empty one.
+
+### CI incidents 6, 7 and 8
+
+All three were compile errors, and all three were mechanical properties of the text that a five-line script
+checks in a second and CI takes nine minutes to report.
+
+**Incident 6** was a braced initialiser at a gtest macro's top level -- `EXPECT_EQ(lut.at(1, 0, 0),
+LutEntry{1.0f, 0.0f, 0.0f})` -- which is CI incident 4 verbatim. The failure was not ignorance: the
+checker existed, was validated and was recorded as doctrine, and I omitted it from that commit's sweep. A
+checklist step skipped is indistinguishable from a checklist step never written, so the checker now
+**validates itself** on a known-bad and a known-good input before it will run, and sweeps every test source
+rather than the file being edited.
+
+**Incident 7** was `kernelForEffectType` and friends used without including `gpu/EffectKernels.hpp` -- ten
+error lines from one missing include. That prompted a new check: collect every name declared in
+`src/**/*.hpp` with its header, then confirm every project-looking identifier a test uses is declared in a
+header that test includes. Run over this spec's new tests it finds only depth-limit artefacts (`ErrorCode`
+reaching a file through `core/Result.hpp`), which is the checker's limit rather than a defect.
+
+**Incident 8** was `make({})` in the parity property's generator, copied from the graceful-degradation
+test where `make` is a local lambda, into a file where the equivalent is a free `makeEffect`. Two files,
+two conventions, one identical-looking line. Checked afterwards that every helper both generators call by
+`return name(` resolves.
 
 ## Phase 3 — Parity, determinism and documentation
 
