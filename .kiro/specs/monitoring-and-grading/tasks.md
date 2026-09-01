@@ -865,19 +865,83 @@ two conventions, one identical-looking line. Checked afterwards that every helpe
 
 ## Phase 3 — Parity, determinism and documentation
 
-- [ ] 8. Close the parity rows and the documentation (Requirement 8) — **S**
-  - [ ] 8.1 Add a test that fails if any `core::EffectType` reachable in the core is absent from the
+- [x] 8. Close the parity rows and the documentation (Requirement 8) — **S**
+  - [x] 8.1 Add a test that fails if any `core::EffectType` reachable in the core is absent from the
         Tool_Surface's closed value set, so the seven-site pattern is enforced rather than remembered.
-  - [ ] 8.2 Assert export and Preview agree for every effect this spec adds, rather than inferring it
+  - [x] 8.2 Assert export and Preview agree for every effect this spec adds, rather than inferring it
         from the shared compositor.
-  - [ ] 8.3 Document every new tool and argument in `docs/TOOLS.md`; keep the documentation-consistency
+  - [x] 8.3 Document every new tool and argument in `docs/TOOLS.md`; keep the documentation-consistency
         suite green.
-  - [ ] 8.4 Re-score `docs/UPSTREAM_PARITY.md`: `audio scrub and metering` (capability area) and `color`
+  - [x] 8.4 Re-score `docs/UPSTREAM_PARITY.md`: `audio scrub and metering` (capability area) and `color`
             (tool category), plus the `color and effects` capability area, recording per row why the
             status changed; update `docs/PORT_BACKLOG.md` if any entry maps to this work; advance
             `linux-ref`; recompute the build-order counts.
-  - [ ] 8.5 Confirm `OfflineModeAvailability` still passes: every new subsystem must work with no network
+  - [x] 8.5 Confirm `OfflineModeAvailability` still passes: every new subsystem must work with no network
         and no generative-AI account.
+
+**Complete.** Two commits, both green first try.
+
+| Commit | What landed | Suite |
+|---|---|---|
+| `e819b35` (run `33554543167`) | the parity re-score and the effect-type enforcement | **1651/1651** |
+| `3f9c52a` (run `33555489695`) | export/Preview agreement | **1652/1652** (+1) |
+
+**Three rows changed, and two of them deliberately did NOT become `present`.**
+`audio scrub and metering` moves `absent` to `present`: the three components its rationale said
+did not exist all do now and are wired into the shell. But `color` and `color and effects` stay
+**partial**, dropping only from `should` to `later`. The gaps each rationale named - curve, wheel,
+scope, LUT, denoise - are four-fifths closed, and what remains is a colour-wheel control,
+secondary/qualifier grading and denoise: real gaps, but no longer ones that stop a grade being
+*shaped or judged*, which is what `should` was recording. Marking either `present` would have been
+a claim the tree does not support, and the report is a checked document precisely so that such a
+claim cannot be made quietly.
+
+Every count was **recomputed from the tables** rather than edited: the build-order projection is
+rebuilt by reading both tables and sorting by priority, and a check confirms it equals exactly the
+`absent`/`partial` rows, that each number in the counts sentence is derivable, and that no
+rationale exceeds the 200-**byte** bound the property test enforces - bytes rather than
+characters, which matters because an em-dash is three of them.
+
+### The fragile-anchor class bit, exactly where doctrine item 6 said it would
+
+Four mutation anchors in `tests/docs/report_parser_test.cpp` broke. Three embedded a build-order
+item's **number**, and those numbers are a projection: re-scoring any row renumbers everything
+after it, so they erode on precisely the task that re-scores the report - the task least able to
+afford a mysterious test failure. The fourth quoted the audio-scrub row's old `absent ... should`
+text, which this change removed.
+
+Fixed by making the anchors **computed**: a `lineWith()` helper finds the line mentioning a name,
+so denoise moving from item 14 to 12 and auto-update from 23 to 22 breaks nothing. Verified that
+all three resolve and each matches exactly **one** line, because an ambiguous anchor would mutate
+the wrong row silently - and that the remaining literal anchors still resolve.
+
+### Criterion 1: the threading pattern is now enforced rather than remembered
+
+`core::kAllEffectTypes` lists every enumerator and the schema test asserts the Tool_Surface's
+closed value set is exactly that size. This spec added three effect types across three tasks and
+the risk was identical each time: a type that renders but cannot be created through any tool is
+invisible to the agent surface and to every scripted workflow, with **nothing failing to say so**.
+Derived from the enum rather than from a list in the test, because a hand-written list is the thing
+that falls behind - and a check confirms the array and the enum agree, so the array cannot itself
+go stale.
+
+### Criterion 2: asserted, not inferred
+
+The subtask asked for this specifically "rather than inferring it from the shared compositor". The
+inference is currently true and is the kind of thing that stops being true quietly - a preview-only
+fast path, a resolution-dependent shortcut, or an effect applied in the viewer's upload step rather
+than in the composite would each break it while every other test still passed. So the same project
+is rendered twice through `Compositor::renderAt`, at a Preview window size and at an export frame
+size, and the results must be **identical**: these effects are per-pixel colour transforms with no
+spatial extent, so nothing about them may depend on frame size. The case also asserts the effect
+*changed something*, because otherwise an effect the compositor silently ignored at both sizes
+would make the comparison pass - which is the failure it exists to catch.
+
+Criterion 3 was satisfied incrementally: every tool this spec added was documented in
+`docs/TOOLS.md` in the commit that added it, and `documentation_consistency_test` has been green
+since. Criterion 5's `OfflineModeAvailability` cases pass unchanged - no subsystem this spec adds
+touches the network or the generative account. `docs/PORT_BACKLOG.md` needed no change: its only
+matches for this work's vocabulary are incidental ("resolution", "upgrade").
 
 ---
 
