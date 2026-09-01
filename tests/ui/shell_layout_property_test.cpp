@@ -62,14 +62,16 @@ private:
 ::testing::Environment* const kQtEnv =
     ::testing::AddGlobalTestEnvironment(new QtEnvironment());
 
-/// The five QDockWidget object names MainWindow assigns (task 11.2). A generic
+/// The QDockWidget object names MainWindow assigns (task 11.2, plus the Scopes
+/// dock from monitoring-and-grading task 6). A generic
 /// `findChildren<QDockWidget*>()` walk keeps this test from hard-coding pointers
-/// MainWindow does not expose, while still checking exactly the five docks
+/// MainWindow does not expose, while still checking exactly the docks
 /// Requirement 1.4 names.
 const std::vector<QString>& expectedDockNames() {
     static const std::vector<QString> names = {
         QStringLiteral("MediaBrowserDock"), QStringLiteral("TimelineDock"),
-        QStringLiteral("InspectorDock"), QStringLiteral("AgentChatDock")};
+        QStringLiteral("InspectorDock"), QStringLiteral("AgentChatDock"),
+        QStringLiteral("ScopesDock")};
     return names;
 }
 

@@ -635,8 +635,14 @@ TEST_F(ShellUnitTest, TheProgrammeLevelMeterIsMountedInTheTransportBar) {
     // this fails if the meter is constructed but never parented into the panel.
     EXPECT_NE(window.findChild<AudioMeterWidget*>(), nullptr);
 
-    // The dock count is the invariant this placement was chosen to preserve.
-    EXPECT_EQ(window.findChildren<QDockWidget*>().size(), 4u);
+    // The invariant this placement was chosen to preserve: the meter is inside the
+    // transport bar, NOT in a dock of its own. Asserted as "no dock holds it" rather than
+    // as a dock count, which is what the claim actually is -- a count went stale the moment
+    // task 6 added the Scopes dock, and said nothing about where the meter lives.
+    for (QDockWidget* dock : window.findChildren<QDockWidget*>()) {
+        EXPECT_NE(dock->widget(), static_cast<QWidget*>(window.findChild<AudioMeterWidget*>()))
+            << dock->objectName().toStdString();
+    }
 }
 
 TEST_F(ShellUnitTest, TheLevelMeterFallsToZeroWhenTheTransportIsNotPlaying) {
