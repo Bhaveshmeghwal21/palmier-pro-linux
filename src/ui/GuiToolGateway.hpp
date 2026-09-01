@@ -28,6 +28,7 @@
 #ifndef PALMIER_UI_GUITOOLGATEWAY_HPP
 #define PALMIER_UI_GUITOOLGATEWAY_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -37,6 +38,7 @@
 #include "core/EditCommands.hpp"
 #include "core/Effect.hpp"
 #include "core/Result.hpp"
+#include "core/ToneCurve.hpp"
 #include "core/Track.hpp"
 #include "core/Transition.hpp"
 #include "core/Uuid.hpp"
@@ -115,6 +117,17 @@ public:
     /// timeline.set_effect_parameter (task 9.2; Requirement 6.1, 6.3)
     [[nodiscard]] Result<Json> setEffectParameter(ClipId clipId, Uuid effectId,
                                                   const std::string& parameter, double value);
+
+    /// timeline.edit_curve_point (monitoring-and-grading task 5; Requirement 5.7).
+    ///
+    /// `index` and `point` are optional because the tool requires each only where it
+    /// means something: move and remove need an index, add and move need coordinates.
+    /// Passing them unconditionally would mean inventing values the tool would accept.
+    [[nodiscard]] Result<Json> editCurvePoint(ClipId clipId, Uuid effectId,
+                                              const std::string& channel,
+                                              const std::string& operation,
+                                              std::optional<std::size_t> index,
+                                              std::optional<CurvePoint> point);
 
     /// timeline.add_transition
     [[nodiscard]] Result<Json> addTransition(ClipId clipId, TransitionKind kind,

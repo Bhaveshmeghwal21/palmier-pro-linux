@@ -1253,6 +1253,36 @@ Result<void> EditCurvePointCommand::revert(Project& project) {
     return ok();
 }
 
+const char* curvePointOperationToolName(EditCurvePointCommand::Operation operation) noexcept {
+    switch (operation) {
+        case EditCurvePointCommand::Operation::Add:    return "add";
+        case EditCurvePointCommand::Operation::Move:   return "move";
+        case EditCurvePointCommand::Operation::Remove: return "remove";
+    }
+    return "add";
+}
+
+std::optional<EditCurvePointCommand::Operation> parseCurvePointOperationToolName(
+    std::string_view name) {
+    // Derived from the name function, so the two directions cannot disagree.
+    for (const auto operation : {EditCurvePointCommand::Operation::Add,
+                                 EditCurvePointCommand::Operation::Move,
+                                 EditCurvePointCommand::Operation::Remove}) {
+        if (name == curvePointOperationToolName(operation)) {
+            return operation;
+        }
+    }
+    return std::nullopt;
+}
+
+const std::vector<std::string>& curvePointOperationToolNames() {
+    static const std::vector<std::string> names = {
+        curvePointOperationToolName(EditCurvePointCommand::Operation::Add),
+        curvePointOperationToolName(EditCurvePointCommand::Operation::Move),
+        curvePointOperationToolName(EditCurvePointCommand::Operation::Remove)};
+    return names;
+}
+
 // ===========================================================================
 // SetProjectSettingsCommand
 // ===========================================================================

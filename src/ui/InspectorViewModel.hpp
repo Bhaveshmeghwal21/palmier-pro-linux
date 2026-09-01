@@ -39,6 +39,7 @@
 #ifndef PALMIER_UI_INSPECTORVIEWMODEL_HPP
 #define PALMIER_UI_INSPECTORVIEWMODEL_HPP
 
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -48,6 +49,7 @@
 #include "core/CommandResult.hpp"
 #include "core/Duration.hpp"
 #include "core/EditCommand.hpp"
+#include "core/EditCommands.hpp"
 #include "core/Effect.hpp"
 #include "core/FrameRate.hpp"
 #include "core/Result.hpp"
@@ -202,6 +204,15 @@ public:
     /// (SetEffectParameterCommand).
     [[nodiscard]] CommandResult setEffectParameter(Uuid effectId, std::string parameter,
                                                    double value);
+
+    /// Add, move or remove one tone-curve control point on an effect in the selected
+    /// clip (EditCurvePointCommand; monitoring-and-grading Requirement 5.7).
+    ///
+    /// `index` is ignored for Add and `point` for Remove, matching the command and the
+    /// tool: the caller does not have to invent values the operation will not use.
+    [[nodiscard]] CommandResult editCurvePoint(Uuid effectId, CurveChannel channel,
+                                               EditCurvePointCommand::Operation operation,
+                                               std::size_t index, CurvePoint point);
 
     /// Remove an effect from the selected clip's chain by id (RemoveEffectCommand;
     /// Requirement 6.1, 6.2).

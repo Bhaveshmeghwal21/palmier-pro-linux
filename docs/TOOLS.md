@@ -501,8 +501,7 @@ channel — including the numbering — in one step.
 Refused, with the project unchanged, when the clip or effect is not found, or when `index` names a
 point the chosen curve does not have.
 
-Result: `clipId` (string), `effectId` (string), `channel` (string), `operation` (string),
-*(command result)*.
+Result: `clipId` (string), `effectId` (string), `channel` (string), `operation` (string), *(command result)*.
 
 ## `timeline.add_transition`
 

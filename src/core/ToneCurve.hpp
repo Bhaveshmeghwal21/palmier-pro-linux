@@ -78,7 +78,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace palmier {
@@ -105,6 +107,22 @@ inline constexpr std::array<CurveChannel, 4> kCurveChannels{
 
 /// The infix used in parameter names: "Master", "Red", "Green", "Blue".
 [[nodiscard]] const char* curveChannelName(CurveChannel channel) noexcept;
+
+/// The channel's name on the tool surface and in the UI, e.g. "red".
+///
+/// Lowercase here and capitalised in curveChannelName(), which is deliberate rather
+/// than drift: that one spells the PERSISTED parameter names ("curveRedP0X") and so
+/// cannot change without breaking every saved project, while this one follows the
+/// convention every other closed value set on the surface already uses
+/// ("crop_transform", "invert_colors"). Both live here so the tool surface, the
+/// Inspector and any future scripting layer cannot disagree about either.
+[[nodiscard]] const char* curveChannelToolName(CurveChannel channel) noexcept;
+
+/// Parse a tool-surface channel name; nullopt when it names no channel.
+[[nodiscard]] std::optional<CurveChannel> parseCurveChannelToolName(std::string_view name);
+
+/// The four tool-surface channel names, in kCurveChannels order.
+[[nodiscard]] const std::vector<std::string>& curveChannelToolNames();
 
 /// The name prefix every parameter belonging to one channel's points shares,
 /// e.g. "curveRedP".

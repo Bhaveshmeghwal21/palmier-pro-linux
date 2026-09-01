@@ -197,36 +197,24 @@ std::optional<EffectType> parseEffectType(std::string_view s) {
     return std::nullopt;
 }
 
-/// The tone-curve channels, named for the tool surface.
+/// The tone-curve channels and point operations, named for the tool surface.
 ///
-/// Lowercase here and capitalised in `core::curveChannelName`, which is deliberate
-/// and not a drift: that one spells the persisted parameter names ("curveRedP0X") and
-/// so cannot change without breaking every saved project, while this one follows the
-/// surface's own convention that every other closed value set already uses
-/// ("crop_transform", "invert_colors").
-const std::vector<std::string>& curveChannelValues() {
-    static const std::vector<std::string> values = {"master", "red", "green", "blue"};
-    return values;
-}
+/// Both vocabularies live in core (core::curveChannelToolName,
+/// core::curvePointOperationToolName) rather than here, because the Inspector names the
+/// same operations and a second copy would be a second thing to forget. These are the
+/// thin adapters the ArgSpec vocabulary wants.
+const std::vector<std::string>& curveChannelValues() { return curveChannelToolNames(); }
 
 std::optional<CurveChannel> parseCurveChannel(std::string_view s) {
-    if (s == "master") return CurveChannel::Master;
-    if (s == "red")    return CurveChannel::Red;
-    if (s == "green")  return CurveChannel::Green;
-    if (s == "blue")   return CurveChannel::Blue;
-    return std::nullopt;
+    return parseCurveChannelToolName(s);
 }
 
 const std::vector<std::string>& curvePointOperationValues() {
-    static const std::vector<std::string> values = {"add", "move", "remove"};
-    return values;
+    return curvePointOperationToolNames();
 }
 
 std::optional<EditCurvePointCommand::Operation> parseCurvePointOperation(std::string_view s) {
-    if (s == "add")    return EditCurvePointCommand::Operation::Add;
-    if (s == "move")   return EditCurvePointCommand::Operation::Move;
-    if (s == "remove") return EditCurvePointCommand::Operation::Remove;
-    return std::nullopt;
+    return parseCurvePointOperationToolName(s);
 }
 
 std::string_view transitionKindName(TransitionKind kind) {

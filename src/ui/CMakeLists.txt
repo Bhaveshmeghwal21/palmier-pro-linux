@@ -66,6 +66,33 @@ target_link_libraries(palmier_ui_audio_meter_vm PUBLIC
     Palmier::media)
 
 # ---------------------------------------------------------------------------
+# palmier_ui_curve_editor_vm — the Qt-free tone-curve editing logic
+# (monitoring-and-grading task 5; Requirement 5.9).
+#
+# CurveEditorViewModel maps pixels to curve coordinates, decides which point the
+# pointer has grabbed, and turns a press-drag-release into the ONE undoable edit
+# it should become. It never touches a project: it answers "what edit does this
+# gesture ask for?" and the caller performs it, so the whole of the direct-
+# manipulation behaviour is testable with no display, no Qt and no GPU.
+#
+# Defined ABOVE the PALMIER_BUILD_UI guard, like the two view models above, so it
+# is built and unit-tested on hosts with no Qt at all. Links only Palmier::core,
+# since it paints nothing and its transfer function is core::bakeToneCurve — the
+# same one the renderer uses, so the curve drawn is the curve applied.
+# ---------------------------------------------------------------------------
+add_library(palmier_ui_curve_editor_vm STATIC
+    CurveEditorViewModel.cpp)
+add_library(Palmier::ui_curve_editor_vm ALIAS palmier_ui_curve_editor_vm)
+
+target_include_directories(palmier_ui_curve_editor_vm PUBLIC
+    "${PROJECT_SOURCE_DIR}/src")
+
+target_compile_features(palmier_ui_curve_editor_vm PUBLIC cxx_std_20)
+
+target_link_libraries(palmier_ui_curve_editor_vm PUBLIC
+    Palmier::core)
+
+# ---------------------------------------------------------------------------
 # palmier_ui_audio_transport — the Qt-free audio-transport decision logic
 # (monitoring-and-grading tasks 3 and 3A; Requirements 3 and 3A).
 #

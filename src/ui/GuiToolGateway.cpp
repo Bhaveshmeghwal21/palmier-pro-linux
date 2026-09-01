@@ -210,6 +210,30 @@ Result<Json> GuiToolGateway::setEffectParameter(ClipId clipId, Uuid effectId,
                                  services::InvocationSource::Gui);
 }
 
+Result<Json> GuiToolGateway::editCurvePoint(ClipId clipId, Uuid effectId,
+                                            const std::string& channel,
+                                            const std::string& operation,
+                                            std::optional<std::size_t> index,
+                                            std::optional<CurvePoint> point) {
+    Json args = Json::object();
+    args.set("clipId", clipId.toString());
+    args.set("effectId", effectId.toString());
+    args.set("channel", channel);
+    args.set("operation", operation);
+    // Sent only when the operation uses them, so the tool's own rule -- move and remove
+    // require an index, add and move require coordinates -- is what rejects a malformed
+    // request, rather than this layer inventing a default the tool would then accept.
+    if (index) {
+        args.set("index", static_cast<std::int64_t>(*index));
+    }
+    if (point) {
+        args.set("x", point->x);
+        args.set("y", point->y);
+    }
+    return executor_.executeTool("timeline.edit_curve_point", args,
+                                 services::InvocationSource::Gui);
+}
+
 Result<Json> GuiToolGateway::addTransition(ClipId clipId, TransitionKind kind,
                                            Duration duration) {
     Json args = Json::object();

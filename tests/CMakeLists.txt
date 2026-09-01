@@ -383,6 +383,25 @@ target_link_libraries(palmier_ui_audio_meter_tests PRIVATE
 
 palmier_register_test(palmier_ui_audio_meter_tests)
 
+# ---------------------------------------------------------------------------
+# Tone-curve editor view model tests (monitoring-and-grading task 5;
+# Requirement 5.9) — the pixel/curve mapping, hit testing and the press-drag-
+# release gesture that must become exactly ONE undoable edit.
+#
+# Links Palmier::ui_curve_editor_vm and Palmier::core only: the view model paints
+# nothing and touches no project, so this runs in the headless tree too.
+# ---------------------------------------------------------------------------
+add_executable(palmier_ui_curve_editor_tests
+    ui/curve_editor_viewmodel_test.cpp)
+target_include_directories(palmier_ui_curve_editor_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_ui_curve_editor_tests PRIVATE
+    Palmier::ui_curve_editor_vm
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_ui_curve_editor_tests)
+
 
 # ---------------------------------------------------------------------------
 # Audio-transport decision tests (monitoring-and-grading tasks 3 and 3A;

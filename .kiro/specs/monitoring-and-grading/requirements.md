@@ -267,6 +267,18 @@ and criterion 4's "same points, same function, every host" follows from the inte
 and evaluated in one place. Criterion 5 is a property of `bakeToneCurve`, which returns
 `identityToneCurveTable` for a curve with fewer than two points.
 
+Criterion 7 is `core::EditCurvePointCommand`, one command with an add/move/remove `Operation` behind
+the `timeline.edit_curve_point` tool. It is one command rather than three because what makes each
+operation *undoable* is the same inverse: it captures the whole channel's prior parameter set, which is
+what makes removing a middle point reversible even though doing so renumbers every point after it.
+
+Criterion 9's direct manipulation is `ui::CurveEditorViewModel`, which owns the pixel-to-coordinate
+mapping, the point hit test and the press-drag-release gesture, and returns a `CurveEditRequest` its
+caller performs; `ui::CurveEditorWidget` only paints and forwards mouse events. The split is the same
+one `ui::AudioMeterViewModel` and `ui::AudioMeterWidget` use, and for the same reason: the behaviour is
+then testable on a host with no display, no Qt and no GPU. The widget paints `bakeToneCurve`'s own
+table, so the curve drawn is necessarily the curve applied rather than a second plot of it.
+
 ## Requirement 6: Video Scopes
 
 **User Story:** As a colourist, I want a histogram, a waveform monitor and a vectorscope, so that I can

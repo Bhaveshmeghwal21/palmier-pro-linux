@@ -230,6 +230,29 @@ CommandResult InspectorViewModel::setEffectParameter(Uuid effectId, std::string 
         *selected_, effectId, std::move(parameter), value));
 }
 
+CommandResult InspectorViewModel::editCurvePoint(Uuid effectId, CurveChannel channel,
+                                                 EditCurvePointCommand::Operation operation,
+                                                 std::size_t index, CurvePoint point) {
+    if (!selected_) {
+        return CommandResult::failed(failedPrecondition("Inspector: no clip is selected"));
+    }
+    // Requirement 5.7: routed through the gateway like every other published tool, so a
+    // curve edit made in the Inspector appears in the agent's transcript and obeys the
+    // same authorisation as one made over MCP.
+    if (gateway_ != nullptr) {
+        const bool usesIndex = operation != EditCurvePointCommand::Operation::Add;
+        const bool usesPoint = operation != EditCurvePointCommand::Operation::Remove;
+        return toCommandResult(gateway_->editCurvePoint(
+            *selected_, effectId, curveChannelToolName(channel),
+            curvePointOperationToolName(operation),
+            usesIndex ? std::optional<std::size_t>(index) : std::nullopt,
+            usesPoint ? std::optional<CurvePoint>(point) : std::nullopt));
+    }
+    return engine_.apply(std::make_unique<EditCurvePointCommand>(*selected_, effectId, channel,
+                                                                operation, index, point.x,
+                                                                point.y));
+}
+
 CommandResult InspectorViewModel::removeEffect(Uuid effectId) {
     if (!selected_) {
         return CommandResult::failed(failedPrecondition("Inspector: no clip is selected"));

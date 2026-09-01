@@ -68,6 +68,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/Clip.hpp"
@@ -694,6 +695,20 @@ private:
     std::map<std::string, double> prior_;
     bool captured_ = false;
 };
+
+/// The operation's name on the tool surface and in the UI, e.g. "move".
+///
+/// Beside the enum rather than inside the tool registry, so the Inspector and the tool
+/// surface name the same operation the same way without either owning the vocabulary.
+[[nodiscard]] const char* curvePointOperationToolName(
+    EditCurvePointCommand::Operation operation) noexcept;
+
+/// Parse a tool-surface operation name; nullopt when it names no operation.
+[[nodiscard]] std::optional<EditCurvePointCommand::Operation> parseCurvePointOperationToolName(
+    std::string_view name);
+
+/// The three tool-surface operation names, in add/move/remove order.
+[[nodiscard]] const std::vector<std::string>& curvePointOperationToolNames();
 
 // ---------------------------------------------------------------------------
 // SetProjectSettingsCommand — change frame rate, canvas and/or colour space.

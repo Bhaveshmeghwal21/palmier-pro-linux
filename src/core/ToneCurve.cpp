@@ -33,6 +33,39 @@ const char* curveChannelName(CurveChannel channel) noexcept {
     return "Master";
 }
 
+const char* curveChannelToolName(CurveChannel channel) noexcept {
+    switch (channel) {
+        case CurveChannel::Master: return "master";
+        case CurveChannel::Red:    return "red";
+        case CurveChannel::Green:  return "green";
+        case CurveChannel::Blue:   return "blue";
+    }
+    return "master";
+}
+
+std::optional<CurveChannel> parseCurveChannelToolName(std::string_view name) {
+    // Derived from curveChannelToolName rather than written out again, so a name added
+    // to one direction cannot be missing from the other.
+    for (const CurveChannel channel : kCurveChannels) {
+        if (name == curveChannelToolName(channel)) {
+            return channel;
+        }
+    }
+    return std::nullopt;
+}
+
+const std::vector<std::string>& curveChannelToolNames() {
+    static const std::vector<std::string> names = [] {
+        std::vector<std::string> built;
+        built.reserve(kCurveChannels.size());
+        for (const CurveChannel channel : kCurveChannels) {
+            built.emplace_back(curveChannelToolName(channel));
+        }
+        return built;
+    }();
+    return names;
+}
+
 std::string curveChannelParameterPrefix(CurveChannel channel) {
     std::string prefix = "curve";
     prefix += curveChannelName(channel);
