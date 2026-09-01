@@ -20,6 +20,8 @@
 
 #include <gtest/gtest.h>
 
+#include "core/Error.hpp"
+
 namespace palmier::gpu {
 namespace {
 

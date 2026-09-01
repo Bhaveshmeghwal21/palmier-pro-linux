@@ -25,6 +25,7 @@
 #include "core/Error.hpp"
 #include "core/Uuid.hpp"
 #include "gpu/Compositor.hpp"
+#include "gpu/EffectKernels.hpp"
 
 namespace palmier::gpu {
 namespace {
