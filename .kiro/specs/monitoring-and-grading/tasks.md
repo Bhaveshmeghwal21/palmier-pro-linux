@@ -475,17 +475,116 @@ device; no image produced by an actual SPIR-V dispatch has been compared to anyt
 
 
 - [ ] 5. Tone curves (Requirement 5) — **L**
-  - [ ] 5.1 Add a tone-curve effect type through all seven sites of audit finding 4, with master plus
+  - [x] 5.1 Add a tone-curve effect type through all seven sites of audit finding 4, with master plus
         independent R/G/B channels.
-  - [ ] 5.2 Implement a documented, deterministic interpolation between control points, identical on the
+  - [x] 5.2 Implement a documented, deterministic interpolation between control points, identical on the
         GPU and software paths; empty and single-point curves are the identity, not an error.
-  - [ ] 5.3 Clamp output without wrapping, so an aggressive curve cannot produce an overflow hue shift.
+  - [x] 5.3 Clamp output without wrapping, so an aggressive curve cannot produce an overflow hue shift.
   - [ ] 5.4 Expose adding, moving and removing a control point on the Tool_Surface, each one undoable;
         round-trip the points' coordinates and order through save/open. (Control points are pairs, so
         Class 2 array-item-shape conformance needs its own check here.)
   - [ ] 5.5 Add a directly editable curve control to the Inspector showing the current transfer function.
   - [ ] 5.6 Tests: identity cases; a known curve's transfer function on both paths; GPU/CPU parity;
         determinism across repeated evaluation; clamping at both ends; point add/move/remove undo.
+
+**Partially complete: 5.1, 5.2 and 5.3 are done and CI-verified; 5.4 and 5.5 are outstanding.** Three
+commits so far, all green:
+
+| Commit | What landed | Suite |
+|---|---|---|
+| `7e1ff5b` (run `33512850550`) | `core::ToneCurve` — points, interpolation, baking | **failed to compile** |
+| `315928c` (run `33513623198`) | the one-line macro fix | **1542/1542** (+18) |
+| `2cc268e` (run `33514956539`) | `EffectType::ToneCurve` through every site, kernel, reference | **1546/1547** — 1 failed |
+| `2666480` (run `33516171510`) | the derived registration count | **1547/1547** (+5) |
+
+The decisions worth keeping:
+
+- **THE CURVE IS BAKED TO A 256-ENTRY TABLE, and both render paths do nothing but index it.** This is
+  the decision the whole task turns on. The pipeline is RGBA8, so a curve's input has exactly 256
+  possible values per channel; a 256-entry table is therefore not an approximation of the transfer
+  function but *is* the transfer function, completely. Interpolation happens exactly once, on the host,
+  in double precision, so the GPU kernel and the software reference **agree exactly rather than within
+  property P5's 1-LSB tolerance** — there is no arithmetic left in either path to diverge. Criterion 5.3
+  becomes a structural fact instead of a bounded error, and criterion 5.6's clamping becomes a property
+  of the table (every entry came from a clamped evaluation) rather than of a render loop.
+
+  It also avoids a limit that would otherwise have been imposed by a transport rather than by the design:
+  push constants are only guaranteed to be 128 bytes, so four channels of variable-length control points
+  could not be passed that way, and "up to 16 points shared across all channels" would have been the
+  result.
+
+- **Interpolation is piecewise linear, and that is a choice, not an oversight.** Monotone cubic
+  (Fritsch–Carlson) is what a dedicated colour tool uses and would look smoother under a coarse set of
+  points. Criterion 5.4 asks for interpolation that is *documented and deterministic* and says nothing
+  about smoothness; linear is exactly reproducible on any host with no dependence on evaluation order or
+  fused multiply-add, and simple enough that a test can state a whole expected transfer function in
+  closed form. Worth revisiting if a colourist finds the result too angular — the baking design means the
+  interpolation could be replaced in one function without touching either render path.
+
+- **Held flat outside the end points, not extrapolated.** Continuing the user's last segment off the end
+  of the range is how an aggressive curve blows a highlight nobody asked for. Asserted directly,
+  including that the extrapolated values do *not* appear.
+
+- **Fewer than two points is the identity (5.5).** Zero is obvious; one is the interesting case, since it
+  defines no segment. Clamping the range to that point's y would flatten the image to a single value —
+  emphatically not what a user placing their first point expects — and an error would make the control
+  unusable mid-construction.
+
+- **Points live in the existing parameter map under indexed names** (`curveMasterP0X`, `curveRedP2Y`, …),
+  so tone curves need **no schema bump and no serializer change**: `ProjectStore` already persists that
+  map by iterating it, and both coordinates *and their order* round-trip because the order is carried in
+  the name. Two consequences are tested rather than assumed: a half-written point (an X with no Y, which
+  is what a partially applied edit leaves behind) is not read as a point at (x, 0); and a gap
+  **truncates** rather than being closed up, because a point's index is its identity and promoting p2
+  into a missing p1 would make an undo entry naming "point 2" refer to a different point than before.
+
+- **Channel composition is per-channel then master, and the two compose into one table.**
+  `combined[c][v] = master[channel_c[v]]`, which is why the kernel needs three tables and no notion of a
+  master curve at all. The order is asserted, *and* the test asserts the two orders genuinely differ, so
+  it is discriminating rather than vacuous.
+
+- **The shader uses `round()` rather than a truncating cast** to recover the input byte. Truncation would
+  read the neighbouring table entry for most values and shift the whole image by one — a subtle,
+  plausible-looking wrong answer rather than an obvious failure.
+
+- **A test asserts the kernel source contains the table binding and NO `mix()` call**, so a future change
+  that moved curve arithmetic back into the shader fails loudly instead of quietly invalidating the
+  exactness argument that criterion 5.3 now rests on.
+
+Three incidents, all caught and all instructive about tooling rather than about the feature:
+
+- **A braced initialiser passed bare to `EXPECT_EQ`** (`EXPECT_EQ(read[0], CurvePoint{0.0, 0.0})`) failed
+  to compile: the comma inside the braces is split by the *preprocessor* into a third macro argument,
+  because parentheses protect a macro argument and braces do not. The same file passes braced
+  initialisers with commas to gtest macros elsewhere and those are fine, because they sit inside a
+  function call's own parentheses. The sweep gained a check for a comma at brace depth > 0 while paren
+  depth is back at 1, validated against the real failing line *and* against the legitimate ones.
+
+- **The new sweep then reported my own tooling twice.** It ran on past a legitimate string literal
+  containing an unmatched parenthesis — `EXPECT_EQ(src.find("mix("), …)` — because it did not blank out
+  string literals first; the preprocessor tokenises strings before matching macro parens, so that
+  parenthesis is genuinely not one. And the glued-line patterns produced 17 false hits from
+  `ProjectStore.cpp`'s legitimate one-line `if (c == ',') { ++pos_; continue; }` bodies until they were
+  restricted to lines absent from `HEAD` — the same delta discipline the brace-balance check already
+  used, and the third time this session that discipline has been the thing that made a checker useful.
+
+- **A hardcoded `EXPECT_EQ(registered, 6u)`** went stale the instant the enumerator landed — standing
+  doctrine item 7, missed because the sweep looked for `allEffectKernels().size()` and not for a bare
+  literal. Now computed from `allEffectKernels()` by excluding `Transition` (the only kernel with no
+  `EffectType`, since it blends two inputs), so it cannot go stale at the next effect.
+
+**What is left, and the decision waiting to be made.** 5.4 needs the Tool_Surface to expose adding,
+moving and removing a control point, each as one undoable edit. `timeline.set_effect_parameter` cannot
+serve: adding a point sets two parameters and would therefore be two undo entries. The choice is between
+three new tools and one tool carrying an `operation` enum of add/move/remove. The single-tool shape is
+strongly preferred on the evidence of this spec's own conformance obligations — one registry entry, one
+schema, one `docs/TOOLS.md` row, one `drawValidInvocation` case and one increment to the tool count,
+against three of each — and it satisfies the criterion exactly, since each invocation is still one
+command. Either way the command should capture the whole prior parameter set for the affected channel, so
+`revert()` is an exact inverse even when removing a middle point renumbers the ones after it. 5.5 then
+needs a Qt curve widget; the arithmetic it needs already exists in `core::ToneCurve`, so it is
+presentation only.
+
 
 - [ ] 6. Video scopes (Requirement 6) — **M**
   - [ ] 6.1 Add pure, Qt-free, GPU-free histogram, luma-waveform and vectorscope computations over an
