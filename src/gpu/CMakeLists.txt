@@ -22,7 +22,8 @@ add_library(palmier_gpu STATIC
     Compositor.cpp
     EffectKernels.cpp
     VideoScopes.cpp
-    CubeLut.cpp)
+    CubeLut.cpp
+    LutCache.cpp)
 add_library(Palmier::gpu ALIAS palmier_gpu)
 
 # Public headers are included as "gpu/<Header>.hpp" / "core/<Header>.hpp".

@@ -288,6 +288,14 @@ void gpuTransition(const std::vector<std::uint8_t>& a, const std::vector<std::ui
         case EffectType::ToneCurve:
             gpuToneCurve(in, out, toneCurveTables(e.parameters));
             break;
+        case EffectType::Lut:
+            // Deliberately not modelled here. A LUT's table comes from a FILE, so
+            // giving this property one would make it a test of gpu::LutCache rather
+            // than of the arithmetic. The interpolation's correctness is asserted
+            // directly in gpu_cube_lut_test.cpp against hand-checked values, and the
+            // software path and the kernel share that same blend by construction.
+            out = in;
+            break;
         case EffectType::Custom:
             out = in; // passthrough, matching the software reference
             break;
@@ -373,6 +381,10 @@ struct GenFrame {
                                      {"saturation", genScaled(0, 2000)}});
         case EffectType::InvertColors:
             return makeEffect(type, {}); // parameterless
+        case EffectType::Lut:
+            // Never generated, matching the dispatch above: an effect with no
+            // resourcePath applies no table, which is a passthrough on both paths.
+            return make({});
         case EffectType::ToneCurve: {
             // Two to five points per channel, at generated positions, so the property
             // covers the identity cases (fewer than two points), ordinary curves, and

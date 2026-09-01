@@ -516,7 +516,7 @@ TEST(ToolRegistrySchema, ClosedValueSetsArePublished) {
     EXPECT_EQ(enumValues(*effect.find("properties")->find("type")),
               (std::vector<std::string>{"brightness", "contrast", "blur", "crop_transform",
                                         "color_grade", "invert_colors", "tone_curve",
-                                        "custom"}));
+                                        "lut", "custom"}));
 
     // Requirement 5.7 — both closed sets on the curve-point tool. Asserted here, where
     // the advertised schema is read back out, so a value set that exists only in the

@@ -39,6 +39,12 @@ enum class EffectType {
     /// `parameters` under indexed names — see core/ToneCurve.hpp for the encoding,
     /// the interpolation and why the curve is baked to a 256-entry table.
     ToneCurve,
+
+    /// A 3D lookup table loaded from a `.cube` file (monitoring-and-grading
+    /// Requirement 7). The path lives in `resourcePath`, not in `parameters`, because a
+    /// path is not a double -- which is the whole reason schema 1.5 exists. See
+    /// gpu/CubeLut.hpp for the parser and the interpolator.
+    Lut,
     Custom,
 };
 

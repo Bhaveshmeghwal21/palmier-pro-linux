@@ -168,6 +168,7 @@ std::string_view effectTypeName(EffectType type) {
         case EffectType::ColorGrade:    return "color_grade";
         case EffectType::InvertColors:  return "invert_colors";
         case EffectType::ToneCurve:     return "tone_curve";
+        case EffectType::Lut:           return "lut";
         case EffectType::Custom:        return "custom";
     }
     return "custom";
@@ -181,7 +182,7 @@ std::string_view effectTypeName(EffectType type) {
 const std::vector<std::string>& effectTypeValues() {
     static const std::vector<std::string> values = {
         "brightness", "contrast", "blur", "crop_transform", "color_grade",
-        "invert_colors", "tone_curve", "custom"};
+        "invert_colors", "tone_curve", "lut", "custom"};
     return values;
 }
 
@@ -193,6 +194,7 @@ std::optional<EffectType> parseEffectType(std::string_view s) {
     if (s == "color_grade")    return EffectType::ColorGrade;
     if (s == "invert_colors")  return EffectType::InvertColors;
     if (s == "tone_curve")     return EffectType::ToneCurve;
+    if (s == "lut")            return EffectType::Lut;
     if (s == "custom")         return EffectType::Custom;
     return std::nullopt;
 }

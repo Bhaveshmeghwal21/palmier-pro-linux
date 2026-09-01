@@ -186,6 +186,71 @@ void main() {
 //
 // The master curve is already composed into each channel's table (per-channel first,
 // then master), which is why there are three tables and no master here.
+// ---------------------------------------------------------------------------
+// LUT (monitoring-and-grading task 7; Requirement 7.6)
+// ---------------------------------------------------------------------------
+//
+// A `.cube` 3D LUT applied by trilinear interpolation. The table is uploaded as a
+// 2D RGBA8 image of size (size*size) x size -- a flattened cube, with red and
+// green across and blue down -- because a 3D image would need a sampler binding
+// this compositor does not create, and the flattening is arithmetic the kernel
+// can do without one.
+//
+// The interpolation is written out longhand rather than left to a hardware
+// sampler for the same reason gpu::CubeLut::sample exists on the host: the two
+// must agree within property P5's 1-LSB tolerance, and a sampler's filtering
+// precision is an implementation detail that varies by device. Eight explicit
+// texel reads and seven mixes are reproducible everywhere.
+//
+// Clamped, not extrapolated, on both paths: continuing a LUT's edge gradient
+// past its 0..1 domain is how a look blows a highlight nobody asked for.
+constexpr std::string_view kLutSrc = R"glsl(#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba8) uniform readonly  image2D inImage;
+layout(binding = 1, rgba8) uniform writeonly image2D outImage;
+layout(binding = 2, rgba8) uniform readonly  image2D lutTable; // (size*size) x size
+layout(push_constant) uniform Params { int size; } pc;
+
+vec3 lutTexel(int r, int g, int b) {
+    // The flattening: x = g * size + r, y = b. Getting this wrong transposes the
+    // table, which still renders a plausible image -- so the host's
+    // CubeLut::at() uses the same order and a test asserts each primary's
+    // position rather than only the entry count.
+    return imageLoad(lutTable, ivec2(g * pc.size + r, b)).rgb;
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 imageSizePx = imageSize(inImage);
+    if (p.x >= imageSizePx.x || p.y >= imageSizePx.y) return;
+    vec4 c = imageLoad(inImage, p);
+    if (pc.size < 2) { imageStore(outImage, p, c); return; }
+
+    float last = float(pc.size - 1);
+    vec3 f = clamp(c.rgb, 0.0, 1.0) * last;
+    ivec3 i0 = ivec3(floor(f));
+    ivec3 i1 = min(i0 + 1, ivec3(pc.size - 1));
+    vec3 d = f - vec3(i0);
+
+    vec3 c000 = lutTexel(i0.r, i0.g, i0.b);
+    vec3 c100 = lutTexel(i1.r, i0.g, i0.b);
+    vec3 c010 = lutTexel(i0.r, i1.g, i0.b);
+    vec3 c110 = lutTexel(i1.r, i1.g, i0.b);
+    vec3 c001 = lutTexel(i0.r, i0.g, i1.b);
+    vec3 c101 = lutTexel(i1.r, i0.g, i1.b);
+    vec3 c011 = lutTexel(i0.r, i1.g, i1.b);
+    vec3 c111 = lutTexel(i1.r, i1.g, i1.b);
+
+    vec3 c00 = mix(c000, c100, d.r);
+    vec3 c10 = mix(c010, c110, d.r);
+    vec3 c01 = mix(c001, c101, d.r);
+    vec3 c11 = mix(c011, c111, d.r);
+    vec3 outRgb = mix(mix(c00, c10, d.g), mix(c01, c11, d.g), d.b);
+
+    imageStore(outImage, p, vec4(outRgb, c.a)); // alpha preserved
+}
+)glsl";
+
 constexpr std::string_view kToneCurveSrc = R"glsl(#version 450
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(binding = 0, rgba8) uniform readonly  image2D inImage;
@@ -259,6 +324,7 @@ std::string_view effectKernelName(EffectKernel kernel) noexcept {
         case EffectKernel::ColorGrade:    return "color_grade";
         case EffectKernel::InvertColors:  return "invert_colors";
         case EffectKernel::ToneCurve:     return "tone_curve";
+        case EffectKernel::Lut:           return "lut";
         case EffectKernel::Transition:    return "transition";
     }
     return "unknown";
@@ -273,6 +339,7 @@ std::optional<EffectType> effectTypeForKernel(EffectKernel kernel) noexcept {
         case EffectKernel::ColorGrade:    return EffectType::ColorGrade;
         case EffectKernel::InvertColors:  return EffectType::InvertColors;
         case EffectKernel::ToneCurve:     return EffectType::ToneCurve;
+        case EffectKernel::Lut:           return EffectType::Lut;
         case EffectKernel::Transition:    return std::nullopt; // no per-clip EffectType
     }
     return std::nullopt;
@@ -287,6 +354,7 @@ std::optional<EffectKernel> kernelForEffectType(EffectType type) noexcept {
         case EffectType::ColorGrade:    return EffectKernel::ColorGrade;
         case EffectType::InvertColors:  return EffectKernel::InvertColors;
         case EffectType::ToneCurve:     return EffectKernel::ToneCurve;
+        case EffectType::Lut:           return EffectKernel::Lut;
         case EffectType::Custom:        return std::nullopt; // caller-supplied kernel
     }
     return std::nullopt;
@@ -301,6 +369,7 @@ std::string_view effectKernelSource(EffectKernel kernel) noexcept {
         case EffectKernel::ColorGrade:    return kColorGradeSrc;
         case EffectKernel::InvertColors:  return kInvertColorsSrc;
         case EffectKernel::ToneCurve:     return kToneCurveSrc;
+        case EffectKernel::Lut:           return kLutSrc;
         case EffectKernel::Transition:    return kTransitionSrc;
     }
     return {};

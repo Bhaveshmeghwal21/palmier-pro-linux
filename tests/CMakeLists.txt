@@ -163,7 +163,8 @@ add_executable(palmier_gpu_tests
     gpu_compositor_test.cpp
     gpu_effect_kernels_test.cpp
     gpu_video_scopes_test.cpp
-    gpu_cube_lut_test.cpp)
+    gpu_cube_lut_test.cpp
+    gpu_lut_cache_test.cpp)
 target_link_libraries(palmier_gpu_tests PRIVATE
     Palmier::test_support
     Palmier::gpu)

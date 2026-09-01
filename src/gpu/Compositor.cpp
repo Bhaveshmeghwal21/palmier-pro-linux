@@ -20,6 +20,8 @@
 #include <utility>
 
 #include "core/ToneCurve.hpp"
+#include "gpu/CubeLut.hpp"
+#include "gpu/LutCache.hpp"
 
 #include "core/Error.hpp"
 #include "gpu/GpuContext.hpp"
@@ -301,6 +303,31 @@ void applyColorGrade(std::uint8_t* rgba, std::size_t pixels,
 /// Clamping (Requirement 5.6) is a property of the table rather than of this loop:
 /// every entry was produced by a clamped evaluation, so no index can yield an
 /// out-of-range value and wrapping is impossible by construction.
+/// Apply a parsed 3D LUT by trilinear interpolation (Requirement 7.6).
+///
+/// Reads the same table the GPU kernel is handed and performs the same eight-texel,
+/// seven-mix blend, so the two agree within property P5's 1-LSB tolerance. The blend is
+/// written out on both sides rather than delegated to a hardware sampler, because a
+/// sampler's filtering precision is a device detail and the tolerance is not.
+///
+/// An empty table is a NO-OP rather than a black frame. That is Requirement 7.8's
+/// behaviour reaching this far down: a LUT whose file is missing leaves the effect in the
+/// chain and renders un-graded, and the way it does so is by carrying no table.
+void applyLut(std::uint8_t* rgba, std::size_t pixels, const CubeLut& lut) {
+    if (lut.empty()) {
+        return;
+    }
+    for (std::size_t i = 0; i < pixels; ++i) {
+        const LutEntry out = lut.sample(static_cast<float>(rgba[i * 4 + 0]) / 255.0f,
+                                       static_cast<float>(rgba[i * 4 + 1]) / 255.0f,
+                                       static_cast<float>(rgba[i * 4 + 2]) / 255.0f);
+        rgba[i * 4 + 0] = toByte(static_cast<double>(out.r) * 255.0);
+        rgba[i * 4 + 1] = toByte(static_cast<double>(out.g) * 255.0);
+        rgba[i * 4 + 2] = toByte(static_cast<double>(out.b) * 255.0);
+        // Alpha untouched: a LUT is a colour transform.
+    }
+}
+
 void applyToneCurve(std::uint8_t* rgba, std::size_t pixels,
                     const ToneCurveTables& tables) noexcept {
     if (tables.isIdentity()) return;
@@ -373,6 +400,13 @@ void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba,
             // core::toneCurveTables, once, in double precision — this path and the
             // GPU kernel then both do nothing but index the result.
             applyToneCurve(rgba, pixels, toneCurveTables(effect.parameters));
+            break;
+        case EffectType::Lut:
+            // The table is parsed and cached by the caller (gpu::LutCache) and handed in
+            // through the effect's resourcePath, because reading a file is not something
+            // a per-pixel loop should do. An unreadable path yields an empty table, which
+            // renders un-graded -- Requirement 7.8.
+            applyLut(rgba, pixels, lutForEffect(effect));
             break;
         case EffectType::Custom:
             // A Custom effect's behavior comes entirely from a caller-registered
