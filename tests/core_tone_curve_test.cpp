@@ -107,7 +107,11 @@ TEST(ToneCurveEncoding, AGapTruncatesRatherThanBeingSilentlyClosedUp) {
 
     const std::vector<CurvePoint> read = curvePoints(params, CurveChannel::Master);
     ASSERT_EQ(read.size(), 1u);
-    EXPECT_EQ(read[0], CurvePoint{0.0, 0.0});
+    // Held in a variable rather than written inline: a braced initialiser containing a
+    // comma is split by the PREPROCESSOR into two macro arguments, because parentheses
+    // protect a macro argument and braces do not.
+    const CurvePoint expected{0.0, 0.0};
+    EXPECT_EQ(read[0], expected);
 }
 
 // ---------------------------------------------------------------------------
