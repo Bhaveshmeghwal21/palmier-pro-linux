@@ -10,7 +10,28 @@
 // supports a stored version iff the major numbers match and the reader's minor is
 // >= the stored minor.
 //
-// The current version is 1.4. Its addition over 1.3 is MediaAssetRef::tags
+// The current version is 1.5. Its addition over 1.4 is Effect::resourcePath
+// (monitoring-and-grading task 7; Requirement 7.2): one optional string field on
+// an effect naming an external resource, which the LUT effect uses to carry a
+// `.cube` file's path. Like tags before it, an effect carrying no
+// "resourcePath" key at all (every 1.0-1.4 document) is unaffected, so a 1.5
+// build reads every earlier document unchanged with an empty path, and a 1.4
+// build reads a 1.5 document unchanged too — an unrecognised extra key on an
+// effect object is ignored rather than rejected.
+//
+// That last part is only true for an effect whose TYPE the older reader knows.
+// A 1.5 document carrying a `lut` effect meets the same rule every earlier
+// addition established: an unrecognised effect kind is rejected, because
+// rendering a clip while silently dropping a look the colourist applied is
+// worse than refusing to open it. So the compatibility story is the same as
+// tags' for the FIELD and the same as `invert_colors`' for the TYPE.
+//
+// A LUT is deliberately NOT modelled as a core::MediaAssetRef (Requirement 7.2,
+// audit finding 14): an asset is timeline content with a duration, a decoder and
+// a media library entry, and a LUT is none of those. Reusing the type would put
+// LUTs in the media browser and give them import semantics they cannot satisfy.
+//
+// The version PRIOR to 1.5 was 1.4. Its addition over 1.3 is MediaAssetRef::tags
 // (usable-editor tasks.md task 15; no dedicated Requirement): an asset carrying
 // no "tags" key at all (every 1.0/1.1/1.2/1.3 document) is unaffected, so a 1.4
 // build reads every earlier document unchanged with an empty tag list, and a
@@ -52,7 +73,7 @@ struct SchemaVersion {
 
     /// The schema version this build writes and can fully round-trip.
     [[nodiscard]] static constexpr SchemaVersion current() noexcept {
-        return SchemaVersion{1, 4};
+        return SchemaVersion{1, 5};
     }
 
     /// Can a reader at `reader` load data written at `stored`?

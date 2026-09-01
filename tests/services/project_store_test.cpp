@@ -117,6 +117,11 @@ void expectSameClip(const Clip& a, const Clip& b) {
         EXPECT_EQ(a.effects[i].id, b.effects[i].id);
         EXPECT_EQ(a.effects[i].type, b.effects[i].type);
         EXPECT_EQ(a.effects[i].parameters, b.effects[i].parameters);
+        // Schema 1.5: compared here so every existing round-trip test covers the new
+        // field too. Without this the dedicated round-trip case would be the ONLY thing
+        // checking it, and a serialiser that dropped the path would still pass the rest
+        // of this file.
+        EXPECT_EQ(a.effects[i].resourcePath, b.effects[i].resourcePath);
     }
 
     ASSERT_EQ(a.transitionIn.has_value(), b.transitionIn.has_value());
@@ -300,10 +305,55 @@ std::string withDeclaredVersion(const Project& p, const std::string& version) {
 }
 
 TEST(ProjectStore, WritesTheCurrentSchemaVersion) {
-    // Schema 1.4 is what this build writes (usable-editor tasks.md task 15).
-    EXPECT_EQ(SchemaVersion::current(), SchemaVersion(1, 4));
-    EXPECT_NE(serializeProject(makeSampleProject()).find("\"version\": \"1.4\""),
+    // Schema 1.5 is what this build writes (monitoring-and-grading task 7; the addition
+    // over 1.4 is Effect::resourcePath).
+    EXPECT_EQ(SchemaVersion::current(), SchemaVersion(1, 5));
+    EXPECT_NE(serializeProject(makeSampleProject()).find("\"version\": \"1.5\""),
               std::string::npos);
+}
+
+// Requirement 7.3: the bump must cost an existing document nothing. An effect with no
+// resource omits the key ENTIRELY rather than writing "", so a project carrying no LUT
+// serialises exactly as a 1.4 build would have written it apart from the version string.
+TEST(ProjectStore, AnEffectWithNoResourceWritesNoResourcePathKeyAtAll) {
+    const std::string json = serializeProject(makeSampleProject());
+    EXPECT_EQ(json.find("resourcePath"), std::string::npos)
+        << "the sample project has no LUT, so the 1.5 field must be absent";
+}
+
+// And the other side: a document written WITHOUT the key loads with an empty path and
+// nothing is migrated in, so a load-then-save does not gain it. This is the same claim
+// ALegacyColorGradeIsLoadedWithoutMigratingItsParameters makes for parameters.
+TEST(ProjectStore, APreSchemaProjectLoadsWithAnEmptyResourcePathAndDoesNotGainTheKey) {
+    const std::string original = serializeProject(makeSampleProject());
+    ASSERT_EQ(original.find("resourcePath"), std::string::npos);
+
+    const auto loaded = deserializeProject(original);
+    ASSERT_TRUE(loaded.isOk()) << loaded.error().message();
+    for (const Track& track : loaded.value().tracks) {
+        for (const Clip& clip : track.clips) {
+            for (const Effect& fx : clip.effects) {
+                EXPECT_TRUE(fx.resourcePath.empty()) << "absent must mean empty, not \"\"-ish";
+            }
+        }
+    }
+    EXPECT_EQ(serializeProject(loaded.value()).find("resourcePath"), std::string::npos)
+        << "a round trip must not INVENT the key";
+}
+
+TEST(ProjectStore, AResourcePathRoundTripsExactlyIncludingAwkwardCharacters) {
+    Project project = makeSampleProject();
+    ASSERT_FALSE(project.tracks.empty());
+    ASSERT_FALSE(project.tracks[0].clips.empty());
+    ASSERT_FALSE(project.tracks[0].clips[0].effects.empty());
+    // Spaces, a quote and a backslash: a path is user data and the serialiser must escape
+    // it rather than assume it is a tidy identifier.
+    const std::string path = R"(/home/u/luts/my "look" \ v2.cube)";
+    project.tracks[0].clips[0].effects[0].resourcePath = path;
+
+    const auto loaded = deserializeProject(serializeProject(project));
+    ASSERT_TRUE(loaded.isOk()) << loaded.error().message();
+    EXPECT_EQ(loaded.value().tracks[0].clips[0].effects[0].resourcePath, path);
 }
 
 TEST(ProjectStore, SchemaCompatibilityIsMinorForwardOnly) {

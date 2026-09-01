@@ -353,6 +353,19 @@ supplied or a camera vendor published, instead of rebuilding it by hand.
    path — a missing LUT SHALL NOT fail the open, drop the effect, or block editing.
 9. THE Tool_Surface SHALL expose applying a LUT by path, and it SHALL be one undoable edit.
 
+**Design constraint (mechanism for criteria 2, 4, 5, 6 and 7).** The field is
+`core::Effect::resourcePath`, a plain string that is empty when there is no resource, which is why every
+1.0-1.4 document opens unchanged: `ProjectStore` omits the key entirely when it is empty, so a project
+with no LUT serialises exactly as a 1.4 build wrote it apart from the version string, and a reader with
+no notion of the key ignores it. The parser is `gpu::parseCubeLut`, a pure function of *text* rather than
+of a path, producing a `gpu::CubeLut` of `gpu::LutEntry` indexed with red varying fastest - the format's
+own order, and the single most likely thing to get wrong, since a transposed table still renders a
+plausible image. `CubeLut::sample` is the trilinear interpolation and `CubeLut::isIdentity` is the shared
+correctness anchor criterion 7 names: a table that parses as the identity *and* samples to its input has
+a consistent index order, domain scaling and set of interpolation weights. Reading the file is the
+caller's job, which is what keeps criterion 8's "a missing LUT renders un-graded and reports the path" a
+question about I/O rather than about parsing.
+
 ## Requirement 8: Parity, Determinism And Documentation
 
 **User Story:** As anyone reading this repository, I want its documents to describe what this spec

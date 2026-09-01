@@ -47,6 +47,24 @@ struct Effect {
     EffectType                  type = EffectType::Custom;
     std::map<std::string, double> parameters; ///< Named scalar parameters.
 
+    /// Path to an external resource this effect needs, or empty for none.
+    ///
+    /// Schema 1.5 (monitoring-and-grading Requirement 7.2). Carries a `.cube` file's
+    /// path for a LUT effect. EMPTY MEANS "no resource" rather than "not yet loaded",
+    /// which is what lets every 1.0-1.4 document open unchanged: the key is simply
+    /// absent, exactly as Clip::captionText and MediaAssetRef::tags already established.
+    ///
+    /// Deliberately a plain string and NOT a core::MediaAssetRef (audit finding 14): an
+    /// asset is timeline content with a duration, a decoder and a media library entry,
+    /// and a LUT is none of those. Reusing the type would put LUTs in the media browser
+    /// and give them import semantics they cannot satisfy.
+    ///
+    /// Not validated here. Whether the file exists is a question for the moment it is
+    /// read, and Requirement 7.8 requires a missing LUT to leave the effect in the chain
+    /// and render un-graded rather than to fail the open -- so a constructor that
+    /// rejected an unreadable path would make that impossible.
+    std::string resourcePath;
+
     Effect() = default;
     Effect(Uuid id_, EffectType type_, std::map<std::string, double> params = {})
         : id(id_), type(type_), parameters(std::move(params)) {}

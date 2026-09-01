@@ -555,6 +555,14 @@ void writeEffect(JsonWriter& w, const Effect& fx) {
         w.valueDouble(value);
     }
     w.endObject();
+    // Schema 1.5 addition (monitoring-and-grading task 7; Requirement 7.2): omitted
+    // ENTIRELY when empty, not written as "". That is what keeps a project with no LUT
+    // byte-identical to what a 1.4 build wrote, so the bump costs nothing to any existing
+    // document and a 1.4 reader meets no key it does not know.
+    if (!fx.resourcePath.empty()) {
+        w.key("resourcePath");
+        w.valueString(fx.resourcePath);
+    }
     w.endObject();
 }
 
@@ -863,6 +871,11 @@ Effect readEffect(const JsonValue& v) {
     for (const auto& [name, pv] : params.members) {
         fx.parameters.emplace(name, parseDouble(pv, name));
     }
+    // Schema 1.5 (monitoring-and-grading task 7; Requirement 7.3): absent means "no
+    // resource", so every 1.0-1.4 document loads with an empty path and nothing is
+    // migrated in. Materialising a "" here would be indistinguishable, but writeEffect
+    // omits an empty path, so a load-then-save of an old project must not GAIN the key.
+    fx.resourcePath = optionalString(v, "resourcePath", "");
     return fx;
 }
 
