@@ -304,6 +304,22 @@ target_link_libraries(palmier_core_media_manager_tests PRIVATE
     Palmier::core
     Palmier::test_support)
 
+# ---------------------------------------------------------------------------
+# Tone curves (monitoring-and-grading task 5; Requirement 5)
+#
+# The control points, the documented piecewise-linear interpolation between them,
+# and the baking of a curve into a 256-entry transfer table. Pure arithmetic over
+# an effect's parameter map, so this links only Palmier::core — the effect type,
+# the GPU kernel and the Inspector's curve control all rest on it and are covered
+# separately.
+# ---------------------------------------------------------------------------
+add_executable(palmier_core_tone_curve_tests
+    core_tone_curve_test.cpp)
+target_link_libraries(palmier_core_tone_curve_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+palmier_register_test(palmier_core_tone_curve_tests)
+
 palmier_register_test(palmier_core_media_manager_tests)
 
 

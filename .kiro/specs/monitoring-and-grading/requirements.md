@@ -256,6 +256,17 @@ out highlights — the one operation no combination of lift/gamma/gain can expre
 9. THE Inspector SHALL present the curve as a directly editable control showing the current transfer
    function, not merely as a numeric list.
 
+**Design constraint (the mechanism for criteria 3, 4 and 5).** The curve arithmetic lives in a Qt-free,
+GPU-free `core::ToneCurve` translation unit: a `CurvePoint` list read from the effect's existing
+parameter map, a documented piecewise-linear `evaluateToneCurve`, and `bakeToneCurve` producing a
+256-entry `ToneCurveTable`. Because the pipeline is 8-bit, a 256-entry table is not an approximation of
+the transfer function but the transfer function itself, so interpolation is performed exactly once, on
+the host, in double precision; the GPU kernel and the software reference then both do nothing but index
+that table. Criterion 3 is therefore satisfied by construction rather than by bounding a divergence,
+and criterion 4's "same points, same function, every host" follows from the interpolation being linear
+and evaluated in one place. Criterion 5 is a property of `bakeToneCurve`, which returns
+`identityToneCurveTable` for a curve with fewer than two points.
+
 ## Requirement 6: Video Scopes
 
 **User Story:** As a colourist, I want a histogram, a waveform monitor and a vectorscope, so that I can

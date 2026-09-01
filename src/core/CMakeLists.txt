@@ -39,6 +39,13 @@
 # subclasses that realize the interactive timeline editing operations
 # (Requirement 2.2-2.7). They mutate a Project through the same apply()/revert()
 # contract the TimelineEngine drives and carry a translation unit.
+#
+# monitoring-and-grading task 5 adds ToneCurve — control points, the documented
+# piecewise-linear interpolation between them, and the baking of a curve into a
+# 256-entry transfer table. It lives in core rather than in gpu because three
+# unrelated places need exactly the same answer and must not drift: the software
+# render reference, the GPU kernel's uploaded table, and the Inspector's curve
+# control. It is pure arithmetic over a parameter map, with no Qt and no GPU.
 
 add_library(palmier_core STATIC
     Uuid.cpp
@@ -47,7 +54,8 @@ add_library(palmier_core STATIC
     UndoRedoStack.cpp
     TimelineEngine.cpp
     EditCommands.cpp
-    MediaManager.cpp)
+    MediaManager.cpp
+    ToneCurve.cpp)
 add_library(Palmier::core ALIAS palmier_core)
 
 # Public headers are included as "core/<Header>.hpp" from the src/ root.
