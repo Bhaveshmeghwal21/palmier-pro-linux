@@ -154,6 +154,7 @@ constexpr std::string_view kRemoveEffect       = "timeline.remove_effect";
 constexpr std::string_view kReorderEffects     = "timeline.reorder_effects";
 constexpr std::string_view kSetEffectParameter = "timeline.set_effect_parameter";
 constexpr std::string_view kEditCurvePoint = "timeline.edit_curve_point";
+constexpr std::string_view kSetEffectResource = "timeline.set_effect_resource";
 constexpr std::string_view kAddTransition = "timeline.add_transition";
 // Text and titles (usable-editor task 12; Requirement 9).
 constexpr std::string_view kAddTextClip    = "timeline.add_text_clip";
@@ -941,6 +942,16 @@ struct Invocation {
     // same guaranteed seeded effect. The effect's TYPE does not matter: a control point
     // is a parameter like any other, and the command deliberately does not police which
     // effect kind carries one -- exactly as set_effect_parameter does not.
+    // A resource path on the same guaranteed seeded effect (Requirement 7.9). The path is
+    // deliberately one that does not exist: the tool must not check, because 7.8 requires a
+    // missing LUT to leave the effect in the chain rather than to refuse the edit.
+    if (name == kSetEffectResource) {
+        const Clip& seeded = project.tracks[0].clips[0];
+        args.set("clipId", Json(seeded.id.toString()));
+        args.set("effectId", Json(seeded.effects.front().id.toString()));
+        args.set("path", Json(std::string{"/luts/generated.cube"}));
+        return Invocation{name, std::move(args)};
+    }
     if (name == kEditCurvePoint) {
         const Clip& seeded = project.tracks[0].clips[0];
         args.set("clipId", Json(seeded.id.toString()));

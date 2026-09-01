@@ -1253,6 +1253,44 @@ Result<void> EditCurvePointCommand::revert(Project& project) {
     return ok();
 }
 
+// ===========================================================================
+// SetEffectResourceCommand
+// ===========================================================================
+
+SetEffectResourceCommand::SetEffectResourceCommand(ClipId clipId, Uuid effectId,
+                                                   std::string path)
+    : clipId_(clipId), effectId_(effectId), path_(std::move(path)) {}
+
+Result<void> SetEffectResourceCommand::apply(Project& project) {
+    auto found = findEffect(project, clipId_, effectId_, "SetEffectResourceCommand");
+    if (!found) {
+        return err(found.error());
+    }
+    auto it = found.value();
+    prior_ = it->resourcePath;
+    captured_ = true;
+    it->resourcePath = path_;
+    // Deliberately no existence check. Requirement 7.8 requires a missing LUT to leave the
+    // effect in the chain and render un-graded, so refusing an unreadable path here would
+    // make a project that opens on one machine un-editable on another.
+    return ok();
+}
+
+Result<void> SetEffectResourceCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition("SetEffectResourceCommand: revert before a successful apply"));
+    }
+    auto found = findEffect(project, clipId_, effectId_, "SetEffectResourceCommand");
+    if (!found) {
+        return err(found.error());
+    }
+    // Restores an EMPTY prior too, which is the common case: an effect just added has no
+    // resource, so skipping the restore when the prior was empty would leave the first LUT
+    // applied to an effect un-undoable.
+    found.value()->resourcePath = prior_;
+    return ok();
+}
+
 const char* curvePointOperationToolName(EditCurvePointCommand::Operation operation) noexcept {
     switch (operation) {
         case EditCurvePointCommand::Operation::Add:    return "add";

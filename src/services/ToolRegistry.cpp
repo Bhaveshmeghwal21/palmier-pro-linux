@@ -74,6 +74,7 @@ constexpr const char* kRemoveEffect        = "timeline.remove_effect";
 constexpr const char* kReorderEffects      = "timeline.reorder_effects";
 constexpr const char* kSetEffectParameter  = "timeline.set_effect_parameter";
 constexpr const char* kEditCurvePoint      = "timeline.edit_curve_point";
+constexpr const char* kSetEffectResource   = "timeline.set_effect_resource";
 constexpr const char* kAddTransition  = "timeline.add_transition";
 // Text and titles (usable-editor Phase 4 task 12; Requirement 9).
 constexpr const char* kAddTextClip      = "timeline.add_text_clip";
@@ -1141,6 +1142,44 @@ Tool makeSetEffectParameterTool(ProjectSession* session) {
                             std::make_unique<SetEffectParameterCommand>(
                                 clipId.value(), effectId.value(), parameter.value(),
                                 value.value()),
+                            std::move(out));
+    };
+    return t;
+}
+
+Tool makeSetEffectResourceTool(ProjectSession* session) {
+    Tool t;
+    t.name = kSetEffectResource;
+    t.description = "Point one of a clip's effects at an external resource file, such as a "
+                    "`.cube` LUT, or clear it with an empty path.";
+    t.schema
+        .arg(uuidArg("clipId", true, "UUID of the clip carrying the effect."))
+        .arg(uuidArg("effectId", true, "UUID of the effect to change."))
+        .arg(ArgSpec{.name = "path",
+                     .kind = JsonKind::String,
+                     .required = true,
+                     .description = "Filesystem path to the resource, or \"\" to clear it."});
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kSetEffectResource));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> clipId = requireUuid(in, "clipId");
+        if (clipId.isError()) return err<Json>(std::move(clipId).error());
+        Result<Uuid> effectId = requireUuid(in, "effectId");
+        if (effectId.isError()) return err<Json>(std::move(effectId).error());
+        Result<std::string> path = requireString(in, "path");
+        if (path.isError()) return err<Json>(std::move(path).error());
+
+        // The path is NOT checked for existence. Requirement 7.8 requires a missing LUT to
+        // leave the effect in the chain and render un-graded, so refusing an unreadable path
+        // here would make a project that opens on one machine un-editable on another -- and
+        // an agent setting up a project before its assets arrive is an ordinary workflow.
+        Json out = Json::object();
+        out.set("clipId", clipId.value().toString());
+        out.set("effectId", effectId.value().toString());
+        out.set("path", path.value());
+        return applyCommand(engine,
+                            std::make_unique<SetEffectResourceCommand>(
+                                clipId.value(), effectId.value(), path.value()),
                             std::move(out));
     };
     return t;
@@ -2702,6 +2741,7 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(makeReorderEffectsTool(session));
     registry.add(makeSetEffectParameterTool(session));
     registry.add(makeEditCurvePointTool(session));
+    registry.add(makeSetEffectResourceTool(session));
     registry.add(makeAddTransitionTool(session));
     // Text and titles sits right after transitions (usable-editor task 12.2).
     registry.add(makeAddTextClipTool(session));

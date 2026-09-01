@@ -503,6 +503,27 @@ point the chosen curve does not have.
 
 Result: `clipId` (string), `effectId` (string), `channel` (string), `operation` (string), *(command result)*.
 
+## `timeline.set_effect_resource`
+
+Point one of a clip's effects at an external resource file, such as a `.cube` LUT, or clear it with an
+empty path (monitoring-and-grading Requirement 7.9).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | |
+| `effectId` | string *uuid* | **yes** | |
+| `path` | string | **yes** | a filesystem path, or `""` to clear |
+
+The path is **not** checked for existence. A referenced LUT that is missing or unreadable leaves the
+effect in the chain and renders the clip un-graded, reporting the path — it does not fail the project
+open, drop the effect, or block editing. Refusing an unreadable path here would instead make a project
+that opens on one machine un-editable on another.
+
+Clearing the path removes the LUT without removing the effect. Undo restores the previous path,
+including when that path was empty — which is the common case, since an effect just added has none.
+
+Result: `clipId` (string), `effectId` (string), `path` (string), *(command result)*.
+
 ## `timeline.add_transition`
 
 Set a clip's incoming transition (crossfade, wipe, slide, fade, ...).

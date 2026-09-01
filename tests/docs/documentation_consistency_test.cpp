@@ -513,6 +513,14 @@ private:
     curvePoint.set("y", 0.6);
     observer.run("timeline.edit_curve_point", curvePoint);
 
+    // A resource path on the same effect (monitoring-and-grading Requirement 7.9). The file
+    // need not exist: the tool records a path and does not read it.
+    services::Json resource = object();
+    resource.set("clipId", secondClip);
+    resource.set("effectId", firstEffectId);
+    resource.set("path", std::string{"/luts/documented.cube"});
+    observer.run("timeline.set_effect_resource", resource);
+
     services::Json secondEffectArgs = object();
     secondEffectArgs.set("clipId", secondClip);
     secondEffectArgs.set("type", std::string{"contrast"});

@@ -219,6 +219,10 @@ std::vector<ToolExpectation> expectedSurface() {
         // are declared optional because which of them is required depends on
         // `operation`'s value, which the vocabulary cannot express; that gap is
         // documented as Class 1 in tool_schema_conformance_property_test.cpp.
+        {"timeline.set_effect_resource",
+         {{"clipId", "string", true},
+          {"effectId", "string", true},
+          {"path", "string", true}}},
         {"timeline.edit_curve_point",
          {{"clipId", "string", true},
           {"effectId", "string", true},
@@ -467,6 +471,8 @@ TEST(ToolRegistrySchema, IdentifierArgumentsPublishAndEnforceTheUuidFormat) {
         {"timeline.add_effect", "clipId"},     {"timeline.remove_effect", "effectId"},
         {"timeline.reorder_effects", "clipId"}, {"timeline.set_effect_parameter", "effectId"},
         {"timeline.edit_curve_point", "clipId"}, {"timeline.edit_curve_point", "effectId"},
+        {"timeline.set_effect_resource", "clipId"},
+        {"timeline.set_effect_resource", "effectId"},
         {"timeline.add_transition", "clipId"},
         {"timeline.ripple_delete", "clipId"},  {"timeline.ripple_trim", "clipId"},
         {"timeline.close_gap", "clipId"},

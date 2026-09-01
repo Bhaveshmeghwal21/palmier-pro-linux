@@ -818,6 +818,88 @@ TEST(EditCurvePointCommand, AMissingClipOrEffectIsRefusedAndNamed) {
     EXPECT_NE(result.error().message().find("effect"), std::string::npos);
 }
 
+// --- SetEffectResourceCommand ----------------------------------------------
+//
+// Requirement 7.9: applying a LUT by path is ONE undoable edit. The interesting case is the
+// EMPTY prior, because it is the common one -- an effect just added has no resource -- and
+// treating "no prior" as "nothing to restore" would make the first LUT applied to an effect
+// un-undoable.
+
+TEST(SetEffectResourceCommand, SetsThePathAndRevertRestoresAnEmptyPrior) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+    ASSERT_TRUE(project.tracks[0].clips[0].effects[0].resourcePath.empty());
+
+    SetEffectResourceCommand cmd(clipId, effectId, "/luts/look.cube");
+    ASSERT_TRUE(cmd.apply(project).isOk());
+    EXPECT_EQ(project.tracks[0].clips[0].effects[0].resourcePath, "/luts/look.cube");
+
+    ASSERT_TRUE(cmd.revert(project).isOk());
+    EXPECT_TRUE(project.tracks[0].clips[0].effects[0].resourcePath.empty())
+        << "an empty prior must be restored, not skipped";
+}
+
+TEST(SetEffectResourceCommand, ReplacingAPathRestoresThePreviousOneNotAnEmptyString) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+    project.tracks[0].clips[0].effects[0].resourcePath = "/luts/first.cube";
+
+    SetEffectResourceCommand cmd(clipId, effectId, "/luts/second.cube");
+    ASSERT_TRUE(cmd.apply(project).isOk());
+    EXPECT_EQ(project.tracks[0].clips[0].effects[0].resourcePath, "/luts/second.cube");
+    ASSERT_TRUE(cmd.revert(project).isOk());
+    EXPECT_EQ(project.tracks[0].clips[0].effects[0].resourcePath, "/luts/first.cube");
+}
+
+TEST(SetEffectResourceCommand, AnEmptyPathClearsTheResourceWithoutRemovingTheEffect) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+    project.tracks[0].clips[0].effects[0].resourcePath = "/luts/look.cube";
+
+    SetEffectResourceCommand cmd(clipId, effectId, "");
+    ASSERT_TRUE(cmd.apply(project).isOk());
+    EXPECT_TRUE(project.tracks[0].clips[0].effects[0].resourcePath.empty());
+    EXPECT_EQ(project.tracks[0].clips[0].effects.size(), 1u)
+        << "clearing a LUT must not remove the effect it was on";
+}
+
+// Requirement 7.8 reaching the command: a path that cannot be read is still accepted, or a
+// project that opens on one machine would be un-editable on another, and an agent setting up
+// a project before its assets arrive is an ordinary workflow.
+TEST(SetEffectResourceCommand, ANonExistentPathIsAcceptedRatherThanRefused) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+    SetEffectResourceCommand cmd(clipId, effectId, "/definitely/not/here.cube");
+    EXPECT_TRUE(cmd.apply(project).isOk());
+    EXPECT_EQ(project.tracks[0].clips[0].effects[0].resourcePath, "/definitely/not/here.cube");
+}
+
+TEST(SetEffectResourceCommand, AMissingClipOrEffectIsRefusedAndRevertBeforeApplyFails) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+
+    SetEffectResourceCommand noClip(Uuid::generateV4(), effectId, "/luts/a.cube");
+    auto result = noClip.apply(project);
+    ASSERT_TRUE(result.isError());
+    EXPECT_EQ(result.error().code(), ErrorCode::NotFound);
+
+    SetEffectResourceCommand noEffect(clipId, Uuid::generateV4(), "/luts/a.cube");
+    EXPECT_TRUE(noEffect.apply(project).isError());
+
+    SetEffectResourceCommand never(clipId, effectId, "/luts/a.cube");
+    result = never.revert(project);
+    ASSERT_TRUE(result.isError());
+    EXPECT_EQ(result.error().code(), ErrorCode::FailedPrecondition);
+
+    // Nothing was changed by any of the three refusals.
+    EXPECT_TRUE(project.tracks[0].clips[0].effects[0].resourcePath.empty());
+}
+
 // --- AddEffectCommand ------------------------------------------------------
 
 TEST(AddEffectCommand, AppendsAndRevertRemoves) {

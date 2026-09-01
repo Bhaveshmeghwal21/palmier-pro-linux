@@ -384,7 +384,7 @@ struct GenFrame {
         case EffectType::Lut:
             // Never generated, matching the dispatch above: an effect with no
             // resourcePath applies no table, which is a passthrough on both paths.
-            return make({});
+            return makeEffect(type, {});
         case EffectType::ToneCurve: {
             // Two to five points per channel, at generated positions, so the property
             // covers the identity cases (fewer than two points), ordinary curves, and

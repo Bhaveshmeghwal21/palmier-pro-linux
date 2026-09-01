@@ -696,6 +696,37 @@ private:
     bool captured_ = false;
 };
 
+// ---------------------------------------------------------------------------
+// SetEffectResourceCommand — point one effect at an external resource, or clear it.
+// ---------------------------------------------------------------------------
+//
+// Requirement 7.9 (monitoring-and-grading): applying a LUT by path is ONE undoable edit.
+// SetEffectParameterCommand cannot serve, because a path is a string and that map holds
+// doubles — which is the whole reason schema 1.5 added the field.
+//
+// revert() restores the prior path, INCLUDING when that path was empty. An empty prior is
+// the common case (an effect just added has no LUT yet), so treating "no prior" as "nothing
+// to restore" would make the first LUT applied to an effect un-undoable — the failure mode
+// SetEffectParameterCommand's hadPrior_ exists to avoid, in a case where the absent value
+// is representable and so needs no flag.
+class SetEffectResourceCommand final : public EditCommand {
+public:
+    /// An empty `path` clears the resource, which is how a LUT is removed without removing
+    /// the effect (Requirement 7.8 keeps the effect in the chain either way).
+    SetEffectResourceCommand(ClipId clipId, Uuid effectId, std::string path);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "SetEffectResource"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+private:
+    ClipId      clipId_;
+    Uuid        effectId_;
+    std::string path_;
+    std::string prior_;
+    bool        captured_ = false;
+};
+
 /// The operation's name on the tool surface and in the UI, e.g. "move".
 ///
 /// Beside the enum rather than inside the tool registry, so the Inspector and the tool
