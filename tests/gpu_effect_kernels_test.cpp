@@ -742,15 +742,28 @@ TEST(EffectKernels, RegistryBuildsAndRegistersEffectTypeKernels) {
     Compositor comp(ctx);
     const std::size_t registered = registry.registerWith(comp);
 
-    // The six EffectType kernels register; Transition does not (no EffectType).
-    EXPECT_EQ(registered, 6u);
-    EXPECT_EQ(comp.registeredEffectCount(), 6u);
+    // Every kernel that maps to an EffectType registers; Transition does not, because
+    // it blends two inputs and so has no EffectType. Derived from allEffectKernels()
+    // rather than written as a literal: this assertion was a hardcoded 6 and went stale
+    // the moment ToneCurve was added, which is the whole failure mode a computed
+    // expectation removes.
+    std::size_t expectedRegistrations = 0;
+    for (const EffectKernel kernel : allEffectKernels()) {
+        if (kernel != EffectKernel::Transition) {
+            ++expectedRegistrations;
+        }
+    }
+    EXPECT_EQ(registered, expectedRegistrations);
+    EXPECT_EQ(comp.registeredEffectCount(), expectedRegistrations);
+
+    // And each one by name, so a kernel that silently failed to map is still caught.
     EXPECT_TRUE(comp.isEffectRegistered(EffectType::Brightness));
     EXPECT_TRUE(comp.isEffectRegistered(EffectType::Blur));
     EXPECT_TRUE(comp.isEffectRegistered(EffectType::CropTransform));
     EXPECT_TRUE(comp.isEffectRegistered(EffectType::ColorGrade));
     EXPECT_TRUE(comp.isEffectRegistered(EffectType::Contrast));
     EXPECT_TRUE(comp.isEffectRegistered(EffectType::InvertColors));
+    EXPECT_TRUE(comp.isEffectRegistered(EffectType::ToneCurve));
 }
 
 } // namespace
