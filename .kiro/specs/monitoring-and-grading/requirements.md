@@ -160,6 +160,14 @@ cut point by ear rather than by counting frames.
 5. IF the decoder cannot supply audio fast enough to keep up with the drag, THEN THE system SHALL drop
    audio rather than delay the drag, and THE dragged playhead SHALL remain visually responsive.
 
+**Design constraint (how criterion 4 is guaranteed rather than merely tested).** The decision logic —
+when to start, reposition and stop scrub audio, and what state the transport is owed back — SHALL live in
+a Qt-free `ui::ScrubAudioController` that returns an *intent* for its caller to apply to the
+`media::AudioEngine`, and SHALL have no access to the `Project`, the `TimelineEngine` or the undo stack.
+Criterion 4 is then true by construction: the component that decides cannot reach the state it is
+forbidden to modify, so no test has to prove a negative about it. The same separation makes criteria 2, 3
+and 5 testable without an audio device, because the controller can be driven with simulated time.
+
 ## Requirement 4: Lift / Gamma / Gain Primary Grade
 
 **User Story:** As a colourist, I want per-channel control of shadows, midtones and highlights, so that

@@ -66,6 +66,33 @@ target_link_libraries(palmier_ui_audio_meter_vm PUBLIC
     Palmier::media)
 
 # ---------------------------------------------------------------------------
+# palmier_ui_scrub_audio — the Qt-free scrub-audio decision logic
+# (monitoring-and-grading task 3; Requirement 3).
+#
+# ScrubAudioController decides and remembers; it performs no I/O and returns an
+# INTENT its caller applies to the Audio_Engine. That shape is load-bearing:
+# because the class has no Project, no TimelineEngine and no way to reach one,
+# Requirement 3.4 (scrub audio must not touch the project, the undo history or
+# the committed playhead) holds by construction rather than by assertion.
+#
+# Time is an argument, so the 60 ms drop interval and the 200 ms stop deadline
+# are tested with simulated milliseconds and no audio device. Declared ABOVE the
+# PALMIER_BUILD_UI guard, like the two view models above, so it builds and is
+# unit-tested on hosts with no Qt. Needs only Palmier::core (Duration).
+# ---------------------------------------------------------------------------
+add_library(palmier_ui_scrub_audio STATIC
+    ScrubAudioController.cpp)
+add_library(Palmier::ui_scrub_audio ALIAS palmier_ui_scrub_audio)
+
+target_include_directories(palmier_ui_scrub_audio PUBLIC
+    "${PROJECT_SOURCE_DIR}/src")
+
+target_compile_features(palmier_ui_scrub_audio PUBLIC cxx_std_20)
+
+target_link_libraries(palmier_ui_scrub_audio PUBLIC
+    Palmier::core)
+
+# ---------------------------------------------------------------------------
 # palmier_ui_gateway — the Qt-free GUI-to-tool-surface gateway (task 11.1;
 # Requirements 1.7, 9.4, 11.5).
 #
@@ -185,6 +212,7 @@ if(TARGET Qt6::Widgets)
         Palmier::ui_project_file_actions
         Palmier::ui_preview_vm
         Palmier::ui_audio_meter_vm
+        Palmier::ui_scrub_audio
         Palmier::ui_inspector_vm
         Palmier::ui_media_browser_vm
         Palmier::ui_agent_chat_vm

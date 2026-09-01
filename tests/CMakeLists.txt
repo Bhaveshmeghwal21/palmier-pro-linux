@@ -369,6 +369,28 @@ palmier_register_test(palmier_ui_audio_meter_tests)
 
 
 # ---------------------------------------------------------------------------
+# Scrub-audio decision tests (monitoring-and-grading task 3; Requirement 3).
+# Exercise the Qt-free ui::ScrubAudioController: that suppression (by setting or
+# by missing output device) silences the audio without changing the DRAG, that a
+# flood of dragged positions is dropped rather than queued, and that the
+# transport is owed its prior state back whether or not the drag was audible.
+# Both timing rules are driven with simulated milliseconds, so these need no
+# audio device, no display and no sleeping. Links Palmier::ui_scrub_audio, which
+# is defined above src/ui's PALMIER_BUILD_UI guard so this runs headless too.
+# ---------------------------------------------------------------------------
+add_executable(palmier_ui_scrub_audio_tests
+    ui/scrub_audio_controller_test.cpp)
+target_include_directories(palmier_ui_scrub_audio_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_ui_scrub_audio_tests PRIVATE
+    Palmier::ui_scrub_audio
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_ui_scrub_audio_tests)
+
+
+# ---------------------------------------------------------------------------
 # Peak-envelope tests (monitoring-and-grading task 2; Requirements 2.1, 2.3,
 # 2.5, 2.6, 2.7). Exercise the pure data layer behind timeline audio waveforms:
 # the bucketed min/max reduction (including that bucket boundaries are a
