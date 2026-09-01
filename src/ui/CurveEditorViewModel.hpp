@@ -106,20 +106,32 @@ public:
                                                     double height) const noexcept;
 
     // --- Gestures ----------------------------------------------------------
+    //
+    // release() is the ONLY commit point for a press-drag-release, which is what makes
+    // "one gesture, one undoable edit" (Requirement 5.7) a property of this class rather
+    // than of whichever widget drives it. press() and drag() therefore never return an
+    // edit: they only advance the working copy so the gesture can be drawn.
 
-    /// Begin a gesture. Grabs an existing point if the pointer is on one, otherwise asks
-    /// for a new point there.
+    /// Begin a gesture: grab the point under the pointer, or begin adding one there.
     ///
-    /// An Add is requested on PRESS rather than on release because the point must exist
-    /// to be dragged; the subsequent moves then move it, and the caller coalesces them.
-    [[nodiscard]] CurveEditRequest press(CurvePixel pixel, double width, double height);
+    /// Always a no-op request. A new point appears in the working copy immediately so it
+    /// can be dragged and drawn, but it is not committed until release() -- otherwise
+    /// clicking and dragging to place a point would be TWO undo entries (an add, then a
+    /// move), and undoing what the user experienced as one action would take two presses.
+    CurveEditRequest press(CurvePixel pixel, double width, double height);
 
-    /// Continue a gesture. Returns a Move for the grabbed point, or None when no gesture
-    /// is in progress — a widget that receives moves without a press must not edit.
-    [[nodiscard]] CurveEditRequest drag(CurvePixel pixel, double width, double height);
+    /// Continue a gesture, moving the grabbed point in the working copy.
+    ///
+    /// Always a no-op request, for the reason above: committing here would put a history
+    /// entry on every mouse move.
+    CurveEditRequest drag(CurvePixel pixel, double width, double height);
 
-    /// End a gesture. Returns the final Move so the caller can commit exactly one edit,
-    /// or None when nothing moved (a click that only selected, or no gesture at all).
+    /// End a gesture and commit it as exactly one edit.
+    ///
+    /// An Add when the gesture began on empty space -- carrying the FINAL position, so
+    /// the point is created where it was released rather than where the press landed --
+    /// a Move when an existing point actually moved, and None when a point was grabbed
+    /// and released without moving.
     [[nodiscard]] CurveEditRequest release();
 
     /// Ask to remove the point under `pixel` (a right-click or double-click, decided by
@@ -138,6 +150,10 @@ private:
     /// Where the dragged point started, so release() can tell a real drag from a click.
     CurvePoint                 dragOrigin_{};
     bool                       moved_ = false;
+    /// Whether this gesture created the point it is dragging, so release() commits an Add
+    /// rather than a Move. Without it, the add would have to be committed on press and
+    /// the gesture would cost two undo entries.
+    bool                       adding_ = false;
 };
 
 }  // namespace palmier::ui

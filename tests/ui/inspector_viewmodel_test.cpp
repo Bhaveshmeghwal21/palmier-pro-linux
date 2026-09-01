@@ -27,9 +27,12 @@
 
 #include "ui/InspectorViewModel.hpp"
 
+#include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
+#include <string>
 
 #include <gtest/gtest.h>
 
@@ -41,6 +44,7 @@
 #include "core/Project.hpp"
 #include "core/TextStyle.hpp"
 #include "core/TimelineEngine.hpp"
+#include "core/ToneCurve.hpp"
 #include "core/Track.hpp"
 #include "core/Uuid.hpp"
 
@@ -618,6 +622,112 @@ TEST(InspectorViewModel, OnChangedFiresForSelectionEditAndExternalChange) {
     // Selecting the same clip again is a no-op (no extra notification).
     model.selectClip(clip);
     EXPECT_EQ(notifications, 3);
+}
+
+// --- Tone curve control points (Requirement 5.7, 5.9) ----------------------
+
+// The claim the Inspector's curve control depends on: each gesture is ONE undo entry.
+// If adding a point were two edits, undoing what the user experienced as one action
+// would take two presses and would briefly leave a half-written point in the project.
+TEST(InspectorViewModel, EachCurvePointOperationIsExactlyOneUndoableEdit) {
+    const ClipId clip = Uuid::generateV4();
+    Project project = makeProjectWithClip(clip);
+    const Effect fx{Uuid::generateV4(), EffectType::ToneCurve, {}};
+    project.tracks[0].clips[0].effects.push_back(fx);
+    TimelineEngine engine(std::move(project));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    const auto pointsNow = [&] {
+        return curvePoints(engine.clip(clip)->effects[0].parameters, CurveChannel::Master);
+    };
+
+    std::size_t depth = engine.undoDepth();
+    ASSERT_TRUE(model
+                    .editCurvePoint(fx.id, CurveChannel::Master,
+                                    EditCurvePointCommand::Operation::Add, 0,
+                                    CurvePoint{0.25, 0.75})
+                    .changed());
+    EXPECT_EQ(engine.undoDepth(), depth + 1) << "adding a point must be ONE edit";
+    ASSERT_EQ(pointsNow().size(), 1u);
+    EXPECT_DOUBLE_EQ(pointsNow()[0].y, 0.75);
+
+    ASSERT_TRUE(model
+                    .editCurvePoint(fx.id, CurveChannel::Master,
+                                    EditCurvePointCommand::Operation::Add, 0,
+                                    CurvePoint{0.75, 0.4})
+                    .changed());
+    ASSERT_EQ(pointsNow().size(), 2u);
+
+    depth = engine.undoDepth();
+    ASSERT_TRUE(model
+                    .editCurvePoint(fx.id, CurveChannel::Master,
+                                    EditCurvePointCommand::Operation::Move, 0,
+                                    CurvePoint{0.1, 0.2})
+                    .changed());
+    EXPECT_EQ(engine.undoDepth(), depth + 1) << "moving a point must be ONE edit";
+    EXPECT_DOUBLE_EQ(pointsNow()[0].x, 0.1);
+    EXPECT_DOUBLE_EQ(pointsNow()[0].y, 0.2);
+
+    // One undo restores BOTH coordinates, which is the whole reason a dedicated command
+    // exists rather than two set_effect_parameter calls.
+    ASSERT_TRUE(engine.undo().changed());
+    EXPECT_DOUBLE_EQ(pointsNow()[0].x, 0.25);
+    EXPECT_DOUBLE_EQ(pointsNow()[0].y, 0.75);
+
+    depth = engine.undoDepth();
+    ASSERT_TRUE(model
+                    .editCurvePoint(fx.id, CurveChannel::Master,
+                                    EditCurvePointCommand::Operation::Remove, 0, CurvePoint{})
+                    .changed());
+    EXPECT_EQ(engine.undoDepth(), depth + 1) << "removing a point must be ONE edit";
+    ASSERT_EQ(pointsNow().size(), 1u);
+    EXPECT_DOUBLE_EQ(pointsNow()[0].x, 0.75) << "the survivor renumbers to index 0";
+
+    ASSERT_TRUE(engine.undo().changed());
+    ASSERT_EQ(pointsNow().size(), 2u) << "undo restores the numbering, not just the values";
+    EXPECT_DOUBLE_EQ(pointsNow()[0].x, 0.25);
+}
+
+TEST(InspectorViewModel, ACurvePointEditWithNoSelectedClipIsRefusedAndChangesNothing) {
+    const ClipId clip = Uuid::generateV4();
+    Project project = makeProjectWithClip(clip);
+    const Effect fx{Uuid::generateV4(), EffectType::ToneCurve, {}};
+    project.tracks[0].clips[0].effects.push_back(fx);
+    TimelineEngine engine(std::move(project));
+    InspectorViewModel model(engine);
+    // Deliberately no selectClip().
+
+    const CommandResult r = model.editCurvePoint(fx.id, CurveChannel::Master,
+                                                EditCurvePointCommand::Operation::Add, 0,
+                                                CurvePoint{0.5, 0.5});
+    EXPECT_FALSE(r.changed());
+    EXPECT_EQ(engine.undoDepth(), 0u);
+    EXPECT_TRUE(engine.clip(clip)->effects[0].parameters.empty());
+}
+
+TEST(InspectorViewModel, CurveChannelsAreIndependentThroughTheInspector) {
+    const ClipId clip = Uuid::generateV4();
+    Project project = makeProjectWithClip(clip);
+    const Effect fx{Uuid::generateV4(), EffectType::ToneCurve, {}};
+    project.tracks[0].clips[0].effects.push_back(fx);
+    TimelineEngine engine(std::move(project));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    for (const CurveChannel channel : kCurveChannels) {
+        ASSERT_TRUE(model
+                        .editCurvePoint(fx.id, channel, EditCurvePointCommand::Operation::Add, 0,
+                                        CurvePoint{0.5, 0.5})
+                        .changed())
+            << curveChannelName(channel);
+    }
+    const std::map<std::string, double>& params = engine.clip(clip)->effects[0].parameters;
+    for (const CurveChannel channel : kCurveChannels) {
+        EXPECT_EQ(curvePoints(params, channel).size(), 1u) << curveChannelName(channel);
+    }
+    // Four channels x one point x two coordinates, and nothing else.
+    EXPECT_EQ(params.size(), 8u) << "an edit to one channel must not write another's names";
 }
 
 }  // namespace

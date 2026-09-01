@@ -45,6 +45,7 @@ void CurveEditorViewModel::setPoints(std::vector<CurvePoint> points) {
     // index, which is a wrong edit that looks like a successful one.
     dragging_.reset();
     moved_ = false;
+    adding_ = false;
 }
 
 ToneCurveTable CurveEditorViewModel::transferTable() const {
@@ -92,27 +93,26 @@ CurveEditRequest CurveEditorViewModel::press(CurvePixel pixel, double width, dou
         dragging_ = *hit;
         dragOrigin_ = points_[*hit];
         moved_ = false;
-        // Grabbing an existing point is not itself an edit. Reporting a Move here would
-        // put a history entry on every click, including one that changes nothing.
+        adding_ = false;
         return CurveEditRequest{};
     }
-    // A new point appended: the working copy gains it immediately so the following moves
-    // have something to drag, and its index is the one the command will also give it.
+    // A new point appended to the WORKING COPY only, so the following moves have
+    // something to drag and the user sees it at once. release() commits it.
     points_.push_back(where);
     dragging_ = points_.size() - 1;
     dragOrigin_ = where;
     moved_ = false;
-    return CurveEditRequest{CurveEditRequest::Kind::Add, dragging_.value(), where};
+    adding_ = true;
+    return CurveEditRequest{};
 }
 
 CurveEditRequest CurveEditorViewModel::drag(CurvePixel pixel, double width, double height) {
     if (!dragging_) {
         return CurveEditRequest{};
     }
-    const CurvePoint where = toCurve(pixel, width, height);
-    points_[*dragging_] = where;
+    points_[*dragging_] = toCurve(pixel, width, height);
     moved_ = true;
-    return CurveEditRequest{CurveEditRequest::Kind::Move, *dragging_, where};
+    return CurveEditRequest{};
 }
 
 CurveEditRequest CurveEditorViewModel::release() {
@@ -122,12 +122,21 @@ CurveEditRequest CurveEditorViewModel::release() {
     const std::size_t index = *dragging_;
     const CurvePoint  where = points_[index];
     const bool        moved = moved_;
+    const bool        adding = adding_;
     dragging_.reset();
     moved_ = false;
+    adding_ = false;
+
+    if (adding) {
+        // Committed even when the pointer never moved: a click on empty space is how a
+        // point is added, and refusing a motionless one would make single clicks do
+        // nothing while drags worked.
+        return CurveEditRequest{CurveEditRequest::Kind::Add, index, where};
+    }
     if (!moved) {
-        // A press with no movement. The point is already where it was, so committing a
-        // Move would add an undo entry that undoes to the same state — indistinguishable
-        // from a broken undo when the user tries it.
+        // A press on an existing point with no movement. The point is already where it
+        // was, so committing a Move would add an undo entry that undoes to the same
+        // state -- indistinguishable from a broken undo when the user tries it.
         return CurveEditRequest{};
     }
     return CurveEditRequest{CurveEditRequest::Kind::Move, index, where};

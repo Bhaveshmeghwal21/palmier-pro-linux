@@ -106,21 +106,49 @@ TEST(CurveEditorViewModel, TheNearestPointWinsRatherThanTheFirstOneAdded) {
 }
 
 // --- Gestures --------------------------------------------------------------
+//
+// release() is the only commit point, which is what makes "one gesture, one undoable
+// edit" a property of the view model rather than of whichever widget drives it.
 
-TEST(CurveEditorViewModel, PressingEmptySpaceAddsAPointThereAndBeginsDraggingIt) {
+TEST(CurveEditorViewModel, PressingEmptySpaceShowsAPointAtOnceButCommitsNothingYet) {
     CurveEditorViewModel vm;
     const CurveEditRequest request = vm.press(CurvePixel{100.0, 50.0}, kW, kH);
 
-    ASSERT_EQ(request.kind, CurveEditRequest::Kind::Add);
-    EXPECT_EQ(request.operation(), EditCurvePointCommand::Operation::Add);
-    EXPECT_DOUBLE_EQ(request.point.x, 0.5);
-    EXPECT_DOUBLE_EQ(request.point.y, 0.5);
-    ASSERT_EQ(vm.points().size(), 1u) << "the working copy gains it at once so it can be dragged";
+    EXPECT_TRUE(request.isNoOp()) << "committing here would cost a second undo entry";
+    ASSERT_EQ(vm.points().size(), 1u) << "but it must be visible and draggable immediately";
+    EXPECT_DOUBLE_EQ(vm.points()[0].x, 0.5);
     EXPECT_TRUE(vm.isDragging());
 }
 
-// Grabbing a point is not an edit. Reporting a Move here would put an undo entry on
-// every click, including a click that changes nothing at all.
+// The gesture a user reads as ONE action -- click on empty space, drag to place, release
+// -- must be one undo entry. Committing the add on press and the move on release would be
+// two, so undoing what felt like one action would take two presses.
+TEST(CurveEditorViewModel, ClickingAndDraggingToPlaceAPointIsExactlyOneAddAtTheFinalPosition) {
+    CurveEditorViewModel vm;
+    ASSERT_TRUE(vm.press(CurvePixel{20.0, 90.0}, kW, kH).isNoOp());
+    ASSERT_TRUE(vm.drag(CurvePixel{60.0, 60.0}, kW, kH).isNoOp());
+    ASSERT_TRUE(vm.drag(CurvePixel{150.0, 25.0}, kW, kH).isNoOp());
+
+    const CurveEditRequest committed = vm.release();
+    ASSERT_EQ(committed.kind, CurveEditRequest::Kind::Add);
+    EXPECT_EQ(committed.operation(), EditCurvePointCommand::Operation::Add);
+    EXPECT_DOUBLE_EQ(committed.point.x, 0.75) << "created where released, not where pressed";
+    EXPECT_DOUBLE_EQ(committed.point.y, 0.75);
+    EXPECT_FALSE(vm.isDragging());
+}
+
+// A single click with no movement still adds. Requiring movement would make clicks do
+// nothing while drags worked, which reads as an unresponsive control.
+TEST(CurveEditorViewModel, AMotionlessClickOnEmptySpaceStillAddsAPoint) {
+    CurveEditorViewModel vm;
+    ASSERT_TRUE(vm.press(CurvePixel{100.0, 50.0}, kW, kH).isNoOp());
+    const CurveEditRequest committed = vm.release();
+    ASSERT_EQ(committed.kind, CurveEditRequest::Kind::Add);
+    EXPECT_DOUBLE_EQ(committed.point.x, 0.5);
+}
+
+// Grabbing a point is not an edit. Reporting one here would put a history entry on every
+// click, including a click that changes nothing at all.
 TEST(CurveEditorViewModel, PressingAnExistingPointGrabsItWithoutAskingForAnEdit) {
     CurveEditorViewModel vm;
     vm.setPoints(std::vector<CurvePoint>{{0.5, 0.5}});
@@ -133,21 +161,15 @@ TEST(CurveEditorViewModel, PressingAnExistingPointGrabsItWithoutAskingForAnEdit)
     EXPECT_EQ(vm.points().size(), 1u) << "grabbing must not add a second point on top";
 }
 
-TEST(CurveEditorViewModel, DraggingMovesTheGrabbedPointAndTheReleaseCommitsTheFinalPosition) {
+TEST(CurveEditorViewModel, DraggingAnExistingPointCommitsOneMoveAtTheFinalPosition) {
     CurveEditorViewModel vm;
     vm.setPoints(std::vector<CurvePoint>{{0.25, 0.25}});
     ASSERT_TRUE(vm.press(vm.toPixel(CurvePoint{0.25, 0.25}, kW, kH), kW, kH).isNoOp());
 
-    const CurveEditRequest mid = vm.drag(CurvePixel{100.0, 50.0}, kW, kH);
-    ASSERT_EQ(mid.kind, CurveEditRequest::Kind::Move);
-    EXPECT_EQ(mid.index, 0u);
+    ASSERT_TRUE(vm.drag(CurvePixel{100.0, 50.0}, kW, kH).isNoOp());
     EXPECT_DOUBLE_EQ(vm.points()[0].x, 0.5) << "the working copy follows the pointer live";
+    ASSERT_TRUE(vm.drag(CurvePixel{150.0, 25.0}, kW, kH).isNoOp());
 
-    const CurveEditRequest last = vm.drag(CurvePixel{150.0, 25.0}, kW, kH);
-    EXPECT_DOUBLE_EQ(last.point.x, 0.75);
-
-    // The release reports the FINAL position, which is what the caller commits -- one
-    // undo entry for the whole drag rather than one per mouse move.
     const CurveEditRequest committed = vm.release();
     ASSERT_EQ(committed.kind, CurveEditRequest::Kind::Move);
     EXPECT_EQ(committed.index, 0u);
@@ -156,7 +178,7 @@ TEST(CurveEditorViewModel, DraggingMovesTheGrabbedPointAndTheReleaseCommitsTheFi
     EXPECT_FALSE(vm.isDragging());
 }
 
-TEST(CurveEditorViewModel, APressAndReleaseWithNoMovementCommitsNothing) {
+TEST(CurveEditorViewModel, PressingAndReleasingAnExistingPointWithNoMovementCommitsNothing) {
     CurveEditorViewModel vm;
     vm.setPoints(std::vector<CurvePoint>{{0.5, 0.5}});
     ASSERT_TRUE(vm.press(vm.toPixel(CurvePoint{0.5, 0.5}, kW, kH), kW, kH).isNoOp());

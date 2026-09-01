@@ -34,6 +34,8 @@
 #include <vector>
 
 #include "core/Effect.hpp"
+#include "core/ToneCurve.hpp"
+#include "ui/CurveEditorWidget.hpp"
 
 namespace palmier::ui {
 
@@ -306,6 +308,51 @@ void InspectorPanel::rebuild() {
         // the same defaults the renderer resolves, which is why it lives in core
         // rather than being reproduced here.
         std::set<std::string> shown;
+        if (effect.type == EffectType::ToneCurve) {
+            // Requirement 5.9: a tone curve gets a directly editable plot, not a list of
+            // numbers. Its control points are hidden from the generic loop below, because
+            // showing thirty-two `curveMasterP3Y` spin boxes beside the plot would be
+            // unreadable and would let the two disagree about the same point.
+            std::map<std::string, double> params;
+            for (const EffectParameterView& param : effect.parameters) {
+                params.emplace(param.name, param.value);
+                for (const CurveChannel channel : kCurveChannels) {
+                    const std::string prefix = curveChannelParameterPrefix(channel);
+                    if (param.name.compare(0, prefix.size(), prefix) == 0) {
+                        shown.insert(param.name);
+                    }
+                }
+            }
+
+            auto* channelChooser = new QComboBox(this);
+            for (const CurveChannel channel : kCurveChannels) {
+                channelChooser->addItem(QString::fromUtf8(curveChannelName(channel)));
+            }
+
+            auto* curve = new CurveEditorWidget(this);
+            curve->setParameters(params);
+            // The applier is the only route to the project, and it goes through the same
+            // undoable command the tool surface uses.
+            curve->setRequestApplier(
+                [this, effectId](CurveChannel channel, const CurveEditRequest& request) {
+                    (void)model_.editCurvePoint(effectId, channel, request.operation(),
+                                                request.index, request.point);
+                });
+            QObject::connect(channelChooser, &QComboBox::currentIndexChanged, curve,
+                             [curve, params](int index) {
+                                 if (index < 0 ||
+                                     static_cast<std::size_t>(index) >= kCurveChannels.size()) {
+                                     return;
+                                 }
+                                 curve->setChannel(kCurveChannels[static_cast<std::size_t>(index)]);
+                                 // setChannel clears the points, so the new channel's must
+                                 // be supplied straight after or the plot reads as empty.
+                                 curve->setParameters(params);
+                             });
+
+            form->addRow(QStringLiteral("Curve"), channelChooser);
+            form->addRow(curve);
+        }
         if (effect.type == EffectType::ColorGrade) {
             std::map<std::string, double> params;
             for (const EffectParameterView& param : effect.parameters) {
