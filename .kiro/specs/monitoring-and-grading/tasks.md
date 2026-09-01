@@ -648,18 +648,104 @@ moved the colour-grade defaults into `core` in task 4. Each parser is derived fr
 by iteration, so a name added to one direction cannot be missing from the other.
 
 
-- [ ] 6. Video scopes (Requirement 6) — **M**
-  - [ ] 6.1 Add pure, Qt-free, GPU-free histogram, luma-waveform and vectorscope computations over an
+- [x] 6. Video scopes (Requirement 6) — **M**
+  - [x] 6.1 Add pure, Qt-free, GPU-free histogram, luma-waveform and vectorscope computations over an
         RGBA8 frame buffer.
-  - [ ] 6.2 Feed them from the output of the same `gpu::Compositor` instance the Preview displays, so a
+  - [x] 6.2 Feed them from the output of the same `gpu::Compositor` instance the Preview displays, so a
         scope cannot disagree with the picture beside it, and so all effects and burn-in are reflected.
-  - [ ] 6.3 Add the three scopes to the Editor_Shell, individually hideable with visibility persisted
+  - [x] 6.3 Add the three scopes to the Editor_Shell, individually hideable with visibility persisted
         across restart, updating at least 10×/second without costing the Preview more than 10% of its
         presented frame rate.
-  - [ ] 6.4 Present an explicit empty state when no frame is available, rather than a stale reading.
-  - [ ] 6.5 Tests: fully black, fully white and full-saturation-primary frames each produce the
+  - [x] 6.4 Present an explicit empty state when no frame is available, rather than a stale reading.
+  - [x] 6.5 Tests: fully black, fully white and full-saturation-primary frames each produce the
         documented asserted reading on all three scopes; the empty state is reached with no project; the
         Preview's frame-rate budget is respected.
+
+**Complete.** Four commits; one CI incident.
+
+| Commit | What landed | Suite |
+|---|---|---|
+| `ea8c8ef` (run `33544033387`) | the three computations | **1596/1596** (+19) |
+| `adc8903` (run `33545162274`) | the Qt-free cadence, empty state and visibility | **1612/1612** (+16) |
+| `8a152ec` (run `33546003036`) | the Scopes dock and the frame observer | **1616/1617** - 1 failed |
+| `76e29a0` (run `33546814172`) | the meter assertion fix | **1617/1617** |
+
+**Criterion 2 is satisfied by WHERE the frames come from, not by anything the panel does.**
+`ui::PreviewView` gained a `FrameObserver` seam called from `uploadFrame` with the very buffer being
+uploaded, and the shell installs the panel's `observeFrame()` as that observer. So a scope is computed
+from the same `gpu::Compositor` output, at the same moment, as the picture beside it - which is exactly
+what "a scope can never disagree with the picture beside it" demands, and it makes criterion 3 (effects
+and burn-in reflected) automatic rather than a separate feature. A second `PreviewFrameSink` could not
+have promised as much: `setFrameSink` holds only one sink, so installing another would displace the
+view's own and the scopes could end up measuring a frame nobody saw.
+
+**The cadence is where the difficulty is.** Criterion 5 has two halves pulling in opposite directions -
+at least 10 updates a second, and never more than ten percent of the Preview's presented frame rate - so
+`shouldRecompute()` is a pure function of the last computation's instant, the current instant and the
+*measured* cost of the last one. Three decisions, each deliberate:
+
+- **The floor wins over the budget** when they conflict. A panel that stops updating is a broken panel;
+  a Preview one frame short is imperceptible, and the floor is only 10 Hz.
+- **The first computation is always allowed**, even on an impossible budget, or a host where one
+  computation happens to exceed the share would show a permanently empty panel with no explanation.
+- **A hidden scope is not computed at all.** The cheapest way to honour the budget is not to spend it.
+
+With no Preview frame rate - paused, which is when a colourist actually reads a scope - any cost fits,
+because there is nothing to protect. The ten percent is asserted on *both* sides of the boundary (1666us
+fits a 60 fps frame, 1667us does not), because a budget that was really 100 percent or 1 percent would
+pass a one-sided test.
+
+**A bug in my own first draft, worth recording because the symptom would have been misleading.**
+`observeFrame` called `update()` twice - once to do the work, once to record what it had cost - which
+computed every scope TWICE per frame and so spent double the budget the cost exists to protect. The
+symptom would have been a Preview that felt slightly heavy while the measurement machinery reported it
+was well inside budget. `recordCost()` replaced the second call, and a test asserts `computeCount()`
+stays at 1 across it.
+
+**Empty is a value, not an error, and the two sides are both asserted.** A null or zero-sized buffer
+produces an empty result rather than failing, and `clear()` drops every reading rather than keeping the
+last: a scope showing the previous shot's exposure is worse than one showing nothing, because it looks
+authoritative. Equally, a **black frame must not read as empty** - it has every sample in bin 0, which
+is a real reading. `clear()` deliberately keeps its cadence bookkeeping, or the view model would report
+"nothing computed yet" and spin while no frame exists, spending the budget precisely when there is
+nothing to show.
+
+Criterion 8's readings are written as **literals with the arithmetic beside them**, not computed by
+calling the same helper under test - which would assert only that a function equals itself and would
+pass with every axis inverted. White's luma is exactly 255; red's is 76 because 0.299 x 255 = 76.245;
+red's Cr is 255 because it is 255.45 *before* clamping, which is why a full-saturation primary sits ON
+the graticule edge exactly as on a real vectorscope. Two further cases pin mistakes a uniform frame
+cannot show: a left-dark, right-bright frame must trace dark on the LEFT (an inverted or mirrored column
+mapping is the most plausible wrong answer), and a red frame's waveform must read 76 rather than 255
+(255 would mean it is plotting the red channel instead of luma).
+
+A waveform's columns are **bucketed and summed, never sampled**. A 3840-wide frame cannot be shown in a
+200-wide panel, and choosing which pixels to keep is exactly how a waveform loses the overexposed streak
+being looked for; a test walks a 1920x3 frame and asserts all 5760 pixels land in exactly one bucket.
+
+The Scopes dock is **tabbed with Inspector and Agent Chat**, because a colourist reads a scope *instead*
+of the Inspector rather than beside it, and a fifth visible column would cost the Preview width at the
+1280x720 minimum the layout property test exercises. The three visibility toggles are checkboxes on the
+panel rather than menu actions: a new menu would shift the menu bar's indices, which several shell tests
+address positionally, and a scope's visibility belongs beside the scope.
+
+### CI incident 5
+
+`8a152ec` failed one test: `ShellUnitTest.TheProgrammeLevelMeterIsMountedInTheTransportBar` carried a
+*second* hardcoded dock count (`EXPECT_EQ(findChildren<QDockWidget*>().size(), 4u)`) that the new dock
+invalidated. I had checked for exactly this before pushing, and the checker reported one assertion,
+correctly updated - because it used `re.search`, which returns only the **first** match, on a pattern
+that can occur many times.
+
+**Standing lesson: a pattern that can appear repeatedly must be scanned with `findall`.** Searching for
+one instance and reporting "found and correct" is how a check passes while the defect it was written for
+sits ten lines further down. This is the same class as the earlier lesson about implausibly *many* hits,
+in the opposite direction: an implausibly *small* result is also the checker reporting itself.
+
+The fix did not renumber the count. That test's claim is "the meter is in the transport bar, NOT in a
+dock of its own", which a dock count states only incidentally - it went stale the moment an unrelated
+dock appeared and said nothing about where the meter is. It now asserts that no dock's widget *is* the
+meter, which is the actual claim and cannot go stale when a sixth dock is added for some other reason.
 
 - [ ] 7. LUT application (Requirement 7) — **L**
   - [ ] 7.1 Add one optional string field to `core::Effect` for a resource path and bump the project
