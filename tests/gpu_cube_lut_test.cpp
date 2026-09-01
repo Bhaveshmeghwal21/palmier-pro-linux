@@ -61,9 +61,16 @@ TEST(CubeLutParse, AHandWrittenIdentityParsesAsTheIdentityWithTheExpectedIndexOr
     // RED VARIES FASTEST: row 1 is (1,0,0), so at(1,0,0) is red. A transposed table would
     // still be a plausible LUT and would still have eight rows, so this is the assertion
     // that catches it.
-    EXPECT_EQ(lut.at(1, 0, 0), LutEntry{1.0f, 0.0f, 0.0f});
-    EXPECT_EQ(lut.at(0, 1, 0), LutEntry{0.0f, 1.0f, 0.0f});
-    EXPECT_EQ(lut.at(0, 0, 1), LutEntry{0.0f, 0.0f, 1.0f});
+    //
+    // Held in named variables because a braced initialiser at a gtest macro's TOP LEVEL is
+    // split by the preprocessor on its commas -- parentheses protect a macro argument and
+    // braces do not. This is CI incident 4 repeating; see the note in core_tone_curve_test.
+    const LutEntry red{1.0f, 0.0f, 0.0f};
+    const LutEntry green{0.0f, 1.0f, 0.0f};
+    const LutEntry blue{0.0f, 0.0f, 1.0f};
+    EXPECT_EQ(lut.at(1, 0, 0), red);
+    EXPECT_EQ(lut.at(0, 1, 0), green);
+    EXPECT_EQ(lut.at(0, 0, 1), blue);
 }
 
 TEST(CubeLutParse, CommentsBlankLinesAndTitleAreIgnoredRatherThanRejected) {
