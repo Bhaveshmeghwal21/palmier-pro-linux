@@ -232,27 +232,73 @@ void applyInvertColors(std::uint8_t* rgba, std::size_t pixels) noexcept {
     }
 }
 
-/// Color grade: per-channel gain, an additive lift (lift*255), and a saturation
-/// mix toward Rec.601 luma. Order: gain -> lift -> saturation. Alpha preserved.
+/// The nine grade values plus saturation (monitoring-and-grading Requirement 4).
+///
+/// A struct rather than eleven positional doubles: at that arity a caller can
+/// silently transpose gamma and gain and still compile, and the two lanes that must
+/// agree exactly would then disagree for a reason no test name would explain.
+struct ColorGradeParams {
+    double gainR = 1.0, gainG = 1.0, gainB = 1.0;
+    double liftR = 0.0, liftG = 0.0, liftB = 0.0;
+    double gammaR = 1.0, gammaG = 1.0, gammaB = 1.0;
+    double saturation = 1.0;
+
+    /// True when every value is at its default, so the whole effect is a no-op.
+    [[nodiscard]] bool isIdentity() const noexcept {
+        return gainR == 1.0 && gainG == 1.0 && gainB == 1.0 && liftR == 0.0 && liftG == 0.0 &&
+               liftB == 0.0 && isGammaIdentity() && saturation == 1.0;
+    }
+    [[nodiscard]] bool isGammaIdentity() const noexcept {
+        return gammaR == 1.0 && gammaG == 1.0 && gammaB == 1.0;
+    }
+};
+
+/// Color grade: per-channel gain, per-channel additive lift (lift*255 in byte
+/// space), per-channel gamma, then a saturation mix toward Rec.601 luma.
+///
+/// ORDER: gain -> lift -> gamma -> saturation (Requirement 4.5). This mirrors
+/// gpu::kColorGradeSrc line for line; see that kernel's comment for why the order is
+/// fixed and why the gamma step is guarded rather than computed at an exponent of 1.
+///
+/// Gamma operates in NORMALISED [0,1] space even though this reference works in
+/// bytes, because an exponent means something entirely different applied to 0-255:
+/// pow(200, 1/2.2) is 10.6, not a brightened 200. So the gamma step alone
+/// normalises, exponentiates and scales back.
 void applyColorGrade(std::uint8_t* rgba, std::size_t pixels,
-                     double gainR, double gainG, double gainB,
-                     double lift, double saturation) noexcept {
-    const double liftShift = lift * 255.0;
-    const bool identity = gainR == 1.0 && gainG == 1.0 && gainB == 1.0 &&
-                          liftShift == 0.0 && saturation == 1.0;
-    if (identity) return;
+                     const ColorGradeParams& p) noexcept {
+    if (p.isIdentity()) return;
+
+    const double liftShiftR = p.liftR * 255.0;
+    const double liftShiftG = p.liftG * 255.0;
+    const double liftShiftB = p.liftB * 255.0;
+
+    // Requirement 4.2: at default gamma this branch is never taken, so the arithmetic
+    // below is exactly what it was before gamma existed — including for values that
+    // a negative lift or a gain above 1 pushed outside [0,255], which the clamp
+    // inside the gamma step would otherwise fold in before saturation reads them.
+    const bool applyGamma = !p.isGammaIdentity();
+    const double kMinGamma = 1.0 / 1024.0;  // matches the kernel's own floor
+    const double invR = 1.0 / std::max(p.gammaR, kMinGamma);
+    const double invG = 1.0 / std::max(p.gammaG, kMinGamma);
+    const double invB = 1.0 / std::max(p.gammaB, kMinGamma);
 
     for (std::size_t i = 0; i < pixels; ++i) {
         const std::size_t o = i * 4u;
-        double r = static_cast<double>(rgba[o + 0]) * gainR + liftShift;
-        double g = static_cast<double>(rgba[o + 1]) * gainG + liftShift;
-        double b = static_cast<double>(rgba[o + 2]) * gainB + liftShift;
+        double r = static_cast<double>(rgba[o + 0]) * p.gainR + liftShiftR;
+        double g = static_cast<double>(rgba[o + 1]) * p.gainG + liftShiftG;
+        double b = static_cast<double>(rgba[o + 2]) * p.gainB + liftShiftB;
+
+        if (applyGamma) {
+            r = std::pow(std::max(r / 255.0, 0.0), invR) * 255.0;
+            g = std::pow(std::max(g / 255.0, 0.0), invG) * 255.0;
+            b = std::pow(std::max(b / 255.0, 0.0), invB) * 255.0;
+        }
 
         // Rec.601 luma; mix each channel toward gray by (1 - saturation).
         const double luma = 0.299 * r + 0.587 * g + 0.114 * b;
-        r = luma + (r - luma) * saturation;
-        g = luma + (g - luma) * saturation;
-        b = luma + (b - luma) * saturation;
+        r = luma + (r - luma) * p.saturation;
+        g = luma + (g - luma) * p.saturation;
+        b = luma + (b - luma) * p.saturation;
 
         rgba[o + 0] = toByte(r);
         rgba[o + 1] = toByte(g);
@@ -306,14 +352,28 @@ void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba,
         case EffectType::InvertColors:
             applyInvertColors(rgba, pixels);
             break;
-        case EffectType::ColorGrade:
-            applyColorGrade(rgba, pixels,
-                            paramOr(effect, "gainR", 1.0),
-                            paramOr(effect, "gainG", 1.0),
-                            paramOr(effect, "gainB", 1.0),
-                            paramOr(effect, "lift", 0.0),
-                            paramOr(effect, "saturation", 1.0));
+        case EffectType::ColorGrade: {
+            // Requirement 4.2 and 4.3 live in these six defaults. A project saved
+            // before this change carries a single scalar "lift" and no gamma at all,
+            // so each per-channel lift falls back to that scalar and each gamma to
+            // 1.0 — which the guard inside applyColorGrade turns into no gamma step.
+            // The result is that an old project renders through the identical
+            // arithmetic it always did, with no migration and no user action.
+            const double legacyLift = paramOr(effect, "lift", 0.0);
+            ColorGradeParams p;
+            p.gainR = paramOr(effect, "gainR", 1.0);
+            p.gainG = paramOr(effect, "gainG", 1.0);
+            p.gainB = paramOr(effect, "gainB", 1.0);
+            p.liftR = paramOr(effect, "liftR", legacyLift);
+            p.liftG = paramOr(effect, "liftG", legacyLift);
+            p.liftB = paramOr(effect, "liftB", legacyLift);
+            p.gammaR = paramOr(effect, "gammaR", 1.0);
+            p.gammaG = paramOr(effect, "gammaG", 1.0);
+            p.gammaB = paramOr(effect, "gammaB", 1.0);
+            p.saturation = paramOr(effect, "saturation", 1.0);
+            applyColorGrade(rgba, pixels, p);
             break;
+        }
         case EffectType::Custom:
             // A Custom effect's behavior comes entirely from a caller-registered
             // kernel/hook; there is no built-in reference transform for it.

@@ -120,19 +120,46 @@ void main() {
 }
 )glsl";
 
+// Lift / gamma / gain primary grade (monitoring-and-grading Requirement 4).
+//
+// ORDER OF OPERATIONS — gain, then lift, then gamma, then saturation
+// (Requirement 4.5). Fixed and stated here because the software reference in
+// gpu::applyColorGrade mirrors it line for line and the two must not drift; any
+// other order produces a visibly different image from the same nine numbers.
+//
+// The gamma step is SKIPPED ENTIRELY when all three exponents are 1.0, and that is
+// a correctness requirement rather than an optimisation (Requirement 4.2). Gamma is
+// meaningless on a negative value — a negative lift can easily produce one, and
+// pow() is undefined there — so the step clamps its input up to 0 first. At an
+// exponent of 1.0 that clamp would still be observable, because saturation below 1
+// mixes toward a luma computed from the UNCLAMPED values: an existing project with
+// a negative lift would shift. Guarding the whole step keeps the default path
+// bit-for-bit what it was before this kernel gained gamma at all.
+//
+// Gamma is applied as pow(x, 1/gamma), so a gamma ABOVE 1 brightens midtones, which
+// is the direction every colour tool's midtone control moves. The exponent is
+// clamped away from zero so a gamma of 0 cannot divide by it.
 constexpr std::string_view kColorGradeSrc = R"glsl(#version 450
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(binding = 0, rgba8) uniform readonly  image2D inImage;
 layout(binding = 1, rgba8) uniform writeonly image2D outImage;
 layout(push_constant) uniform Params {
-    float gainR; float gainG; float gainB; float lift; float saturation;
+    float gainR;  float gainG;  float gainB;
+    float liftR;  float liftG;  float liftB;
+    float gammaR; float gammaG; float gammaB;
+    float saturation;
 } pc;
 void main() {
     ivec2 p = ivec2(gl_GlobalInvocationID.xy);
     ivec2 size = imageSize(inImage);
     if (p.x >= size.x || p.y >= size.y) return;
     vec4 c = imageLoad(inImage, p);
-    vec3 rgb = c.rgb * vec3(pc.gainR, pc.gainG, pc.gainB) + vec3(pc.lift);
+    vec3 rgb = c.rgb * vec3(pc.gainR, pc.gainG, pc.gainB)
+                     + vec3(pc.liftR, pc.liftG, pc.liftB);
+    vec3 gamma = vec3(pc.gammaR, pc.gammaG, pc.gammaB);
+    if (gamma != vec3(1.0)) {
+        rgb = pow(max(rgb, vec3(0.0)), vec3(1.0) / max(gamma, vec3(1.0 / 1024.0)));
+    }
     float luma = dot(rgb, vec3(0.299, 0.587, 0.114)); // Rec.601
     rgb = mix(vec3(luma), rgb, pc.saturation);
     rgb = clamp(rgb, 0.0, 1.0);

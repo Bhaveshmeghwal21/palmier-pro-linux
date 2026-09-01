@@ -173,6 +173,238 @@ TEST(SoftwareEffect, ColorGradeLiftAddsOffset) {
     EXPECT_NEAR(px[0], 36, 1); // 10 + 25.5
 }
 
+// --- Lift / gamma / gain primary grade (monitoring-and-grading Requirement 4) ---
+
+namespace {
+
+/// A FROZEN copy of the colour-grade arithmetic exactly as it stood immediately
+/// before per-channel lift and gamma were added, including its own copy of
+/// Compositor's private toByte() rounding.
+///
+/// This exists so Requirement 4.2's "renders byte-identically" can be asserted
+/// against something. The previous implementation is gone from the tree, so a test
+/// comparing the new code to the old one has to carry the old one; comparing the new
+/// code to itself would assert nothing at all. Do not "simplify" this to call
+/// applyEffectSoftware — that is precisely the tautology it exists to avoid.
+[[nodiscard]] std::uint8_t legacyToByte(double v) {
+    if (v <= 0.0) return 0;
+    if (v >= 255.0) return 255;
+    return static_cast<std::uint8_t>(v + 0.5);
+}
+
+void legacyColorGrade(std::vector<std::uint8_t>& px, double gainR, double gainG, double gainB,
+                      double lift, double saturation) {
+    const double liftShift = lift * 255.0;
+    if (gainR == 1.0 && gainG == 1.0 && gainB == 1.0 && liftShift == 0.0 && saturation == 1.0) {
+        return;
+    }
+    for (std::size_t o = 0; o < px.size(); o += 4) {
+        double r = static_cast<double>(px[o + 0]) * gainR + liftShift;
+        double g = static_cast<double>(px[o + 1]) * gainG + liftShift;
+        double b = static_cast<double>(px[o + 2]) * gainB + liftShift;
+        const double luma = 0.299 * r + 0.587 * g + 0.114 * b;
+        r = luma + (r - luma) * saturation;
+        g = luma + (g - luma) * saturation;
+        b = luma + (b - luma) * saturation;
+        px[o + 0] = legacyToByte(r);
+        px[o + 1] = legacyToByte(g);
+        px[o + 2] = legacyToByte(b);
+    }
+}
+
+/// An image covering every byte value on every channel, with a varying alpha, so a
+/// comparison over it is a comparison over the whole domain rather than a sample.
+[[nodiscard]] std::vector<std::uint8_t> fullRangeImage() {
+    std::vector<std::uint8_t> px(256u * 4u);
+    for (std::size_t i = 0; i < 256; ++i) {
+        px[i * 4 + 0] = static_cast<std::uint8_t>(i);
+        px[i * 4 + 1] = static_cast<std::uint8_t>(255 - i);
+        px[i * 4 + 2] = static_cast<std::uint8_t>((i * 7) % 256);
+        px[i * 4 + 3] = static_cast<std::uint8_t>((i * 3) % 256);
+    }
+    return px;
+}
+
+}  // namespace
+
+// Requirement 4.2 and 4.3, the hard criterion: an effect carrying only the legacy
+// parameters must render EXACTLY as it did before per-channel lift and gamma existed
+// — not within a tolerance, byte for byte — with no migration and no user action.
+//
+// The legacy parameter set is what a project saved before this change actually
+// contains: a scalar `lift`, no `liftR/G/B`, and no gamma at all.
+TEST(ColorGradePrimaryGrade, ALegacyEffectRendersByteIdenticallyToThePreviousImplementation) {
+    struct Case {
+        double gainR, gainG, gainB, lift, saturation;
+    };
+    // Includes the all-default no-op, one-sided gains, a NEGATIVE lift (the case the
+    // gamma step's clamp would silently change if it were not guarded), a lift that
+    // pushes past white, and saturation both under and over 1.
+    const std::vector<Case> cases = {
+        {1.0, 1.0, 1.0, 0.0, 1.0},   {2.0, 1.0, 1.0, 0.0, 1.0},
+        {1.0, 0.5, 1.5, 0.0, 1.0},   {1.0, 1.0, 1.0, -0.3, 1.0},
+        {1.0, 1.0, 1.0, 0.4, 1.0},   {1.0, 1.0, 1.0, 0.0, 0.0},
+        {1.0, 1.0, 1.0, 0.0, 1.8},   {1.7, 0.3, 1.1, -0.25, 0.4},
+        {0.0, 0.0, 0.0, 0.6, 1.2},   {1.9, 1.9, 1.9, -0.45, 1.6},
+    };
+
+    for (const Case& c : cases) {
+        std::vector<std::uint8_t> viaCurrent = fullRangeImage();
+        std::vector<std::uint8_t> viaLegacy = viaCurrent;
+
+        applyEffectSoftware(makeEffect(EffectType::ColorGrade,
+                                       {{"gainR", c.gainR},
+                                        {"gainG", c.gainG},
+                                        {"gainB", c.gainB},
+                                        {"lift", c.lift},
+                                        {"saturation", c.saturation}}),
+                            viaCurrent.data(), 256, 1);
+        legacyColorGrade(viaLegacy, c.gainR, c.gainG, c.gainB, c.lift, c.saturation);
+
+        ASSERT_EQ(viaCurrent.size(), viaLegacy.size());
+        for (std::size_t i = 0; i < viaCurrent.size(); ++i) {
+            ASSERT_EQ(viaCurrent[i], viaLegacy[i])
+                << "byte " << i << " differs for gain(" << c.gainR << ',' << c.gainG << ','
+                << c.gainB << ") lift " << c.lift << " saturation " << c.saturation;
+        }
+    }
+}
+
+// Requirement 4.2's mechanism, asserted directly rather than left implicit. A gamma
+// of exactly 1 must SKIP the step, not compute pow(x, 1). The observable difference
+// is a negative intermediate: the clamp inside the step would fold it up to 0 before
+// the saturation mix reads it, changing the luma and therefore every channel.
+TEST(ColorGradePrimaryGrade, AUnityGammaIsSkippedRatherThanComputed) {
+    const std::map<std::string, double> legacy = {
+        {"lift", -0.3}, {"saturation", 0.25}, {"gainR", 1.0}};
+    std::map<std::string, double> explicitUnity = legacy;
+    explicitUnity["gammaR"] = 1.0;
+    explicitUnity["gammaG"] = 1.0;
+    explicitUnity["gammaB"] = 1.0;
+
+    std::vector<std::uint8_t> withoutGamma = fullRangeImage();
+    std::vector<std::uint8_t> withUnityGamma = withoutGamma;
+    applyEffectSoftware(makeEffect(EffectType::ColorGrade, legacy), withoutGamma.data(), 256, 1);
+    applyEffectSoftware(makeEffect(EffectType::ColorGrade, explicitUnity),
+                        withUnityGamma.data(), 256, 1);
+
+    EXPECT_EQ(withoutGamma, withUnityGamma)
+        << "spelling gamma out as 1.0 must be indistinguishable from omitting it";
+}
+
+// Requirement 4.1: each channel's lift is independent. Also pins Requirement 4.2's
+// fallback from the other side — naming liftR alone must not disturb G and B, which
+// keep taking their value from the legacy scalar.
+TEST(ColorGradePrimaryGrade, PerChannelLiftIsIndependentAndFallsBackToTheLegacyScalar) {
+    auto px = solid(1, 1, 10, 10, 10, 255);
+    applyEffectSoftware(
+        makeEffect(EffectType::ColorGrade, {{"liftR", 0.2}, {"lift", 0.1}, {"saturation", 1.0}}),
+        px.data(), 1, 1);
+    EXPECT_NEAR(px[0], 61, 1);  // 10 + 0.2*255 = 61
+    EXPECT_NEAR(px[1], 36, 1);  // 10 + 0.1*255 = 35.5 -> the legacy scalar
+    EXPECT_NEAR(px[2], 36, 1);
+    EXPECT_EQ(px[3], 255);
+}
+
+// Requirement 4.1: gamma above 1 brightens midtones and below 1 darkens them, which
+// is the direction a colourist's midtone control moves. Asserted on mid-gray, where
+// a gamma change is largest — at 0 and 255 pow() is a fixed point and would show
+// nothing whichever direction the convention ran.
+TEST(ColorGradePrimaryGrade, GammaAboveOneBrightensMidtonesAndBelowOneDarkensThem) {
+    const std::uint8_t mid = 128;
+
+    auto brighter = solid(1, 1, mid, mid, mid, 255);
+    applyEffectSoftware(makeEffect(EffectType::ColorGrade,
+                                   {{"gammaR", 2.0}, {"gammaG", 2.0}, {"gammaB", 2.0}}),
+                        brighter.data(), 1, 1);
+    EXPECT_GT(brighter[0], mid) << "gamma 2.0 must brighten, i.e. pow(x, 1/gamma)";
+
+    auto darker = solid(1, 1, mid, mid, mid, 255);
+    applyEffectSoftware(makeEffect(EffectType::ColorGrade,
+                                   {{"gammaR", 0.5}, {"gammaG", 0.5}, {"gammaB", 0.5}}),
+                        darker.data(), 1, 1);
+    EXPECT_LT(darker[0], mid) << "gamma 0.5 must darken";
+
+    // pow(0.5, 1/2.0) = 0.7071 -> 180.3; pow(0.5, 2.0) = 0.25 -> 63.75. Computed from
+    // the exact input (128/255 = 0.50196) rather than a rounded 0.5.
+    const double x = 128.0 / 255.0;
+    EXPECT_NEAR(brighter[0], std::pow(x, 0.5) * 255.0, 1.0);
+    EXPECT_NEAR(darker[0], std::pow(x, 2.0) * 255.0, 1.0);
+
+    // The endpoints are fixed points of pow, so gamma must leave them alone.
+    auto ends = solid(2, 1, 0, 0, 0, 255);
+    ends[4] = ends[5] = ends[6] = 255;
+    applyEffectSoftware(makeEffect(EffectType::ColorGrade,
+                                   {{"gammaR", 2.2}, {"gammaG", 2.2}, {"gammaB", 2.2}}),
+                        ends.data(), 2, 1);
+    EXPECT_EQ(ends[0], 0);
+    EXPECT_EQ(ends[4], 255);
+}
+
+// Requirement 4.5: the order is gain, lift, gamma, saturation, and it is fixed
+// because it is observable. Gain-then-lift and lift-then-gain differ whenever gain
+// is not 1, so this proves the implemented order rather than restating it.
+TEST(ColorGradePrimaryGrade, TheDocumentedOrderOfOperationsIsTheImplementedOne) {
+    // gain 2 then lift 0.1: 50*2 = 100, +25.5 = 125.5 -> 126.
+    // The other order would be (50 + 25.5)*2 = 151.
+    auto px = solid(1, 1, 50, 50, 50, 255);
+    applyEffectSoftware(makeEffect(EffectType::ColorGrade,
+                                   {{"gainR", 2.0}, {"gainG", 2.0}, {"gainB", 2.0}, {"lift", 0.1}}),
+                        px.data(), 1, 1);
+    EXPECT_NEAR(px[0], 126, 1);
+    EXPECT_LT(px[0], 140) << "lift must be applied AFTER gain, not before it";
+
+    // gamma before saturation: at saturation 0 every channel collapses to the luma of
+    // the POST-gamma values. Applying gamma after the collapse would give a different
+    // gray, because gamma is non-linear and the channels differ before it.
+    auto grey = solid(1, 1, 200, 100, 20, 255);
+    applyEffectSoftware(makeEffect(EffectType::ColorGrade, {{"gammaR", 2.2},
+                                                            {"gammaG", 2.2},
+                                                            {"gammaB", 2.2},
+                                                            {"saturation", 0.0}}),
+                        grey.data(), 1, 1);
+    const double gr = std::pow(200.0 / 255.0, 1.0 / 2.2) * 255.0;
+    const double gg = std::pow(100.0 / 255.0, 1.0 / 2.2) * 255.0;
+    const double gb = std::pow(20.0 / 255.0, 1.0 / 2.2) * 255.0;
+    const double expected = 0.299 * gr + 0.587 * gg + 0.114 * gb;
+    EXPECT_NEAR(grey[0], expected, 1.0);
+    EXPECT_EQ(grey[0], grey[1]);
+    EXPECT_EQ(grey[1], grey[2]);
+}
+
+// A gamma of zero is a division by zero waiting to happen, and a negative gamma is
+// meaningless. Both must produce a rendered image rather than a NaN written into a
+// frame, where toByte's comparisons would both be false and the cast would be
+// undefined — and where it would then propagate through every later effect in the
+// chain and into the encoder.
+TEST(ColorGradePrimaryGrade, ADegenerateGammaIsClampedRatherThanDividingByZero) {
+    for (const double gamma : {0.0, -1.0, -1000.0}) {
+        // Pixel 0 is a mid tone; pixel 1 carries a pure-white green channel, which is
+        // a fixed point of pow() for ANY exponent and so is the one value that must
+        // survive whatever the clamp floor happens to be.
+        auto px = solid(2, 1, 10, 128, 250, 255);
+        px[4] = 0;
+        px[5] = 255;
+        px[6] = 77;
+        auto again = px;
+
+        const Effect e = makeEffect(
+            EffectType::ColorGrade,
+            {{"gammaR", gamma}, {"gammaG", gamma}, {"gammaB", gamma}});
+        applyEffectSoftware(e, px.data(), 2, 1);
+        applyEffectSoftware(e, again.data(), 2, 1);
+
+        // Deterministic: a NaN is not equal to itself, so any NaN reaching the
+        // arithmetic would make these two runs disagree even though nothing else
+        // differs between them.
+        EXPECT_EQ(px, again) << "gamma " << gamma << " must be deterministic";
+
+        EXPECT_EQ(px[5], 255) << "pure white is a fixed point of pow for any exponent";
+        EXPECT_EQ(px[3], 255) << "alpha must survive a degenerate gamma";
+        EXPECT_EQ(px[7], 255);
+    }
+}
+
 // --- InvertColors (upstream PR 408; Requirements 14.4, 14.5) ----------------
 
 TEST(SoftwareEffect, InvertColorsSubtractsEachRgbChannelFrom255) {

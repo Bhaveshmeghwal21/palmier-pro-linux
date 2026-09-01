@@ -167,13 +167,37 @@ void gpuCropTransform(const std::vector<std::uint8_t>& in, std::vector<std::uint
     }
 }
 
-/// Mirror of kColorGradeSrc: gain -> lift -> Rec.601 saturation mix; alpha preserved.
+/// Mirror of kColorGradeSrc: gain -> lift -> gamma -> Rec.601 saturation mix; alpha
+/// preserved (monitoring-and-grading Requirement 4.5).
+///
+/// Note the two lanes handle gamma in the SAME normalised space but arrive there
+/// differently: this model already works in [0,1], while the byte-space software
+/// reference has to divide by 255, exponentiate and multiply back. That asymmetry is
+/// the most likely place for the two to drift, so the property below exercises gamma
+/// across its whole generated range rather than at a couple of example values.
+///
+/// The `gamma != 1` guard is reproduced rather than simplified away, because it is
+/// load-bearing: at an exponent of 1 the max(rgb, 0) clamp would still fold negative
+/// values in before the saturation mix reads them.
 void gpuColorGrade(const std::vector<std::uint8_t>& in, std::vector<std::uint8_t>& out,
-                   double gainR, double gainG, double gainB, double lift, double saturation) {
+                   double gainR, double gainG, double gainB, double liftR, double liftG,
+                   double liftB, double gammaR, double gammaG, double gammaB,
+                   double saturation) {
+    const bool applyGamma = !(gammaR == 1.0 && gammaG == 1.0 && gammaB == 1.0);
+    const double kMinGamma = 1.0 / 1024.0;
+    const double invR = 1.0 / std::max(gammaR, kMinGamma);
+    const double invG = 1.0 / std::max(gammaG, kMinGamma);
+    const double invB = 1.0 / std::max(gammaB, kMinGamma);
+
     for (std::size_t i = 0; i < in.size(); i += 4) {
-        double r = load01(in[i + 0]) * gainR + lift;
-        double g = load01(in[i + 1]) * gainG + lift;
-        double b = load01(in[i + 2]) * gainB + lift;
+        double r = load01(in[i + 0]) * gainR + liftR;
+        double g = load01(in[i + 1]) * gainG + liftG;
+        double b = load01(in[i + 2]) * gainB + liftB;
+        if (applyGamma) {
+            r = std::pow(std::max(r, 0.0), invR);
+            g = std::pow(std::max(g, 0.0), invG);
+            b = std::pow(std::max(b, 0.0), invB);
+        }
         const double luma = 0.299 * r + 0.587 * g + 0.114 * b;
         r = luma + (r - luma) * saturation;
         g = luma + (g - luma) * saturation;
@@ -227,10 +251,18 @@ void gpuTransition(const std::vector<std::uint8_t>& a, const std::vector<std::ui
             gpuCropTransform(in, out, w, h, param("cropLeft", 0.0), param("cropTop", 0.0),
                              param("cropRight", 1.0), param("cropBottom", 1.0));
             break;
-        case EffectType::ColorGrade:
+        case EffectType::ColorGrade: {
+            // Mirrors the production default chain exactly, including the one that
+            // carries Requirement 4.2: each per-channel lift falls back to the legacy
+            // scalar `lift`. Getting this wrong here would hide a real regression,
+            // because both lanes would then agree on the wrong answer.
+            const double legacyLift = param("lift", 0.0);
             gpuColorGrade(in, out, param("gainR", 1.0), param("gainG", 1.0), param("gainB", 1.0),
-                          param("lift", 0.0), param("saturation", 1.0));
+                          param("liftR", legacyLift), param("liftG", legacyLift),
+                          param("liftB", legacyLift), param("gammaR", 1.0), param("gammaG", 1.0),
+                          param("gammaB", 1.0), param("saturation", 1.0));
             break;
+        }
         case EffectType::InvertColors:
             gpuInvertColors(in, out);
             break;
@@ -302,10 +334,20 @@ struct GenFrame {
                                      {"cropRight", genScaled(0, 1000)},
                                      {"cropBottom", genScaled(0, 1000)}});
         case EffectType::ColorGrade:
+            // Requirement 4.4: every combination of the new parameters must agree
+            // within the same 1-LSB tolerance. Gamma is generated across [0.1, 4.0]
+            // — wide enough that pow()'s float/double divergence is genuinely
+            // exercised — and lift per channel across [-0.5, 0.5], which routinely
+            // drives values negative and so exercises the gamma step's clamp.
             return makeEffect(type, {{"gainR", genScaled(0, 2000)},
                                      {"gainG", genScaled(0, 2000)},
                                      {"gainB", genScaled(0, 2000)},
-                                     {"lift", genScaled(-500, 500)},
+                                     {"liftR", genScaled(-500, 500)},
+                                     {"liftG", genScaled(-500, 500)},
+                                     {"liftB", genScaled(-500, 500)},
+                                     {"gammaR", genScaled(100, 4000)},
+                                     {"gammaG", genScaled(100, 4000)},
+                                     {"gammaB", genScaled(100, 4000)},
                                      {"saturation", genScaled(0, 2000)}});
         case EffectType::InvertColors:
             return makeEffect(type, {}); // parameterless

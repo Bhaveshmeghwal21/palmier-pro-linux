@@ -251,9 +251,20 @@ private:
 ///   * CropTransform— `cropLeft`/`cropTop`/`cropRight`/`cropBottom` normalized
 ///                    [0,1] visible rect (defaults 0,0,1,1); pixels outside the
 ///                    rect become transparent black.
-///   * ColorGrade   — `gainR`/`gainG`/`gainB` (default 1), `lift` (default 0,
-///                    added as lift*255), `saturation` (default 1, mixes each
-///                    pixel toward its Rec.601 luma).
+///   * ColorGrade   — a lift/gamma/gain primary grade plus saturation
+///                    (monitoring-and-grading Requirement 4), applied in the fixed
+///                    order gain, lift, gamma, saturation:
+///                    `gainR`/`gainG`/`gainB` (default 1);
+///                    `liftR`/`liftG`/`liftB` (added as lift*255), each defaulting
+///                    to the legacy scalar `lift` (itself default 0) so a project
+///                    saved before per-channel lift existed renders unchanged;
+///                    `gammaR`/`gammaG`/`gammaB` (default 1) applied as
+///                    pow(x, 1/gamma) in normalised [0,1] space, so above 1
+///                    brightens midtones — the step is skipped entirely at 1 rather
+///                    than computed, which is what keeps an existing project
+///                    byte-identical (Requirement 4.2);
+///                    `saturation` (default 1, mixes each pixel toward its Rec.601
+///                    luma).
 ///   * InvertColors — no parameters: each RGB channel becomes 255 minus the
 ///                    input value; alpha is unchanged (Requirements 14.4).
 void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba,
