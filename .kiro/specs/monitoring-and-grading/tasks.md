@@ -389,18 +389,90 @@ could never have caught it. The checker gained a pattern for it, validated again
 Blocker B. Every task here adds a GPU kernel **and** its byte-mirrored software reference, and each is
 bound by property P5's per-channel tolerance of 1 on a 0-255 scale.
 
-- [ ] 4. Lift / gamma / gain primary grade (Requirement 4) — **M**
-  - [ ] 4.1 Extend `color_grade` to per-channel lift, per-channel gamma and per-channel gain alongside
+- [x] 4. Lift / gamma / gain primary grade (Requirement 4) — **M**
+  - [x] 4.1 Extend `color_grade` to per-channel lift, per-channel gamma and per-channel gain alongside
         the existing saturation, choosing defaults that reproduce today's output exactly.
-  - [ ] 4.2 Fix and document the operation order — gain, lift, gamma, saturation — in the kernel, and
+  - [x] 4.2 Fix and document the operation order — gain, lift, gamma, saturation — in the kernel, and
         mirror it exactly in `gpu::applyColorGrade` so the two cannot drift.
-  - [ ] 4.3 Accept every new parameter through the existing `timeline.set_effect_parameter` as one
+  - [x] 4.3 Accept every new parameter through the existing `timeline.set_effect_parameter` as one
         undoable edit; round-trip each through save/open.
-  - [ ] 4.4 Present lift, gamma and gain in the Inspector as three grouped per-channel controls plus
+  - [x] 4.4 Present lift, gamma and gain in the Inspector as three grouped per-channel controls plus
         saturation, each showing its current value.
-  - [ ] 4.5 Tests: a project saved before the change renders byte-identically after it (the hard
+  - [x] 4.5 Tests: a project saved before the change renders byte-identically after it (the hard
         backward-compatibility criterion); GPU/CPU parity across the new parameter space; each parameter
         round-trips; operation order is asserted rather than assumed.
+
+Two commits, both green first try, no CI incidents:
+
+| Commit | What landed | Suite |
+|---|---|---|
+| `9cb9b11` (run `33509745453`) | the kernel, the software reference, the parity model | **1520/1520** (+6) |
+| `a5f2cb5` (run `33510740057`) | the defaults moved to core, the Inspector, tool/round-trip tests | **1524/1524** (+4) |
+
+**No schema bump was needed, which is worth stating because the spec anticipated one.**
+`core::Effect::parameters` is already a `std::map<std::string, double>` that `ProjectStore` serialises
+by iterating, so the new names round-trip with no serializer change; and
+`timeline.set_effect_parameter` already takes a free-form parameter name and is already undoable with
+an exact inverse, including the "had no prior value" case. Requirements 4.6 and 4.8 were therefore
+satisfied by existing code, and the work for them was to *prove* it rather than to build it.
+
+The decisions worth keeping:
+
+- **Byte-identity is carried by six defaults, not by a compatibility branch.** Each per-channel lift
+  falls back to the LEGACY SCALAR `lift` and each gamma to 1.0, so a project saved before the change
+  renders through the identical arithmetic. There is no migration step, no version check and nothing
+  for the user to do — which is what Requirement 4.3 asks for, and what
+  `ALegacyColorGradeIsLoadedWithoutMigratingItsParameters` pins from the other side: loading such a
+  project must add *nothing*. An open that helpfully materialised `liftR/G/B` would be the forbidden
+  migration, and would turn a later edit of the legacy scalar into a silent no-op because the
+  per-channel names shadow it.
+- **A unity gamma SKIPS the step rather than computing `pow(x, 1)`.** This is the genuinely subtle
+  part. Gamma is meaningless on a negative value and `pow` is undefined there, so the step clamps its
+  input up to 0 first — and at an exponent of 1 that clamp is still observable, because a saturation
+  below 1 mixes toward a luma computed from the *unclamped* values. Without the guard, an existing
+  project with a negative lift would shift. Both lanes guard it, the parity model reproduces the guard
+  rather than simplifying it away, and `AUnityGammaIsSkippedRatherThanComputed` asserts that spelling
+  gamma out as 1.0 is indistinguishable from omitting it.
+- **The byte-identity test carries a FROZEN copy of the previous implementation.** The old arithmetic
+  is gone from the tree, so a test comparing the new code to the old one has to contain the old one,
+  down to its own copy of `Compositor`'s private `toByte` rounding. Comparing the new code to itself
+  would assert nothing, and the temptation to "simplify" it into a call to `applyEffectSoftware` is
+  called out in a comment for exactly that reason. The comparison is `==` over an image covering every
+  byte value, across ten parameter combinations including a negative lift and a lift past white — not a
+  tolerance, because the requirement says byte-identical.
+- **Gamma runs in normalised [0,1] space in both lanes, but they reach it differently.** The kernel
+  already works in [0,1]; the byte-space software reference has to divide by 255, exponentiate and
+  multiply back, because `pow(200, 1/2.2)` is 10.6 rather than a brightened 200. That asymmetry is the
+  likeliest place for the two to drift, so the P5 property generates gamma across [0.1, 4.0] and
+  per-channel lift across [-0.5, 0.5] — the latter routinely driving values negative and so exercising
+  the clamp — instead of testing a couple of example values.
+- **`pow(x, 1/gamma)`, not `pow(x, gamma)`.** Above 1 brightens midtones, the direction every colour
+  tool's midtone control moves. Asserted on mid-gray, because 0 and 255 are fixed points of `pow` and
+  would show nothing whichever way the convention ran; the endpoints are then asserted separately to be
+  left alone.
+- **The defaults live in `core`, in one place.** They started at the renderer's call site and moved,
+  because the Inspector must display "the current value of each" and those values include the legacy
+  fallback. Resolved independently in two places, an old project would show a per-channel lift of 0 in
+  the panel while the renderer used −0.25 — the panel quietly lying about what is on screen. A pre-push
+  check now fails if `Compositor` resolves them itself again.
+- **The Inspector presents all ten unconditionally.** Its generic loop can only show parameters
+  *present* in the map, so an effect carrying just `lift` offered one spin box and no way to reach the
+  other nine. The legacy scalar deliberately gets no control of its own, since it is already shown
+  through the three per-channel lift rows and two widgets disagreeing about one number is worse than
+  one; anything outside the known ten still falls through to the generic loop, so nothing is hidden.
+- **Both "every parameter" tests iterate `kColorGradeParameterNames`.** A hand-written list in a test
+  is a list that falls behind the renderer silently. Driving the round-trip and the undo tests from the
+  same array the resolver uses means a parameter added without a way to set it, or without persistence,
+  cannot pass by being forgotten in a second place.
+- **A degenerate gamma is clamped, not divided by.** A gamma of 0 would divide by zero and a negative
+  one is meaningless; either would put a NaN into a frame, where `toByte`'s two comparisons are both
+  false and the cast is undefined, and it would propagate through every later effect and into the
+  encoder. Detected in the test by running twice and comparing, since a NaN is not equal to itself.
+
+Not established: nothing here has been *seen*. The GPU lane is a float model of the shader compared
+against the software reference, which is what makes property P5 checkable on a runner with no Vulkan
+device; no image produced by an actual SPIR-V dispatch has been compared to anything.
+
 
 - [ ] 5. Tone curves (Requirement 5) — **L**
   - [ ] 5.1 Add a tone-curve effect type through all seven sites of audit finding 4, with master plus
