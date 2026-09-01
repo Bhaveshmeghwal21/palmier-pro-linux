@@ -11,6 +11,8 @@
 // the documented error paths. Source frames are supplied through an injected
 // ClipFrameProvider (the seam the future MediaDecoder fills).
 
+#include <map>
+#include <utility>
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -19,6 +21,7 @@
 
 #include "core/Duration.hpp"
 #include "core/Effect.hpp"
+#include "core/ToneCurve.hpp"
 #include "core/Project.hpp"
 #include "core/Result.hpp"
 #include "core/Uuid.hpp"
@@ -157,6 +160,87 @@ TEST(CompositorRender, TopOpaqueLayerOccludesLowerLayers) {
     EXPECT_EQ(rf.value().layerCount(), 2u);
     // Top opaque green fully occludes the bottom red.
     EXPECT_EQ(firstPixel(rf.value()), green);
+}
+
+// --- Export and Preview agree on every effect this spec adds ---------------
+//
+// Requirement 8.2 (monitoring-and-grading): assert that export and Preview agree for every
+// effect this spec adds, RATHER THAN INFERRING IT from the fact that they share a compositor.
+// The inference is currently true and is exactly the kind of thing that stops being true
+// quietly -- a preview-only fast path, a resolution-dependent shortcut, or an effect applied
+// in the viewer's upload step rather than in the composite would each break it while every
+// other test still passed.
+//
+// So this renders the same project twice through the same seam both paths use --
+// Compositor::renderAt -- at the Preview's window size and at an export-sized target, and
+// asserts the effect changed the pixels identically. Identical is the right bar because the
+// effects are per-pixel colour transforms with no spatial extent: nothing about them may
+// depend on how large the frame is.
+
+namespace {
+
+/// Render one effect over a known solid colour at a given size, returning the top-left pixel.
+RgbaColor renderEffectAt(const Effect& effect, int width, int height) {
+    auto ctx = GpuContext::softwareFallback();
+    Compositor comp(ctx);
+
+    Clip clip = makeClip();
+    clip.effects.push_back(effect);
+    Project p = makeProject({makeVideoTrack({clip})});
+
+    const RgbaColor source{200, 96, 32, 255};
+    comp.setFrameProvider([&](const Clip&, Duration) -> Result<SourceFrame> {
+        return SourceFrame::solid(width, height, source);
+    });
+    auto rf = comp.renderAt(p, kAt, RenderTarget(width, height));
+    if (!rf.isOk()) {
+        return RgbaColor{0, 0, 0, 0};  // an unrenderable frame fails the assertion below
+    }
+    return firstPixel(rf.value());
+}
+
+}  // namespace
+
+TEST(ExportPreviewAgreement, EveryEffectThisSpecAddsRendersIdenticallyAtPreviewAndExportSizes) {
+    // A curve that is emphatically not the identity, and a per-channel primary grade. A LUT is
+    // covered separately in gpu_lut_cache_test.cpp, where the table can be injected without a
+    // filesystem; here it would only assert that an absent table is a no-op at both sizes.
+    std::map<std::string, double> curve;
+    curve[curvePointParameterName(CurveChannel::Master, 0, /*isY=*/false)] = 0.0;
+    curve[curvePointParameterName(CurveChannel::Master, 0, /*isY=*/true)] = 0.15;
+    curve[curvePointParameterName(CurveChannel::Master, 1, /*isY=*/false)] = 1.0;
+    curve[curvePointParameterName(CurveChannel::Master, 1, /*isY=*/true)] = 0.8;
+
+    const std::vector<std::pair<const char*, Effect>> cases{
+        {"tone curve", Effect{Uuid::generateV4(), EffectType::ToneCurve, curve}},
+        {"per-channel grade",
+         Effect{Uuid::generateV4(), EffectType::ColorGrade,
+                {{"liftR", 0.1}, {"liftG", -0.05}, {"liftB", 0.0},
+                 {"gammaR", 1.4}, {"gammaG", 0.8}, {"gammaB", 1.0},
+                 {"gainR", 1.1}, {"gainG", 0.9}, {"gainB", 1.0},
+                 {"saturation", 0.7}}}},
+    };
+
+    for (const auto& [label, effect] : cases) {
+        // 640x360 is a plausible Preview window; 1920x1080 is an export frame.
+        const RgbaColor preview = renderEffectAt(effect, 640, 360);
+        const RgbaColor exported = renderEffectAt(effect, 1920, 1080);
+
+        EXPECT_EQ(preview.r, exported.r) << label << ": red";
+        EXPECT_EQ(preview.g, exported.g) << label << ": green";
+        EXPECT_EQ(preview.b, exported.b) << label << ": blue";
+        EXPECT_EQ(preview.a, exported.a) << label << ": alpha";
+
+        // And the effect must actually have DONE something, or this would pass for an effect
+        // the compositor silently ignored at both sizes -- which is the failure it is meant to
+        // catch, not a way of passing.
+        const RgbaColor untouched = renderEffectAt(
+            Effect{Uuid::generateV4(), EffectType::Custom, {}}, 640, 360);
+        const bool changedSomething = preview.r != untouched.r || preview.g != untouched.g ||
+                                      preview.b != untouched.b;
+        EXPECT_TRUE(changedSomething)
+            << label << " changed nothing, so this comparison proves nothing";
+    }
 }
 
 // --- Opacity-weighted alpha compositing ------------------------------------
