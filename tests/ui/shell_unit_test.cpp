@@ -459,6 +459,13 @@ TEST_F(ShellUnitTest, AScrubGestureTakesTheEngineFromThePlaybackDriver) {
 
     composition.playbackEngine().play();
 
+    // CI runners have no sound card, so MainWindow correctly auto-suppresses scrub
+    // audio (Requirement 3.3) and isScrubbing() would never become true. This test is
+    // about who OWNS the engine during a drag, not about device availability, so it
+    // declares a device present. The suppression itself is asserted separately, in
+    // ScrubAudioFollowsTheHostsActualOutputAvailability.
+    timeline->setScrubAudioOutputAvailable(true);
+
     // A drag begins: the panel's scrub controller now owns the engine.
     (void)timeline->scrubAudio().beginDrag(Duration::fromMilliseconds(1'000),
                                            /*transportWasPlaying=*/true,
@@ -475,6 +482,39 @@ TEST_F(ShellUnitTest, AScrubGestureTakesTheEngineFromThePlaybackDriver) {
     ASSERT_FALSE(timeline->scrubAudio().isScrubbing());
     (void)driver->tick();
     EXPECT_TRUE(composition.audioEngine().running()) << "control returns to the driver";
+}
+
+// Requirement 3.3's automatic half: scrub audio is suppressed when there is no output
+// device, with no setting change and no error.
+//
+// Written after this exact behaviour broke four tests at once. CI runners have no sound
+// card, so the shell suppresses scrub audio there — correctly — and every test that
+// wants to OBSERVE scrub audio must declare a device present first. Rather than leave
+// that as a trap, this asserts the wiring as a property.
+//
+// Deliberately environment-independent: it asserts the controller AGREES with the host
+// rather than asserting either specific value, so it holds on a runner with no device
+// and on a developer machine with one.
+TEST_F(ShellUnitTest, ScrubAudioFollowsTheHostsActualOutputAvailability) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+
+    TimelinePanel* timeline = window.findChild<TimelinePanel*>();
+    ASSERT_NE(timeline, nullptr);
+
+    EXPECT_EQ(timeline->scrubAudio().isOutputAvailable(), composition.audioOutputAvailable())
+        << "the shell must tell the controller what the host actually has";
+
+    // The USER'S SETTING is untouched either way. Auto-suppression that silently
+    // unchecked the menu item would mean plugging in a device left scrub audio off with
+    // no indication of why, and the user would have to toggle it twice to recover.
+    EXPECT_TRUE(timeline->scrubAudio().isEnabled())
+        << "a missing device must not flip the user's setting";
+
+    if (!composition.audioOutputAvailable()) {
+        EXPECT_TRUE(timeline->scrubAudio().isSuppressed())
+            << "no device means silence, not a failure";
+    }
 }
 
 TEST_F(ShellUnitTest, SuspendingTheDriverStopsTheEngineAndItsCadence) {
@@ -1415,6 +1455,10 @@ TEST_F(TimelineGraphViewTest, ARulerDragScrubsAudioAndLeavesTheProjectAndUndoHis
     std::vector<ScrubAudioDecision> decisions;
     panel->setScrubAudioApplier(
         [&decisions](const ScrubAudioDecision& d) { decisions.push_back(d); });
+    // See ScrubAudioFollowsTheHostsActualOutputAvailability: a CI runner has no sound
+    // card, so the shell auto-suppresses scrub audio and there would be nothing to
+    // observe. Declaring a device present is what makes the rest of this assertable.
+    panel->setScrubAudioOutputAvailable(true);
 
     // Requirement 3.4's baseline. The seed project already left undo history behind,
     // so the depth — not canUndo() — is what distinguishes "nothing happened" from
@@ -1475,6 +1519,7 @@ TEST_F(TimelineGraphViewTest, ARulerDragThatInterruptedPlaybackResumesItOnReleas
     std::vector<ScrubAudioDecision> decisions;
     panel->setScrubAudioApplier(
         [&decisions](const ScrubAudioDecision& d) { decisions.push_back(d); });
+    panel->setScrubAudioOutputAvailable(true);
 
     composition.playbackEngine().play();
     ASSERT_TRUE(composition.playbackEngine().isPlaying());
@@ -1512,6 +1557,7 @@ TEST_F(TimelineGraphViewTest, SwitchingScrubAudioOffSuppressesTheSoundButNotTheD
     std::vector<ScrubAudioDecision> decisions;
     panel->setScrubAudioApplier(
         [&decisions](const ScrubAudioDecision& d) { decisions.push_back(d); });
+    panel->setScrubAudioOutputAvailable(true);
 
     // Requirement 3.3's user-visible half, driven through the menu the user actually
     // has rather than by calling the controller directly — which is the only way to
@@ -1572,6 +1618,7 @@ TEST_F(TimelineGraphViewTest, AFloodOfDragPositionsIsDroppedRatherThanQueued) {
     ASSERT_NE(graph, nullptr);
     TimelinePanel* panel = window.findChild<TimelinePanel*>();
     ASSERT_NE(panel, nullptr);
+    panel->setScrubAudioOutputAvailable(true);
 
     const int kRulerY = kRulerHeight / 2;
     press(graph, QPoint(30, kRulerY));
