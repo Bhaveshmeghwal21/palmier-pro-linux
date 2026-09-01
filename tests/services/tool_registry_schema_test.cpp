@@ -215,6 +215,18 @@ std::vector<ToolExpectation> expectedSurface() {
           {"effectId", "string", true},
           {"parameter", "string", true},
           {"value", "number", true}}},
+        // Tone-curve control points (monitoring-and-grading Requirement 5.7). index/x/y
+        // are declared optional because which of them is required depends on
+        // `operation`'s value, which the vocabulary cannot express; that gap is
+        // documented as Class 1 in tool_schema_conformance_property_test.cpp.
+        {"timeline.edit_curve_point",
+         {{"clipId", "string", true},
+          {"effectId", "string", true},
+          {"channel", "string", true},
+          {"operation", "string", true},
+          {"index", "integer", false},
+          {"x", "number", false},
+          {"y", "number", false}}},
         {"timeline.add_transition",
          {{"clipId", "string", true},
           {"kind", "string", true},
@@ -454,6 +466,7 @@ TEST(ToolRegistrySchema, IdentifierArgumentsPublishAndEnforceTheUuidFormat) {
         {"timeline.split_clip", "clipId"},     {"timeline.reorder_clips", "trackId"},
         {"timeline.add_effect", "clipId"},     {"timeline.remove_effect", "effectId"},
         {"timeline.reorder_effects", "clipId"}, {"timeline.set_effect_parameter", "effectId"},
+        {"timeline.edit_curve_point", "clipId"}, {"timeline.edit_curve_point", "effectId"},
         {"timeline.add_transition", "clipId"},
         {"timeline.ripple_delete", "clipId"},  {"timeline.ripple_trim", "clipId"},
         {"timeline.close_gap", "clipId"},
@@ -504,6 +517,15 @@ TEST(ToolRegistrySchema, ClosedValueSetsArePublished) {
               (std::vector<std::string>{"brightness", "contrast", "blur", "crop_transform",
                                         "color_grade", "invert_colors", "tone_curve",
                                         "custom"}));
+
+    // Requirement 5.7 — both closed sets on the curve-point tool. Asserted here, where
+    // the advertised schema is read back out, so a value set that exists only in the
+    // handler's parser (or only in the schema) is caught rather than inferred.
+    const Json curve = registry.find("timeline.edit_curve_point")->inputSchema();
+    EXPECT_EQ(enumValues(*curve.find("properties")->find("channel")),
+              (std::vector<std::string>{"master", "red", "green", "blue"}));
+    EXPECT_EQ(enumValues(*curve.find("properties")->find("operation")),
+              (std::vector<std::string>{"add", "move", "remove"}));
 
     const Json generate = registry.find("generation.generate")->inputSchema();
     EXPECT_EQ(enumValues(*generate.find("properties")->find("mediaType")),

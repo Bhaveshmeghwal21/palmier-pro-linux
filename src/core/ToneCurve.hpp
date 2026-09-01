@@ -106,6 +106,14 @@ inline constexpr std::array<CurveChannel, 4> kCurveChannels{
 /// The infix used in parameter names: "Master", "Red", "Green", "Blue".
 [[nodiscard]] const char* curveChannelName(CurveChannel channel) noexcept;
 
+/// The name prefix every parameter belonging to one channel's points shares,
+/// e.g. "curveRedP".
+///
+/// Exists so a caller that must operate on "all of this channel's points" -- an
+/// undoable edit capturing the prior state, for instance -- can find them without
+/// re-deriving the encoding and without guessing how many there are.
+[[nodiscard]] std::string curveChannelParameterPrefix(CurveChannel channel);
+
 /// The parameter name for one coordinate of one point, e.g. "curveRedP2Y".
 ///
 /// The single place the encoding is spelled out. Everything that reads or writes a

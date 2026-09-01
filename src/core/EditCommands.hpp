@@ -65,6 +65,7 @@
 #define PALMIER_CORE_EDITCOMMANDS_HPP
 
 #include <cstddef>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -77,6 +78,7 @@
 #include "core/FrameRate.hpp"
 #include "core/Resolution.hpp"
 #include "core/Result.hpp"
+#include "core/ToneCurve.hpp"
 #include "core/Track.hpp"
 #include "core/Transition.hpp"
 #include "core/Uuid.hpp"
@@ -640,6 +642,57 @@ private:
     bool        hadPrior_ = false;
     double      prior_ = 0.0;
     bool        captured_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// EditCurvePointCommand — add, move or remove one tone-curve control point.
+// ---------------------------------------------------------------------------
+//
+// Requirement 5.7 (monitoring-and-grading): adding, moving and removing a control
+// point are each ONE undoable edit. SetEffectParameterCommand cannot serve, because a
+// point is a pair: adding one sets two parameters and would therefore be two history
+// entries, so a single Undo would leave a half-written point behind — an X with no Y,
+// which core::curvePoints deliberately refuses to read as a point. The user would see
+// their point vanish and the curve change shape in a way no single action explains.
+//
+// The three operations are one command rather than three because they share their
+// target (clip, effect, channel) and differ only in which coordinates matter. What
+// makes them one *undoable* thing is the inverse below, which is identical for all
+// three.
+//
+// revert() restores THE WHOLE CHANNEL'S prior parameter set rather than undoing the
+// specific mutation. That is not laziness: removing a middle point renumbers every
+// point after it, so the inverse of "remove p1" is not "add a point at p1" but
+// "restore the numbering that existed before". Capturing the channel wholesale makes
+// the inverse exact for every operation, including that one, without a special case —
+// and the captured set is at most a few dozen doubles.
+class EditCurvePointCommand final : public EditCommand {
+public:
+    enum class Operation { Add, Move, Remove };
+
+    /// `index` is ignored for Add (the point is appended); `x`/`y` are ignored for
+    /// Remove. Add appends rather than inserting at `index` because rendering sorts by
+    /// x regardless, so an insertion position would be a distinction without a
+    /// difference — while a point's index IS its identity for a later move or remove.
+    EditCurvePointCommand(ClipId clipId, Uuid effectId, CurveChannel channel,
+                          Operation operation, std::size_t index, double x, double y);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "EditCurvePoint"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+private:
+    ClipId       clipId_;
+    Uuid         effectId_;
+    CurveChannel channel_;
+    Operation    operation_;
+    std::size_t  index_;
+    double       x_;
+    double       y_;
+    /// Every parameter of this channel as it stood before apply(), and nothing else:
+    /// an edit to the master curve must not restore the red curve.
+    std::map<std::string, double> prior_;
+    bool captured_ = false;
 };
 
 // ---------------------------------------------------------------------------

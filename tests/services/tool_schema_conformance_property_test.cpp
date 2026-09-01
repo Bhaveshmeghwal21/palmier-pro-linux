@@ -123,6 +123,7 @@ namespace {
 constexpr const char* kAddClip  = "timeline.add_clip";
 constexpr const char* kReorder  = "timeline.reorder_clips";
 constexpr const char* kReorderEffects = "timeline.reorder_effects";
+constexpr const char* kEditCurvePoint = "timeline.edit_curve_point";
 constexpr const char* kGenerate = "generation.generate";
 constexpr const char* kSetProjectSettings = "project.set_settings";
 constexpr const char* kRetimeCaptionCue = "timeline.retime_caption_cue";
@@ -618,6 +619,24 @@ enum class SharedRule { None, MissingRequired, WrongTypedRequired, OutOfEnumRequ
         if (!args.contains("timelineStartNs") && !args.contains("durationNs")) {
             return "class 1: cross-field relation — at least one of timelineStartNs/"
                    "durationNs must be present";
+        }
+    }
+
+    if (tool.name == kEditCurvePoint) {
+        // Which of index/x/y are required depends on `operation`'s VALUE, which no
+        // per-argument constraint can express: an argument is required or it is not.
+        // Declaring them all required instead would force callers to pass coordinates to
+        // a removal, and defaulting the missing ones would silently move or delete point
+        // 0 -- a plausible wrong answer, which is worse than a rejection.
+        const std::string operation = args.stringOr("operation", "");
+        if ((operation == "move" || operation == "remove") && !args.contains("index")) {
+            return "class 1: cross-field relation — index is required when operation is "
+                   "move or remove";
+        }
+        if ((operation == "add" || operation == "move") &&
+            (!args.contains("x") || !args.contains("y"))) {
+            return "class 1: cross-field relation — x and y are required when operation "
+                   "is add or move";
         }
     }
 

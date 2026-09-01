@@ -500,6 +500,19 @@ private:
     setParameter.set("value", 0.4);
     observer.run("timeline.set_effect_parameter", setParameter);
 
+    // A tone-curve control point on the same effect (monitoring-and-grading
+    // Requirement 5.7). Only "add" is exercised here: the observer's job is to record
+    // one real payload per documented tool, and "add" is the operation that needs no
+    // pre-existing point, so it is the one that works against a freshly seeded effect.
+    services::Json curvePoint = object();
+    curvePoint.set("clipId", secondClip);
+    curvePoint.set("effectId", firstEffectId);
+    curvePoint.set("channel", std::string{"master"});
+    curvePoint.set("operation", std::string{"add"});
+    curvePoint.set("x", 0.25);
+    curvePoint.set("y", 0.6);
+    observer.run("timeline.edit_curve_point", curvePoint);
+
     services::Json secondEffectArgs = object();
     secondEffectArgs.set("clipId", secondClip);
     secondEffectArgs.set("type", std::string{"contrast"});

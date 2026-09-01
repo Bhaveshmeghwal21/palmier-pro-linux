@@ -13,6 +13,7 @@
 #include "core/EditCommands.hpp"
 
 #include <algorithm>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -1121,6 +1122,133 @@ Result<void> SetEffectParameterCommand::revert(Project& project) {
         it->parameters[parameter_] = prior_;
     } else {
         it->parameters.erase(parameter_);
+    }
+    return ok();
+}
+
+// ===========================================================================
+// EditCurvePointCommand
+// ===========================================================================
+
+EditCurvePointCommand::EditCurvePointCommand(ClipId clipId, Uuid effectId,
+                                             CurveChannel channel, Operation operation,
+                                             std::size_t index, double x, double y)
+    : clipId_(clipId),
+      effectId_(effectId),
+      channel_(channel),
+      operation_(operation),
+      index_(index),
+      x_(x),
+      y_(y) {}
+
+namespace {
+
+/// Locate one effect, or say which of the two things was missing.
+Result<std::vector<Effect>::iterator> findEffect(Project& project, ClipId clipId,
+                                                const Uuid& effectId, const char* who) {
+    std::optional<ClipLocation> loc = findClip(project, clipId);
+    if (!loc) {
+        return err<std::vector<Effect>::iterator>(
+            notFound(std::string(who) + ": clip " + idLabel(clipId) + " not found"));
+    }
+    std::vector<Effect>& effects = loc->track->clips[loc->index].effects;
+    auto it = std::find_if(effects.begin(), effects.end(),
+                           [&](const Effect& e) { return e.id == effectId; });
+    if (it == effects.end()) {
+        return err<std::vector<Effect>::iterator>(
+            notFound(std::string(who) + ": effect " + idLabel(effectId) + " not found on clip " +
+                     idLabel(clipId)));
+    }
+    return ok(it);
+}
+
+/// Every parameter of one channel's points, keyed by full parameter name.
+///
+/// Selected by name prefix rather than by walking indices, because the whole point of
+/// the capture is to restore state that may not be contiguous — a set walked with
+/// curvePoints() would stop at the first gap and quietly fail to restore anything
+/// beyond it.
+std::map<std::string, double> channelParameters(const std::map<std::string, double>& all,
+                                                CurveChannel channel) {
+    const std::string prefix = curveChannelParameterPrefix(channel);
+    std::map<std::string, double> mine;
+    for (const auto& [key, value] : all) {
+        if (key.compare(0, prefix.size(), prefix) == 0) {
+            mine.emplace(key, value);
+        }
+    }
+    return mine;
+}
+
+}  // namespace
+
+Result<void> EditCurvePointCommand::apply(Project& project) {
+    auto found = findEffect(project, clipId_, effectId_, "EditCurvePointCommand");
+    if (!found) {
+        return err(found.error());
+    }
+    auto it = found.value();
+
+    // The points as they stand, and the whole channel as it stands. The points drive
+    // validation; the parameter set is the inverse.
+    std::vector<CurvePoint> points = curvePoints(it->parameters, channel_);
+    prior_ = channelParameters(it->parameters, channel_);
+
+    if (operation_ != Operation::Add && index_ >= points.size()) {
+        return err(notFound("EditCurvePointCommand: point " + std::to_string(index_) +
+                            " does not exist on the " + curveChannelName(channel_) +
+                            " curve, which has " + std::to_string(points.size()) + " point(s)"));
+    }
+
+    switch (operation_) {
+        case Operation::Add:
+            points.push_back(CurvePoint{x_, y_});
+            break;
+        case Operation::Move:
+            points[index_] = CurvePoint{x_, y_};
+            break;
+        case Operation::Remove:
+            points.erase(points.begin() + static_cast<std::ptrdiff_t>(index_));
+            break;
+    }
+
+    // Rewrite the channel from scratch. Erasing first is what keeps the indices
+    // contiguous after a removal: writing the shortened list over the old one would
+    // leave the final point's coordinates behind as a duplicate at the end.
+    for (const auto& [key, value] : prior_) {
+        (void)value;
+        it->parameters.erase(key);
+    }
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        it->parameters[curvePointParameterName(channel_, i, /*isY=*/false)] = points[i].x;
+        it->parameters[curvePointParameterName(channel_, i, /*isY=*/true)] = points[i].y;
+    }
+
+    captured_ = true;
+    return ok();
+}
+
+Result<void> EditCurvePointCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition("EditCurvePointCommand: revert before a successful apply"));
+    }
+    auto found = findEffect(project, clipId_, effectId_, "EditCurvePointCommand");
+    if (!found) {
+        return err(found.error());
+    }
+    auto it = found.value();
+
+    // Remove whatever this channel holds now, then put back exactly what it held
+    // before. Both halves are needed: without the erase, undoing an Add would leave
+    // the added point in place; without the restore, undoing a Move or Remove would
+    // leave the channel empty.
+    const std::map<std::string, double> current = channelParameters(it->parameters, channel_);
+    for (const auto& [key, value] : current) {
+        (void)value;
+        it->parameters.erase(key);
+    }
+    for (const auto& [key, value] : prior_) {
+        it->parameters[key] = value;
     }
     return ok();
 }

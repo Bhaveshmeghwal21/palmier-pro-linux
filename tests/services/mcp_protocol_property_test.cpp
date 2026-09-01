@@ -153,6 +153,7 @@ constexpr std::string_view kAddEffect     = "timeline.add_effect";
 constexpr std::string_view kRemoveEffect       = "timeline.remove_effect";
 constexpr std::string_view kReorderEffects     = "timeline.reorder_effects";
 constexpr std::string_view kSetEffectParameter = "timeline.set_effect_parameter";
+constexpr std::string_view kEditCurvePoint = "timeline.edit_curve_point";
 constexpr std::string_view kAddTransition = "timeline.add_transition";
 // Text and titles (usable-editor task 12; Requirement 9).
 constexpr std::string_view kAddTextClip    = "timeline.add_text_clip";
@@ -933,6 +934,25 @@ struct Invocation {
             args.set("parameter", Json(std::string{"amount"}));
             args.set("value", Json(static_cast<double>(drawIndex(201)) / 100.0));
         }
+        return Invocation{name, std::move(args)};
+    }
+
+    // Tone-curve control points (monitoring-and-grading Requirement 5.7). Targets the
+    // same guaranteed seeded effect. The effect's TYPE does not matter: a control point
+    // is a parameter like any other, and the command deliberately does not police which
+    // effect kind carries one -- exactly as set_effect_parameter does not.
+    if (name == kEditCurvePoint) {
+        const Clip& seeded = project.tracks[0].clips[0];
+        args.set("clipId", Json(seeded.id.toString()));
+        args.set("effectId", Json(seeded.effects.front().id.toString()));
+        args.set("channel", Json(drawEnumValue(registry, kEditCurvePoint, "channel")));
+        // "add" only: move and remove need a point that already exists, and this draws
+        // one invocation against a fresh project every case. The undo/redo and
+        // renumbering behaviour of the other two is pinned in the core command's own
+        // tests, where a curve can be built up first.
+        args.set("operation", Json(std::string{"add"}));
+        args.set("x", Json(static_cast<double>(drawIndex(101)) / 100.0));
+        args.set("y", Json(static_cast<double>(drawIndex(101)) / 100.0));
         return Invocation{name, std::move(args)};
     }
 

@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -33,6 +34,7 @@
 #include "core/Resolution.hpp"
 #include "core/TextStyle.hpp"
 #include "core/TimelineEngine.hpp"
+#include "core/ToneCurve.hpp"
 #include "core/Track.hpp"
 #include "core/Transition.hpp"
 #include "core/Uuid.hpp"
@@ -602,6 +604,218 @@ TEST(ReorderClipsCommand, NonPermutationRejected) {
     // Track unchanged.
     EXPECT_EQ(project.tracks[0].clips[0].id, a);
     EXPECT_EQ(project.tracks[0].clips[1].id, b);
+}
+
+// --- EditCurvePointCommand -------------------------------------------------
+//
+// Requirement 5.7: add, move and remove are each ONE undoable edit. The interesting
+// claim is not that each mutates correctly but that each has an exact inverse, which
+// for removal means restoring the NUMBERING and not merely the coordinates.
+
+namespace {
+
+/// A project holding one clip with one tone-curve effect, and the ids to address it.
+Project makeProjectWithCurveEffect(ClipId& clipOut, Uuid& effectOut) {
+    Uuid trackId;
+    Project project = makeProjectWithOneTrack(trackId);
+    clipOut = Uuid::generateV4();
+    Effect effect;
+    effect.id = Uuid::generateV4();
+    effect.type = EffectType::ToneCurve;
+    effectOut = effect.id;
+    Clip clip = makeClip(clipOut, ms(0), ms(0), ms(1000));
+    clip.effects = {effect};
+    project.tracks[0].clips = {clip};
+    return project;
+}
+
+const std::map<std::string, double>& curveParams(const Project& project) {
+    return project.tracks[0].clips[0].effects[0].parameters;
+}
+
+/// Add points p0..pN-1 to one channel, each through its own command, so the fixture is
+/// built by the code under test rather than by hand-written parameter names.
+void addPoints(Project& project, ClipId clipId, const Uuid& effectId, CurveChannel channel,
+               const std::vector<CurvePoint>& points) {
+    for (const CurvePoint& p : points) {
+        EditCurvePointCommand cmd(clipId, effectId, channel,
+                                  EditCurvePointCommand::Operation::Add, 0, p.x, p.y);
+        ASSERT_TRUE(cmd.apply(project).isOk());
+    }
+}
+
+}  // namespace
+
+TEST(EditCurvePointCommand, AddingAPointIsOneEditAndRevertRemovesBothCoordinates) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+
+    EditCurvePointCommand cmd(clipId, effectId, CurveChannel::Master,
+                              EditCurvePointCommand::Operation::Add, 0, 0.25, 0.75);
+    ASSERT_TRUE(cmd.apply(project).isOk());
+
+    const std::vector<CurvePoint> after = curvePoints(curveParams(project), CurveChannel::Master);
+    ASSERT_EQ(after.size(), 1u);
+    EXPECT_DOUBLE_EQ(after[0].x, 0.25);
+    EXPECT_DOUBLE_EQ(after[0].y, 0.75);
+
+    // The whole point of a dedicated command: one revert removes BOTH coordinates. Two
+    // set_effect_parameter edits would leave an X with no Y behind, which curvePoints
+    // refuses to read as a point -- so the curve would change shape after a single undo.
+    ASSERT_TRUE(cmd.revert(project).isOk());
+    EXPECT_TRUE(curvePoints(curveParams(project), CurveChannel::Master).empty());
+    EXPECT_TRUE(curveParams(project).empty()) << "revert must leave no orphaned coordinate";
+}
+
+TEST(EditCurvePointCommand, MovingAPointReplacesBothCoordinatesAndRevertRestoresThem) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+    addPoints(project, clipId, effectId, CurveChannel::Red, {{0.2, 0.3}, {0.8, 0.9}});
+
+    EditCurvePointCommand cmd(clipId, effectId, CurveChannel::Red,
+                              EditCurvePointCommand::Operation::Move, 0, 0.1, 0.15);
+    ASSERT_TRUE(cmd.apply(project).isOk());
+
+    std::vector<CurvePoint> after = curvePoints(curveParams(project), CurveChannel::Red);
+    ASSERT_EQ(after.size(), 2u);
+    EXPECT_DOUBLE_EQ(after[0].x, 0.1);
+    EXPECT_DOUBLE_EQ(after[0].y, 0.15);
+    EXPECT_DOUBLE_EQ(after[1].x, 0.8) << "the other point must not move";
+
+    ASSERT_TRUE(cmd.revert(project).isOk());
+    after = curvePoints(curveParams(project), CurveChannel::Red);
+    ASSERT_EQ(after.size(), 2u);
+    EXPECT_DOUBLE_EQ(after[0].x, 0.2);
+    EXPECT_DOUBLE_EQ(after[0].y, 0.3);
+}
+
+// The case the whole-channel capture exists for. Removing a middle point renumbers
+// every point after it, so the inverse of "remove p1" is not "add a point at p1" --
+// after the removal there IS no p1 with the old p2's coordinates to put back.
+TEST(EditCurvePointCommand, RemovingAMiddlePointRenumbersAndRevertRestoresTheNumbering) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+    addPoints(project, clipId, effectId, CurveChannel::Master,
+              {{0.0, 0.0}, {0.5, 0.9}, {1.0, 1.0}});
+
+    EditCurvePointCommand cmd(clipId, effectId, CurveChannel::Master,
+                              EditCurvePointCommand::Operation::Remove, 1, 0.0, 0.0);
+    ASSERT_TRUE(cmd.apply(project).isOk());
+
+    std::vector<CurvePoint> after = curvePoints(curveParams(project), CurveChannel::Master);
+    ASSERT_EQ(after.size(), 2u) << "a gap would truncate the run and lose the last point";
+    EXPECT_DOUBLE_EQ(after[1].x, 1.0) << "p2 must become p1, contiguously";
+    // The old p2's parameter names must be GONE, not left behind as a duplicate tail.
+    EXPECT_EQ(curveParams(project).count(
+                  curvePointParameterName(CurveChannel::Master, 2, /*isY=*/false)),
+              0u);
+
+    ASSERT_TRUE(cmd.revert(project).isOk());
+    after = curvePoints(curveParams(project), CurveChannel::Master);
+    ASSERT_EQ(after.size(), 3u);
+    EXPECT_DOUBLE_EQ(after[1].x, 0.5);
+    EXPECT_DOUBLE_EQ(after[1].y, 0.9);
+    EXPECT_DOUBLE_EQ(after[2].x, 1.0);
+}
+
+TEST(EditCurvePointCommand, AnEditToOneChannelLeavesTheOthersAlone) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+    addPoints(project, clipId, effectId, CurveChannel::Master, {{0.5, 0.5}});
+    addPoints(project, clipId, effectId, CurveChannel::Blue, {{0.25, 0.4}, {0.75, 0.6}});
+
+    EditCurvePointCommand cmd(clipId, effectId, CurveChannel::Master,
+                              EditCurvePointCommand::Operation::Remove, 0, 0.0, 0.0);
+    ASSERT_TRUE(cmd.apply(project).isOk());
+    EXPECT_TRUE(curvePoints(curveParams(project), CurveChannel::Master).empty());
+    EXPECT_EQ(curvePoints(curveParams(project), CurveChannel::Blue).size(), 2u);
+
+    // And the inverse is equally narrow: restoring master must not resurrect or disturb
+    // blue. A capture keyed on the wrong prefix would pass the line above and fail here.
+    ASSERT_TRUE(cmd.revert(project).isOk());
+    EXPECT_EQ(curvePoints(curveParams(project), CurveChannel::Master).size(), 1u);
+    const std::vector<CurvePoint> blue = curvePoints(curveParams(project), CurveChannel::Blue);
+    ASSERT_EQ(blue.size(), 2u);
+    EXPECT_DOUBLE_EQ(blue[1].y, 0.6);
+}
+
+TEST(EditCurvePointCommand, AnEditLeavesOtherParametersOnTheSameEffectUntouched) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+    project.tracks[0].clips[0].effects[0].parameters["amount"] = 0.42;
+    addPoints(project, clipId, effectId, CurveChannel::Green, {{0.3, 0.7}});
+
+    EditCurvePointCommand cmd(clipId, effectId, CurveChannel::Green,
+                              EditCurvePointCommand::Operation::Add, 0, 0.6, 0.2);
+    ASSERT_TRUE(cmd.apply(project).isOk());
+    EXPECT_DOUBLE_EQ(curveParams(project).at("amount"), 0.42);
+    ASSERT_TRUE(cmd.revert(project).isOk());
+    EXPECT_DOUBLE_EQ(curveParams(project).at("amount"), 0.42)
+        << "the wholesale restore must be scoped to the channel, not to the effect";
+}
+
+TEST(EditCurvePointCommand, MovingOrRemovingAPointThatDoesNotExistIsRefused) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+    addPoints(project, clipId, effectId, CurveChannel::Master, {{0.5, 0.5}});
+
+    EditCurvePointCommand move(clipId, effectId, CurveChannel::Master,
+                               EditCurvePointCommand::Operation::Move, 3, 0.1, 0.1);
+    const auto moved = move.apply(project);
+    ASSERT_TRUE(moved.isError());
+    EXPECT_EQ(moved.error().code(), ErrorCode::NotFound);
+
+    EditCurvePointCommand remove(clipId, effectId, CurveChannel::Master,
+                                 EditCurvePointCommand::Operation::Remove, 1, 0.0, 0.0);
+    EXPECT_TRUE(remove.apply(project).isError());
+
+    // A refused edit changes nothing, so the one real point is still there.
+    EXPECT_EQ(curvePoints(curveParams(project), CurveChannel::Master).size(), 1u);
+}
+
+TEST(EditCurvePointCommand, AddingToAnEmptyCurveNeedsNoIndexAndRevertBeforeApplyFails) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+
+    // index 9 with operation Add: ignored rather than refused, because add appends.
+    EditCurvePointCommand cmd(clipId, effectId, CurveChannel::Master,
+                              EditCurvePointCommand::Operation::Add, 9, 0.4, 0.4);
+    EditCurvePointCommand never(clipId, effectId, CurveChannel::Master,
+                                EditCurvePointCommand::Operation::Add, 0, 0.4, 0.4);
+    const auto premature = never.revert(project);
+    ASSERT_TRUE(premature.isError());
+    EXPECT_EQ(premature.error().code(), ErrorCode::FailedPrecondition);
+
+    ASSERT_TRUE(cmd.apply(project).isOk());
+    const std::vector<CurvePoint> after = curvePoints(curveParams(project), CurveChannel::Master);
+    ASSERT_EQ(after.size(), 1u) << "add appends at the next free index, whatever index says";
+    EXPECT_DOUBLE_EQ(after[0].x, 0.4);
+}
+
+TEST(EditCurvePointCommand, AMissingClipOrEffectIsRefusedAndNamed) {
+    ClipId clipId;
+    Uuid   effectId;
+    Project project = makeProjectWithCurveEffect(clipId, effectId);
+
+    EditCurvePointCommand noClip(Uuid::generateV4(), effectId, CurveChannel::Master,
+                                 EditCurvePointCommand::Operation::Add, 0, 0.5, 0.5);
+    auto result = noClip.apply(project);
+    ASSERT_TRUE(result.isError());
+    EXPECT_EQ(result.error().code(), ErrorCode::NotFound);
+
+    EditCurvePointCommand noEffect(clipId, Uuid::generateV4(), CurveChannel::Master,
+                                   EditCurvePointCommand::Operation::Add, 0, 0.5, 0.5);
+    result = noEffect.apply(project);
+    ASSERT_TRUE(result.isError());
+    EXPECT_EQ(result.error().code(), ErrorCode::NotFound);
+    EXPECT_NE(result.error().message().find("effect"), std::string::npos);
 }
 
 // --- AddEffectCommand ------------------------------------------------------

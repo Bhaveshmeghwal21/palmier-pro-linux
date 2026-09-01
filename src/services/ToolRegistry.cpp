@@ -42,6 +42,7 @@
 #include "core/Project.hpp"
 #include "core/Resolution.hpp"
 #include "core/TimelineEngine.hpp"
+#include "core/ToneCurve.hpp"
 #include "core/Track.hpp"
 #include "core/Transition.hpp"
 #include "core/Uuid.hpp"
@@ -72,6 +73,7 @@ constexpr const char* kAddEffect      = "timeline.add_effect";
 constexpr const char* kRemoveEffect        = "timeline.remove_effect";
 constexpr const char* kReorderEffects      = "timeline.reorder_effects";
 constexpr const char* kSetEffectParameter  = "timeline.set_effect_parameter";
+constexpr const char* kEditCurvePoint      = "timeline.edit_curve_point";
 constexpr const char* kAddTransition  = "timeline.add_transition";
 // Text and titles (usable-editor Phase 4 task 12; Requirement 9).
 constexpr const char* kAddTextClip      = "timeline.add_text_clip";
@@ -192,6 +194,38 @@ std::optional<EffectType> parseEffectType(std::string_view s) {
     if (s == "invert_colors")  return EffectType::InvertColors;
     if (s == "tone_curve")     return EffectType::ToneCurve;
     if (s == "custom")         return EffectType::Custom;
+    return std::nullopt;
+}
+
+/// The tone-curve channels, named for the tool surface.
+///
+/// Lowercase here and capitalised in `core::curveChannelName`, which is deliberate
+/// and not a drift: that one spells the persisted parameter names ("curveRedP0X") and
+/// so cannot change without breaking every saved project, while this one follows the
+/// surface's own convention that every other closed value set already uses
+/// ("crop_transform", "invert_colors").
+const std::vector<std::string>& curveChannelValues() {
+    static const std::vector<std::string> values = {"master", "red", "green", "blue"};
+    return values;
+}
+
+std::optional<CurveChannel> parseCurveChannel(std::string_view s) {
+    if (s == "master") return CurveChannel::Master;
+    if (s == "red")    return CurveChannel::Red;
+    if (s == "green")  return CurveChannel::Green;
+    if (s == "blue")   return CurveChannel::Blue;
+    return std::nullopt;
+}
+
+const std::vector<std::string>& curvePointOperationValues() {
+    static const std::vector<std::string> values = {"add", "move", "remove"};
+    return values;
+}
+
+std::optional<EditCurvePointCommand::Operation> parseCurvePointOperation(std::string_view s) {
+    if (s == "add")    return EditCurvePointCommand::Operation::Add;
+    if (s == "move")   return EditCurvePointCommand::Operation::Move;
+    if (s == "remove") return EditCurvePointCommand::Operation::Remove;
     return std::nullopt;
 }
 
@@ -1117,6 +1151,103 @@ Tool makeSetEffectParameterTool(ProjectSession* session) {
                             std::make_unique<SetEffectParameterCommand>(
                                 clipId.value(), effectId.value(), parameter.value(),
                                 value.value()),
+                            std::move(out));
+    };
+    return t;
+}
+
+Tool makeEditCurvePointTool(ProjectSession* session) {
+    Tool t;
+    t.name = kEditCurvePoint;
+    t.description = "Add, move or remove one control point on a tone-curve effect's "
+                    "master, red, green or blue curve, as a single undoable edit.";
+    // Two handler-private rules are declared here as far as the vocabulary allows and
+    // documented in the schema/handler conformance property as Class 1 (cross-field)
+    // beyond that: which of index/x/y are required depends on `operation`'s VALUE,
+    // which no per-argument constraint can express.
+    t.schema
+        .arg(uuidArg("clipId", true, "UUID of the clip carrying the effect."))
+        .arg(uuidArg("effectId", true, "UUID of the tone-curve effect to change."))
+        .arg(ArgSpec{.name = "channel",
+                     .kind = JsonKind::String,
+                     .required = true,
+                     .description = "Curve to edit: master, red, green, blue.",
+                     .enumValues = curveChannelValues()})
+        .arg(ArgSpec{.name = "operation",
+                     .kind = JsonKind::String,
+                     .required = true,
+                     .description = "add (append a point), move (replace point `index`), "
+                                    "remove (delete point `index`).",
+                     .enumValues = curvePointOperationValues()})
+        .arg(intArg("index", false,
+                   "Zero-based point index. Required for move and remove; ignored by add, "
+                   "which always appends.",
+                   0))
+        .arg(ArgSpec{.name = "x",
+                     .kind = JsonKind::Number,
+                     .required = false,
+                     .description = "Input coordinate in [0,1]. Required for add and move.",
+                     .minNum = 0.0,
+                     .maxNum = 1.0})
+        .arg(ArgSpec{.name = "y",
+                     .kind = JsonKind::Number,
+                     .required = false,
+                     .description = "Output coordinate in [0,1]. Required for add and move.",
+                     .minNum = 0.0,
+                     .maxNum = 1.0});
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kEditCurvePoint));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> clipId = requireUuid(in, "clipId");
+        if (clipId.isError()) return err<Json>(std::move(clipId).error());
+        Result<Uuid> effectId = requireUuid(in, "effectId");
+        if (effectId.isError()) return err<Json>(std::move(effectId).error());
+        Result<std::string> channelStr = requireString(in, "channel");
+        if (channelStr.isError()) return err<Json>(std::move(channelStr).error());
+        const std::optional<CurveChannel> channel = parseCurveChannel(channelStr.value());
+        if (!channel) {
+            return err<Json>(invalidArgument("channel must be one of master, red, green, blue"));
+        }
+        Result<std::string> operationStr = requireString(in, "operation");
+        if (operationStr.isError()) return err<Json>(std::move(operationStr).error());
+        const std::optional<EditCurvePointCommand::Operation> operation =
+            parseCurvePointOperation(operationStr.value());
+        if (!operation) {
+            return err<Json>(invalidArgument("operation must be one of add, move, remove"));
+        }
+
+        // Which coordinates matter depends on the operation, so each is required only
+        // where it means something. Defaulting a missing index to 0 would silently move
+        // or delete the wrong point, which is exactly the kind of plausible wrong answer
+        // that is worse than a rejection.
+        const bool needsIndex = *operation != EditCurvePointCommand::Operation::Add;
+        const bool needsPoint = *operation != EditCurvePointCommand::Operation::Remove;
+        std::int64_t index = 0;
+        if (needsIndex) {
+            Result<std::int64_t> parsed = requireInt(in, "index");
+            if (parsed.isError()) return err<Json>(std::move(parsed).error());
+            index = parsed.value();
+        }
+        double x = 0.0;
+        double y = 0.0;
+        if (needsPoint) {
+            Result<double> parsedX = requireNumber(in, "x");
+            if (parsedX.isError()) return err<Json>(std::move(parsedX).error());
+            Result<double> parsedY = requireNumber(in, "y");
+            if (parsedY.isError()) return err<Json>(std::move(parsedY).error());
+            x = parsedX.value();
+            y = parsedY.value();
+        }
+
+        Json out = Json::object();
+        out.set("clipId", clipId.value().toString());
+        out.set("effectId", effectId.value().toString());
+        out.set("channel", channelStr.value());
+        out.set("operation", operationStr.value());
+        return applyCommand(engine,
+                            std::make_unique<EditCurvePointCommand>(
+                                clipId.value(), effectId.value(), *channel, *operation,
+                                static_cast<std::size_t>(index), x, y),
                             std::move(out));
     };
     return t;
@@ -2580,6 +2711,7 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(makeRemoveEffectTool(session));
     registry.add(makeReorderEffectsTool(session));
     registry.add(makeSetEffectParameterTool(session));
+    registry.add(makeEditCurvePointTool(session));
     registry.add(makeAddTransitionTool(session));
     // Text and titles sits right after transitions (usable-editor task 12.2).
     registry.add(makeAddTextClipTool(session));

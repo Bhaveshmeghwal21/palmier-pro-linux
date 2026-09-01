@@ -33,10 +33,18 @@ const char* curveChannelName(CurveChannel channel) noexcept {
     return "Master";
 }
 
+std::string curveChannelParameterPrefix(CurveChannel channel) {
+    std::string prefix = "curve";
+    prefix += curveChannelName(channel);
+    prefix += 'P';
+    return prefix;
+}
+
 std::string curvePointParameterName(CurveChannel channel, std::size_t index, bool isY) {
-    std::string name = "curve";
-    name += curveChannelName(channel);
-    name += 'P';
+    // Built on the prefix rather than repeating it, so the two cannot disagree: a
+    // prefix that did not actually prefix the names would make "every parameter of
+    // this channel" silently select nothing.
+    std::string name = curveChannelParameterPrefix(channel);
     name += std::to_string(index);
     name += isY ? 'Y' : 'X';
     return name;

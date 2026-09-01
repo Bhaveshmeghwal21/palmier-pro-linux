@@ -474,6 +474,36 @@ leaving it at `0`.
 
 Result: `clipId` (string), `effectId` (string), *(command result)*.
 
+## `timeline.edit_curve_point`
+
+Add, move or remove one control point on a tone-curve effect's master, red, green or blue curve, as
+a single undoable edit (monitoring-and-grading Requirement 5.7).
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | |
+| `effectId` | string *uuid* | **yes** | |
+| `channel` | string | **yes** | `master`, `red`, `green`, `blue` |
+| `operation` | string | **yes** | `add`, `move`, `remove` |
+| `index` | integer | for `move`/`remove` | ≥ 0 |
+| `x` | number | for `add`/`move` | 0.0 – 1.0 |
+| `y` | number | for `add`/`move` | 0.0 – 1.0 |
+
+`add` appends a point; `index` is ignored, because rendering sorts the points by `x` regardless, so
+an insertion position would be a distinction without a difference. A point's index *is* its identity
+for a later `move` or `remove`, which is why those two require one and refuse rather than defaulting
+to point `0`.
+
+`remove` renumbers the points after the removed one so the indices stay contiguous, which matters
+because a curve is read as a contiguous run and stops at the first gap. Undo restores the whole
+channel — including the numbering — in one step.
+
+Refused, with the project unchanged, when the clip or effect is not found, or when `index` names a
+point the chosen curve does not have.
+
+Result: `clipId` (string), `effectId` (string), `channel` (string), `operation` (string),
+*(command result)*.
+
 ## `timeline.add_transition`
 
 Set a clip's incoming transition (crossfade, wipe, slide, fade, ...).
