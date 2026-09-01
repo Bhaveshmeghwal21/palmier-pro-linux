@@ -13,6 +13,7 @@
 #ifndef PALMIER_CORE_EFFECT_HPP
 #define PALMIER_CORE_EFFECT_HPP
 
+#include <array>
 #include <map>
 #include <string>
 
@@ -59,6 +60,77 @@ struct Effect {
         return Effect{Uuid::generateV4(), EffectType::InvertColors, {}};
     }
 };
+
+// ---------------------------------------------------------------------------
+// Lift / gamma / gain primary grade (monitoring-and-grading Requirement 4)
+// ---------------------------------------------------------------------------
+
+/// The ten values an EffectType::ColorGrade effect renders with, each resolved to
+/// either its stored value or its default.
+///
+/// The DEFAULTS are the interesting part, and they live here — in core, beside the
+/// effect itself — rather than in the renderer, because two unrelated places need
+/// exactly the same answer and must not drift: `gpu::applyEffectSoftware` renders
+/// with them, and the Inspector displays them as "the current value of each"
+/// (Requirement 4.7). If the Inspector reproduced them independently it would show a
+/// per-channel lift of 0 for an old project while the renderer used the legacy
+/// scalar, and the panel would be quietly lying about what is on screen.
+struct ColorGradeValues {
+    double gainR = 1.0, gainG = 1.0, gainB = 1.0;
+    double liftR = 0.0, liftG = 0.0, liftB = 0.0;
+    double gammaR = 1.0, gammaG = 1.0, gammaB = 1.0;
+    double saturation = 1.0;
+
+    /// Every value at its default, so the effect is a no-op.
+    [[nodiscard]] bool isIdentity() const noexcept {
+        return gainR == 1.0 && gainG == 1.0 && gainB == 1.0 && liftR == 0.0 && liftG == 0.0 &&
+               liftB == 0.0 && isGammaIdentity() && saturation == 1.0;
+    }
+    /// No gamma to apply. Separate because the gamma STEP must be skipped entirely at
+    /// unity rather than computed as pow(x, 1) — see the kernel's own comment.
+    [[nodiscard]] bool isGammaIdentity() const noexcept {
+        return gammaR == 1.0 && gammaG == 1.0 && gammaB == 1.0;
+    }
+};
+
+/// The parameter names a ColorGrade effect understands, in presentation order.
+/// Exposed so the Inspector can group them and a test can assert the set is the same
+/// one the renderer reads, rather than two lists that happen to match today.
+inline constexpr std::array<const char*, 10> kColorGradeParameterNames{
+    "liftR", "liftG", "liftB", "gammaR", "gammaG", "gammaB",
+    "gainR", "gainG", "gainB", "saturation"};
+
+/// Resolve a ColorGrade effect's parameter map to the values it renders with.
+///
+/// Requirement 4.2 and 4.3 are carried by one line here: each per-channel lift falls
+/// back to the LEGACY SCALAR `lift` rather than to 0. A project saved before
+/// per-channel lift existed carries only that scalar, so it keeps rendering exactly
+/// as it did with no migration step and no user action.
+[[nodiscard]] inline ColorGradeValues colorGradeValues(
+    const std::map<std::string, double>& parameters) {
+    const auto get = [&parameters](const char* name, double fallback) {
+        const auto it = parameters.find(name);
+        return it == parameters.end() ? fallback : it->second;
+    };
+    const double legacyLift = get("lift", 0.0);
+
+    ColorGradeValues v;
+    v.gainR = get("gainR", 1.0);
+    v.gainG = get("gainG", 1.0);
+    v.gainB = get("gainB", 1.0);
+    v.liftR = get("liftR", legacyLift);
+    v.liftG = get("liftG", legacyLift);
+    v.liftB = get("liftB", legacyLift);
+    v.gammaR = get("gammaR", 1.0);
+    v.gammaG = get("gammaG", 1.0);
+    v.gammaB = get("gammaB", 1.0);
+    v.saturation = get("saturation", 1.0);
+    return v;
+}
+
+[[nodiscard]] inline ColorGradeValues colorGradeValues(const Effect& effect) {
+    return colorGradeValues(effect.parameters);
+}
 
 } // namespace palmier
 

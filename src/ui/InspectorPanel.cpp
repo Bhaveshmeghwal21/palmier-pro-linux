@@ -25,9 +25,15 @@
 #include <QString>
 #include <QVBoxLayout>
 
+#include <array>
+#include <map>
 #include <optional>
+#include <set>
+#include <string>
 #include <utility>
 #include <vector>
+
+#include "core/Effect.hpp"
 
 namespace palmier::ui {
 
@@ -288,7 +294,61 @@ void InspectorPanel::rebuild() {
 
         form->addRow(header);
 
+        // Requirement 4.7: a ColorGrade effect always presents all ten grade values
+        // as three grouped per-channel controls plus saturation, each showing the
+        // value it currently RENDERS with.
+        //
+        // The generic loop below can only show parameters that are present in the map,
+        // so an effect carrying just `lift` would offer one spin box and no way to
+        // reach the other nine — and an old project would show a per-channel lift of 0
+        // while the renderer used the legacy scalar. core::colorGradeValues() resolves
+        // the same defaults the renderer resolves, which is why it lives in core
+        // rather than being reproduced here.
+        std::set<std::string> shown;
+        if (effect.type == EffectType::ColorGrade) {
+            std::map<std::string, double> params;
+            for (const EffectParameterView& param : effect.parameters) {
+                params.emplace(param.name, param.value);
+            }
+            const ColorGradeValues values = colorGradeValues(params);
+            // The legacy scalar is displayed through the three per-channel lift rows,
+            // so listing it again as its own control would offer two widgets that
+            // disagree about one number.
+            shown.insert("lift");
+            const std::array<std::pair<const char*, double>, 10> rows{{
+                {"Lift R", values.liftR},
+                {"Lift G", values.liftG},
+                {"Lift B", values.liftB},
+                {"Gamma R", values.gammaR},
+                {"Gamma G", values.gammaG},
+                {"Gamma B", values.gammaB},
+                {"Gain R", values.gainR},
+                {"Gain G", values.gainG},
+                {"Gain B", values.gainB},
+                {"Saturation", values.saturation},
+            }};
+            for (std::size_t i = 0; i < rows.size(); ++i) {
+                const std::string parameterName = kColorGradeParameterNames[i];
+                shown.insert(parameterName);
+
+                auto* spin = new QDoubleSpinBox(frame);
+                spin->setRange(-1000.0, 1000.0);
+                spin->setDecimals(4);
+                spin->setValue(rows[i].second);
+                const QString name = QString::fromStdString(parameterName);
+                QObject::connect(spin, &QDoubleSpinBox::editingFinished, this,
+                                 [this, effectId, name, spin] {
+                                     (void)model_.setEffectParameter(
+                                         effectId, name.toStdString(), spin->value());
+                                 });
+                form->addRow(QString::fromLatin1(rows[i].first), spin);
+            }
+        }
+
         for (const EffectParameterView& param : effect.parameters) {
+            if (shown.count(param.name) != 0) {
+                continue;  // already presented as a named grade row above
+            }
             auto* spin = new QDoubleSpinBox(frame);
             spin->setRange(-1000.0, 1000.0);
             spin->setDecimals(4);

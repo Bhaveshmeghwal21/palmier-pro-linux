@@ -182,6 +182,83 @@ TEST(InspectorViewModel, SetEffectParameterOnMissingEffectFailsAndLeavesProjectU
     EXPECT_TRUE(engine.clip(clip)->effects.empty());
 }
 
+// --- Lift / gamma / gain primary grade (monitoring-and-grading Requirement 4) ---
+
+// Requirement 4.6: every new grade parameter is accepted through the existing
+// set_effect_parameter path, and each change is ONE undoable edit.
+//
+// Driven over kColorGradeParameterNames rather than a hand-written list, so a
+// parameter added to the renderer without a way to set it cannot pass this by being
+// forgotten here. Each is set, verified, undone and verified again, so "one undoable
+// edit" means the count and the exact inverse, not merely that undo did something.
+TEST(InspectorViewModel, EveryColorGradeParameterIsOneUndoableEdit) {
+    const ClipId clip = Uuid::generateV4();
+    Project project = makeProjectWithClip(clip);
+    const Effect fx{Uuid::generateV4(), EffectType::ColorGrade, {}};
+    project.tracks[0].clips[0].effects.push_back(fx);
+    TimelineEngine engine(std::move(project));
+    InspectorViewModel model(engine);
+    model.selectClip(clip);
+
+    ASSERT_EQ(kColorGradeParameterNames.size(), 10u);
+    for (const char* name : kColorGradeParameterNames) {
+        const std::size_t depthBefore = engine.undoDepth();
+        const double value = 0.625;  // exactly representable, so == is meaningful
+
+        const CommandResult r = model.setEffectParameter(fx.id, name, value);
+        ASSERT_TRUE(r.changed()) << name;
+        EXPECT_EQ(engine.undoDepth(), depthBefore + 1) << name << " must be ONE edit";
+        ASSERT_EQ(engine.clip(clip)->effects[0].parameters.count(name), 1u) << name;
+        EXPECT_EQ(engine.clip(clip)->effects[0].parameters.at(name), value) << name;
+
+        // The exact inverse of setting a parameter that was ABSENT is removing it
+        // again, not resetting it to zero — a zero gamma is not a default, it is a
+        // degenerate value the renderer has to clamp.
+        ASSERT_TRUE(engine.undo().changed()) << name;
+        EXPECT_EQ(engine.undoDepth(), depthBefore) << name;
+        EXPECT_EQ(engine.clip(clip)->effects[0].parameters.count(name), 0u)
+            << name << " was absent before the edit, so undo must remove it";
+    }
+}
+
+// Requirement 4.7 and 4.2 together: the values the Inspector shows are the values the
+// renderer uses, including the legacy fallback.
+//
+// This is the assertion that justifies core::colorGradeValues existing at all. An
+// effect saved before per-channel lift carries only the scalar; if the panel resolved
+// defaults independently it would display a per-channel lift of 0 while the renderer
+// used -0.25, and the panel would be quietly lying about what is on screen.
+TEST(InspectorViewModel, TheResolvedGradeValuesAreWhatAnOldProjectActuallyRendersWith) {
+    const std::map<std::string, double> legacy = {{"lift", -0.25}, {"saturation", 1.4}};
+    const ColorGradeValues v = colorGradeValues(legacy);
+
+    EXPECT_EQ(v.liftR, -0.25);
+    EXPECT_EQ(v.liftG, -0.25);
+    EXPECT_EQ(v.liftB, -0.25);
+    EXPECT_EQ(v.saturation, 1.4);
+    // Unnamed values resolve to defaults that make the effect a no-op in those axes.
+    EXPECT_EQ(v.gainR, 1.0);
+    EXPECT_EQ(v.gammaR, 1.0);
+    EXPECT_EQ(v.gammaG, 1.0);
+    EXPECT_EQ(v.gammaB, 1.0);
+    EXPECT_TRUE(v.isGammaIdentity()) << "so the gamma step is skipped, not computed";
+    EXPECT_FALSE(v.isIdentity()) << "the lift and saturation are not defaults";
+
+    // A per-channel name always wins over the legacy scalar, and only for its own
+    // channel — this is what lets an old grade be edited into a new one one channel at
+    // a time without the other two jumping to 0.
+    std::map<std::string, double> mixed = legacy;
+    mixed["liftG"] = 0.5;
+    const ColorGradeValues m = colorGradeValues(mixed);
+    EXPECT_EQ(m.liftR, -0.25);
+    EXPECT_EQ(m.liftG, 0.5);
+    EXPECT_EQ(m.liftB, -0.25);
+
+    // An effect with nothing set at all is a complete no-op, which is what makes
+    // adding a ColorGrade to a clip a visually neutral act.
+    EXPECT_TRUE(colorGradeValues(std::map<std::string, double>{}).isIdentity());
+}
+
 // --- Remove effect (task 9.2; Requirement 6.1, 6.2, 6.5) --------------------
 
 TEST(InspectorViewModel, RemoveEffectRemovesItAndUndoesExactly) {

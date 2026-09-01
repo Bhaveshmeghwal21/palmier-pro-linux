@@ -170,6 +170,89 @@ TEST(ProjectStore, RoundTripPreservesCompleteState) {
     expectSameProject(original, loaded.value());
 }
 
+// Requirement 4.8: every lift/gamma/gain parameter round-trips through save and open
+// preserving its EXACT value, and Requirement 4.3: a project saved before those
+// parameters existed opens with no error and no migration.
+//
+// Driven over kColorGradeParameterNames so a parameter the renderer reads cannot be
+// left out of this by being forgotten here. The values carry many significant digits
+// and are compared with ==, because "preserving its exact value" is the requirement —
+// a serializer that rounded to four decimals would pass any tolerance check.
+TEST(ProjectStore, EveryColorGradeParameterRoundTripsExactly) {
+    Project project;
+    project.id = Uuid::generateV4();
+    project.name = "grade";
+    project.timelineFps = FrameRate::fps30();
+
+    Track video;
+    video.id = Uuid::generateV4();
+    video.kind = TrackKind::Video;
+    Clip clip;
+    clip.id = Uuid::generateV4();
+    clip.assetRef = MediaAssetRef(Uuid::generateV4(), "mem://asset");
+    clip.sourceOut = Duration::fromMilliseconds(1000);
+
+    Effect grade{Uuid::generateV4(), EffectType::ColorGrade, {}};
+    double next = -0.9876543210987;
+    for (const char* name : kColorGradeParameterNames) {
+        grade.parameters.emplace(name, next);
+        next += 0.1234567890123;
+    }
+    const std::map<std::string, double> expected = grade.parameters;
+    clip.effects.push_back(grade);
+    video.clips.push_back(clip);
+    project.tracks.push_back(video);
+
+    Result<Project> loaded = deserializeProject(serializeProject(project));
+    ASSERT_TRUE(loaded.isOk()) << loaded.error().toString();
+    ASSERT_EQ(loaded.value().tracks.size(), 1u);
+    ASSERT_EQ(loaded.value().tracks[0].clips.size(), 1u);
+    ASSERT_EQ(loaded.value().tracks[0].clips[0].effects.size(), 1u);
+    EXPECT_EQ(loaded.value().tracks[0].clips[0].effects[0].parameters, expected);
+}
+
+// Requirement 4.3's other half, and the part a round-trip test can actually prove:
+// loading a pre-change grade must NOT inject the new parameters. An open that
+// helpfully materialised liftR/liftG/liftB would be exactly the migration step the
+// requirement forbids, and it would turn a later edit of the legacy scalar into a
+// silent no-op because the per-channel names now shadow it.
+TEST(ProjectStore, ALegacyColorGradeIsLoadedWithoutMigratingItsParameters) {
+    Project project;
+    project.id = Uuid::generateV4();
+    project.name = "legacy grade";
+    project.timelineFps = FrameRate::fps30();
+
+    Track video;
+    video.id = Uuid::generateV4();
+    video.kind = TrackKind::Video;
+    Clip clip;
+    clip.id = Uuid::generateV4();
+    clip.assetRef = MediaAssetRef(Uuid::generateV4(), "mem://asset");
+    clip.sourceOut = Duration::fromMilliseconds(1000);
+    // Exactly what a project saved before this change contains.
+    clip.effects.push_back(Effect{Uuid::generateV4(),
+                                  EffectType::ColorGrade,
+                                  {{"gainR", 1.2}, {"lift", -0.25}, {"saturation", 0.8}}});
+    video.clips.push_back(clip);
+    project.tracks.push_back(video);
+
+    Result<Project> loaded = deserializeProject(serializeProject(project));
+    ASSERT_TRUE(loaded.isOk()) << loaded.error().toString();
+    const std::map<std::string, double>& params =
+        loaded.value().tracks[0].clips[0].effects[0].parameters;
+    EXPECT_EQ(params.size(), 3u) << "loading must not add parameters";
+    EXPECT_EQ(params.count("liftR"), 0u);
+    EXPECT_EQ(params.count("gammaR"), 0u);
+    EXPECT_EQ(params.at("lift"), -0.25);
+
+    // And the renderer still resolves the per-channel lifts from that scalar, which is
+    // why no migration is needed for it to render identically.
+    const ColorGradeValues v = colorGradeValues(params);
+    EXPECT_EQ(v.liftR, -0.25);
+    EXPECT_EQ(v.liftG, -0.25);
+    EXPECT_EQ(v.liftB, -0.25);
+}
+
 TEST(ProjectStore, SerializationIsIdempotent) {
     const Project original = makeSampleProject();
     const std::string first = serializeProject(original);

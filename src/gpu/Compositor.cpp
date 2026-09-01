@@ -232,27 +232,6 @@ void applyInvertColors(std::uint8_t* rgba, std::size_t pixels) noexcept {
     }
 }
 
-/// The nine grade values plus saturation (monitoring-and-grading Requirement 4).
-///
-/// A struct rather than eleven positional doubles: at that arity a caller can
-/// silently transpose gamma and gain and still compile, and the two lanes that must
-/// agree exactly would then disagree for a reason no test name would explain.
-struct ColorGradeParams {
-    double gainR = 1.0, gainG = 1.0, gainB = 1.0;
-    double liftR = 0.0, liftG = 0.0, liftB = 0.0;
-    double gammaR = 1.0, gammaG = 1.0, gammaB = 1.0;
-    double saturation = 1.0;
-
-    /// True when every value is at its default, so the whole effect is a no-op.
-    [[nodiscard]] bool isIdentity() const noexcept {
-        return gainR == 1.0 && gainG == 1.0 && gainB == 1.0 && liftR == 0.0 && liftG == 0.0 &&
-               liftB == 0.0 && isGammaIdentity() && saturation == 1.0;
-    }
-    [[nodiscard]] bool isGammaIdentity() const noexcept {
-        return gammaR == 1.0 && gammaG == 1.0 && gammaB == 1.0;
-    }
-};
-
 /// Color grade: per-channel gain, per-channel additive lift (lift*255 in byte
 /// space), per-channel gamma, then a saturation mix toward Rec.601 luma.
 ///
@@ -264,8 +243,12 @@ struct ColorGradeParams {
 /// bytes, because an exponent means something entirely different applied to 0-255:
 /// pow(200, 1/2.2) is 10.6, not a brightened 200. So the gamma step alone
 /// normalises, exponentiates and scales back.
+///
+/// Takes the already-resolved core::ColorGradeValues rather than the effect, so the
+/// defaults — including Requirement 4.2's legacy-lift fallback — are stated in
+/// exactly one place, which the Inspector reads too.
 void applyColorGrade(std::uint8_t* rgba, std::size_t pixels,
-                     const ColorGradeParams& p) noexcept {
+                     const ColorGradeValues& p) noexcept {
     if (p.isIdentity()) return;
 
     const double liftShiftR = p.liftR * 255.0;
@@ -352,28 +335,14 @@ void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba,
         case EffectType::InvertColors:
             applyInvertColors(rgba, pixels);
             break;
-        case EffectType::ColorGrade: {
-            // Requirement 4.2 and 4.3 live in these six defaults. A project saved
-            // before this change carries a single scalar "lift" and no gamma at all,
-            // so each per-channel lift falls back to that scalar and each gamma to
-            // 1.0 — which the guard inside applyColorGrade turns into no gamma step.
-            // The result is that an old project renders through the identical
-            // arithmetic it always did, with no migration and no user action.
-            const double legacyLift = paramOr(effect, "lift", 0.0);
-            ColorGradeParams p;
-            p.gainR = paramOr(effect, "gainR", 1.0);
-            p.gainG = paramOr(effect, "gainG", 1.0);
-            p.gainB = paramOr(effect, "gainB", 1.0);
-            p.liftR = paramOr(effect, "liftR", legacyLift);
-            p.liftG = paramOr(effect, "liftG", legacyLift);
-            p.liftB = paramOr(effect, "liftB", legacyLift);
-            p.gammaR = paramOr(effect, "gammaR", 1.0);
-            p.gammaG = paramOr(effect, "gammaG", 1.0);
-            p.gammaB = paramOr(effect, "gammaB", 1.0);
-            p.saturation = paramOr(effect, "saturation", 1.0);
-            applyColorGrade(rgba, pixels, p);
+        case EffectType::ColorGrade:
+            // Requirement 4.2 and 4.3 are carried by core::colorGradeValues, which
+            // resolves each per-channel lift to the legacy scalar `lift` when the
+            // per-channel name is absent — as it is in every project saved before
+            // this change. Resolved there rather than here so the Inspector, which
+            // must display the same numbers, cannot drift from what is rendered.
+            applyColorGrade(rgba, pixels, colorGradeValues(effect));
             break;
-        }
         case EffectType::Custom:
             // A Custom effect's behavior comes entirely from a caller-registered
             // kernel/hook; there is no built-in reference transform for it.
