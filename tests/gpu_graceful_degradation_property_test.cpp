@@ -282,6 +282,11 @@ struct GenFrame {
                          {"saturation", genScaled(0, 2000)}});
         case EffectType::InvertColors:
             return make({}); // parameterless (not drawn by the generator above)
+        case EffectType::ToneCurve:
+            // Also not drawn by the generator above: this property is about graceful
+            // degradation, not about curve arithmetic, and leaving tone curves out
+            // keeps its effect mix as it was rather than diluting it.
+            return make({});
         case EffectType::Custom:
             return make({{"anything", genScaled(-1000, 1000)}});
     }

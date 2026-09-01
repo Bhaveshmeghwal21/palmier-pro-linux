@@ -419,7 +419,7 @@ Append an effect to a clip's effect chain.
 | Argument | Type | Required | Accepted values |
 |---|---|---|---|
 | `clipId` | string *uuid* | **yes** | |
-| `type` | string | **yes** | `brightness`, `contrast`, `blur`, `crop_transform`, `color_grade`, `invert_colors`, `custom` |
+| `type` | string | **yes** | `brightness`, `contrast`, `blur`, `crop_transform`, `color_grade`, `invert_colors`, `tone_curve`, `custom` |
 | `parameters` | object | no | named numeric effect parameters; non-numeric members are ignored |
 
 An unknown `type` is rejected rather than silently becoming `custom`.

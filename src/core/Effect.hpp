@@ -33,6 +33,12 @@ enum class EffectType {
     /// 8-bit red, green and blue value becomes 255 minus the input value, while
     /// every alpha value is left unchanged. Takes no parameters.
     InvertColors,
+    /// Tone curve (monitoring-and-grading Requirement 5): maps input intensity to
+    /// output intensity through user-placed control points, with a master curve plus
+    /// independent red, green and blue curves. The control points live in
+    /// `parameters` under indexed names — see core/ToneCurve.hpp for the encoding,
+    /// the interpolation and why the curve is baked to a 256-entry table.
+    ToneCurve,
     Custom,
 };
 

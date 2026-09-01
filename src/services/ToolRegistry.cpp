@@ -165,6 +165,7 @@ std::string_view effectTypeName(EffectType type) {
         case EffectType::CropTransform: return "crop_transform";
         case EffectType::ColorGrade:    return "color_grade";
         case EffectType::InvertColors:  return "invert_colors";
+        case EffectType::ToneCurve:     return "tone_curve";
         case EffectType::Custom:        return "custom";
     }
     return "custom";
@@ -178,7 +179,7 @@ std::string_view effectTypeName(EffectType type) {
 const std::vector<std::string>& effectTypeValues() {
     static const std::vector<std::string> values = {
         "brightness", "contrast", "blur", "crop_transform", "color_grade",
-        "invert_colors", "custom"};
+        "invert_colors", "tone_curve", "custom"};
     return values;
 }
 
@@ -189,6 +190,7 @@ std::optional<EffectType> parseEffectType(std::string_view s) {
     if (s == "crop_transform") return EffectType::CropTransform;
     if (s == "color_grade")    return EffectType::ColorGrade;
     if (s == "invert_colors")  return EffectType::InvertColors;
+    if (s == "tone_curve")     return EffectType::ToneCurve;
     if (s == "custom")         return EffectType::Custom;
     return std::nullopt;
 }
@@ -963,7 +965,8 @@ Tool makeAddEffectTool(ProjectSession* session) {
                      .kind = JsonKind::String,
                      .required = true,
                      .description = "Effect type: brightness, contrast, blur, "
-                                    "crop_transform, color_grade, invert_colors, custom.",
+                                    "crop_transform, color_grade, invert_colors, "
+                                    "tone_curve, custom.",
                      .enumValues = effectTypeValues()})
         .arg(ArgSpec{.name = "parameters",
                      .kind = JsonKind::Object,

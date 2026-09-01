@@ -47,6 +47,7 @@ QString effectTypeName(EffectType type) {
         case EffectType::CropTransform: return QStringLiteral("Crop / Transform");
         case EffectType::ColorGrade:    return QStringLiteral("Color Grade");
         case EffectType::InvertColors:  return QStringLiteral("Invert Colors");
+        case EffectType::ToneCurve:     return QStringLiteral("Tone Curve");
         case EffectType::Custom:        return QStringLiteral("Custom");
     }
     return QStringLiteral("Effect");

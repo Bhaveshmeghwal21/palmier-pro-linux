@@ -31,6 +31,7 @@ std::string_view effectTypeName(EffectType type) noexcept {
         case EffectType::CropTransform: return "crop_transform";
         case EffectType::ColorGrade:    return "color_grade";
         case EffectType::InvertColors:  return "invert_colors";
+        case EffectType::ToneCurve:     return "tone_curve";
         case EffectType::Custom:        return "custom";
     }
     return "custom";

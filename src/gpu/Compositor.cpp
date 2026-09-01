@@ -19,6 +19,8 @@
 #include <cstring>
 #include <utility>
 
+#include "core/ToneCurve.hpp"
+
 #include "core/Error.hpp"
 #include "gpu/GpuContext.hpp"
 
@@ -289,6 +291,29 @@ void applyColorGrade(std::uint8_t* rgba, std::size_t pixels,
     }
 }
 
+/// Tone curve (monitoring-and-grading Requirement 5): three 256-entry lookups.
+///
+/// Mirrors gpu::kToneCurveSrc, but "mirrors" is stronger here than for the other
+/// effects: both paths index the SAME table, baked once by core::bakeToneCurve, so
+/// they agree exactly rather than within property P5's 1-LSB tolerance. There is no
+/// arithmetic left in either path to diverge.
+///
+/// Clamping (Requirement 5.6) is a property of the table rather than of this loop:
+/// every entry was produced by a clamped evaluation, so no index can yield an
+/// out-of-range value and wrapping is impossible by construction.
+void applyToneCurve(std::uint8_t* rgba, std::size_t pixels,
+                    const ToneCurveTables& tables) noexcept {
+    if (tables.isIdentity()) return;
+
+    for (std::size_t i = 0; i < pixels; ++i) {
+        const std::size_t o = i * 4u;
+        rgba[o + 0] = tables.red[rgba[o + 0]];
+        rgba[o + 1] = tables.green[rgba[o + 1]];
+        rgba[o + 2] = tables.blue[rgba[o + 2]];
+        // alpha (o+3) preserved.
+    }
+}
+
 /// Requirement 10.3's fixed default burn-in style: white text, bottom-centred,
 /// a size proportional to neither font metrics nor canvas — TextRasterizer's
 /// own point-size field is an absolute value, so a single documented default
@@ -342,6 +367,12 @@ void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba,
             // this change. Resolved there rather than here so the Inspector, which
             // must display the same numbers, cannot drift from what is rendered.
             applyColorGrade(rgba, pixels, colorGradeValues(effect));
+            break;
+        case EffectType::ToneCurve:
+            // The interpolation between control points happens inside
+            // core::toneCurveTables, once, in double precision — this path and the
+            // GPU kernel then both do nothing but index the result.
+            applyToneCurve(rgba, pixels, toneCurveTables(effect.parameters));
             break;
         case EffectType::Custom:
             // A Custom effect's behavior comes entirely from a caller-registered

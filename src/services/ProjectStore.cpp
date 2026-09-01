@@ -473,6 +473,7 @@ std::string_view effectTypeKey(EffectType t) {
         case EffectType::ColorGrade:    return "colorGrade";
         case EffectType::InvertColors:  return "invert_colors";
         case EffectType::Custom:        return "custom";
+        case EffectType::ToneCurve:     return "tone_curve";
     }
     return "custom";
 }
@@ -485,6 +486,7 @@ std::optional<EffectType> effectTypeFromKey(std::string_view k) {
     if (k == "colorGrade") return EffectType::ColorGrade;
     if (k == "invert_colors") return EffectType::InvertColors;
     if (k == "custom") return EffectType::Custom;
+    if (k == "tone_curve") return EffectType::ToneCurve;
     return std::nullopt;
 }
 

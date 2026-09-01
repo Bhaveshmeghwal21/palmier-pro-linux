@@ -502,7 +502,8 @@ TEST(ToolRegistrySchema, ClosedValueSetsArePublished) {
     const Json effect = registry.find("timeline.add_effect")->inputSchema();
     EXPECT_EQ(enumValues(*effect.find("properties")->find("type")),
               (std::vector<std::string>{"brightness", "contrast", "blur", "crop_transform",
-                                        "color_grade", "invert_colors", "custom"}));
+                                        "color_grade", "invert_colors", "tone_curve",
+                                        "custom"}));
 
     const Json generate = registry.find("generation.generate")->inputSchema();
     EXPECT_EQ(enumValues(*generate.find("properties")->find("mediaType")),

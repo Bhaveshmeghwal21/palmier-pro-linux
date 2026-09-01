@@ -63,15 +63,16 @@ enum class EffectKernel {
     CropTransform,
     ColorGrade,
     InvertColors,
+    ToneCurve,
     Transition,
 };
 
 /// All kernels, in a stable order (handy for iterating / registering).
-[[nodiscard]] constexpr std::array<EffectKernel, 7> allEffectKernels() noexcept {
+[[nodiscard]] constexpr std::array<EffectKernel, 8> allEffectKernels() noexcept {
     return {EffectKernel::Brightness,   EffectKernel::Contrast,
             EffectKernel::Blur,         EffectKernel::CropTransform,
             EffectKernel::ColorGrade,   EffectKernel::InvertColors,
-            EffectKernel::Transition};
+            EffectKernel::ToneCurve,    EffectKernel::Transition};
 }
 
 /// Stable, human-readable kernel name (for logs / diagnostics / the shaderc

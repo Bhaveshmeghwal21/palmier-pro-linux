@@ -167,6 +167,47 @@ void main() {
 }
 )glsl";
 
+// Tone curve (monitoring-and-grading Requirement 5).
+//
+// This kernel does not evaluate a curve. It indexes a 256-entry transfer table, one
+// per RGB channel, computed on the host by core::bakeToneCurve and uploaded as a
+// 256x3 R8 image at binding 2.
+//
+// That is the whole design, and it is why criteria 5.3 and 5.4 need no tolerance
+// argument: the pipeline is RGBA8, so 256 entries is not an approximation of the
+// transfer function but the transfer function itself, and the interpolation between
+// control points therefore happens exactly once, on the host, in double precision.
+// This kernel and gpu::applyToneCurveSoftware read the SAME bytes and agree exactly
+// rather than within 1 LSB.
+//
+// It also avoids a limit that would otherwise be imposed by the transport rather than
+// by the design: push constants are only guaranteed to be 128 bytes, so four channels
+// of variable-length control points could not be passed that way at all.
+//
+// The master curve is already composed into each channel's table (per-channel first,
+// then master), which is why there are three tables and no master here.
+constexpr std::string_view kToneCurveSrc = R"glsl(#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba8) uniform readonly  image2D inImage;
+layout(binding = 1, rgba8) uniform writeonly image2D outImage;
+layout(binding = 2, r8)    uniform readonly  image2D curveTables; // 256 x 3 (R,G,B rows)
+layout(push_constant) uniform Params { float reserved; } pc;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(inImage);
+    if (p.x >= size.x || p.y >= size.y) return;
+    vec4 c = imageLoad(inImage, p);
+    // round() rather than a truncating cast: the input byte is recovered exactly, so
+    // the lookup index is the byte the host baked the table against. Truncating would
+    // read the neighbouring entry for most values and shift the whole image by one.
+    ivec3 idx = ivec3(round(c.rgb * 255.0));
+    float r = imageLoad(curveTables, ivec2(idx.r, 0)).r;
+    float g = imageLoad(curveTables, ivec2(idx.g, 1)).r;
+    float b = imageLoad(curveTables, ivec2(idx.b, 2)).r;
+    imageStore(outImage, p, vec4(r, g, b, c.a)); // alpha preserved
+}
+)glsl";
+
 // Invert colors (upstream PR 408; Requirements 14.4): rgb = 1 - rgb, alpha kept.
 // In byte space that is exactly 255 - value, which is what the software
 // reference computes: 1.0 - n stored back through the rgba8 round-to-nearest
@@ -217,6 +258,7 @@ std::string_view effectKernelName(EffectKernel kernel) noexcept {
         case EffectKernel::CropTransform: return "crop_transform";
         case EffectKernel::ColorGrade:    return "color_grade";
         case EffectKernel::InvertColors:  return "invert_colors";
+        case EffectKernel::ToneCurve:     return "tone_curve";
         case EffectKernel::Transition:    return "transition";
     }
     return "unknown";
@@ -230,6 +272,7 @@ std::optional<EffectType> effectTypeForKernel(EffectKernel kernel) noexcept {
         case EffectKernel::CropTransform: return EffectType::CropTransform;
         case EffectKernel::ColorGrade:    return EffectType::ColorGrade;
         case EffectKernel::InvertColors:  return EffectType::InvertColors;
+        case EffectKernel::ToneCurve:     return EffectType::ToneCurve;
         case EffectKernel::Transition:    return std::nullopt; // no per-clip EffectType
     }
     return std::nullopt;
@@ -243,6 +286,7 @@ std::optional<EffectKernel> kernelForEffectType(EffectType type) noexcept {
         case EffectType::CropTransform: return EffectKernel::CropTransform;
         case EffectType::ColorGrade:    return EffectKernel::ColorGrade;
         case EffectType::InvertColors:  return EffectKernel::InvertColors;
+        case EffectType::ToneCurve:     return EffectKernel::ToneCurve;
         case EffectType::Custom:        return std::nullopt; // caller-supplied kernel
     }
     return std::nullopt;
@@ -256,6 +300,7 @@ std::string_view effectKernelSource(EffectKernel kernel) noexcept {
         case EffectKernel::CropTransform: return kCropTransformSrc;
         case EffectKernel::ColorGrade:    return kColorGradeSrc;
         case EffectKernel::InvertColors:  return kInvertColorsSrc;
+        case EffectKernel::ToneCurve:     return kToneCurveSrc;
         case EffectKernel::Transition:    return kTransitionSrc;
     }
     return {};

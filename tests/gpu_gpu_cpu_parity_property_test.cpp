@@ -58,6 +58,7 @@
 #include <rapidcheck/gtest.h>
 
 #include "core/Effect.hpp"
+#include "core/ToneCurve.hpp"
 #include "core/Uuid.hpp"
 #include "gpu/Compositor.hpp"
 #include "gpu/EffectKernels.hpp"
@@ -209,6 +210,24 @@ void gpuColorGrade(const std::vector<std::uint8_t>& in, std::vector<std::uint8_t
     }
 }
 
+/// Mirror of kToneCurveSrc: three 256-entry table lookups, alpha preserved.
+///
+/// Unlike every other model in this file, this one is not an independent
+/// reimplementation of the kernel's arithmetic — because the kernel has none. Both
+/// paths index the same table baked by core::bakeToneCurve, so they agree EXACTLY
+/// rather than within the 1-LSB tolerance. Keeping it here anyway is deliberate: the
+/// property below then covers tone curves alongside every other effect, and would
+/// catch a future change that moved evaluation back into either path.
+void gpuToneCurve(const std::vector<std::uint8_t>& in, std::vector<std::uint8_t>& out,
+                  const ToneCurveTables& tables) {
+    for (std::size_t i = 0; i < in.size(); i += 4) {
+        out[i + 0] = tables.red[in[i + 0]];
+        out[i + 1] = tables.green[in[i + 1]];
+        out[i + 2] = tables.blue[in[i + 2]];
+        out[i + 3] = in[i + 3];
+    }
+}
+
 /// Mirror of kInvertColorsSrc: rgb = clamp(1 - c.rgb, 0, 1); alpha preserved.
 void gpuInvertColors(const std::vector<std::uint8_t>& in, std::vector<std::uint8_t>& out) {
     for (std::size_t i = 0; i < in.size(); i += 4) {
@@ -266,6 +285,9 @@ void gpuTransition(const std::vector<std::uint8_t>& a, const std::vector<std::ui
         case EffectType::InvertColors:
             gpuInvertColors(in, out);
             break;
+        case EffectType::ToneCurve:
+            gpuToneCurve(in, out, toneCurveTables(e.parameters));
+            break;
         case EffectType::Custom:
             out = in; // passthrough, matching the software reference
             break;
@@ -320,7 +342,7 @@ struct GenFrame {
     const EffectType type = *rc::gen::element(EffectType::Brightness, EffectType::Contrast,
                                               EffectType::Blur, EffectType::CropTransform,
                                               EffectType::ColorGrade, EffectType::InvertColors,
-                                              EffectType::Custom);
+                                              EffectType::ToneCurve, EffectType::Custom);
     switch (type) {
         case EffectType::Brightness:
             return makeEffect(type, {{"amount", genScaled(-1000, 1000)}}); // [-1,1]
@@ -351,6 +373,24 @@ struct GenFrame {
                                      {"saturation", genScaled(0, 2000)}});
         case EffectType::InvertColors:
             return makeEffect(type, {}); // parameterless
+        case EffectType::ToneCurve: {
+            // Two to five points per channel, at generated positions, so the property
+            // covers the identity cases (fewer than two points), ordinary curves, and
+            // points sharing an x — rather than one hand-picked shape.
+            std::map<std::string, double> params;
+            for (const CurveChannel channel : kCurveChannels) {
+                const int count = *rc::gen::inRange(0, 6);
+                for (int i = 0; i < count; ++i) {
+                    params.emplace(curvePointParameterName(channel, static_cast<std::size_t>(i),
+                                                           /*isY=*/false),
+                                   genScaled(0, 1000));
+                    params.emplace(curvePointParameterName(channel, static_cast<std::size_t>(i),
+                                                           /*isY=*/true),
+                                   genScaled(0, 1000));
+                }
+            }
+            return makeEffect(type, std::move(params));
+        }
         case EffectType::Custom:
             return makeEffect(type, {{"anything", genScaled(-1000, 1000)}});
     }

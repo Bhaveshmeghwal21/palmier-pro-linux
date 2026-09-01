@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "core/Effect.hpp"
+#include "core/ToneCurve.hpp"
 #include "core/Uuid.hpp"
 #include "gpu/Compositor.hpp"
 #include "gpu/EffectKernels.hpp"
@@ -405,6 +406,99 @@ TEST(ColorGradePrimaryGrade, ADegenerateGammaIsClampedRatherThanDividingByZero) 
     }
 }
 
+// --- Tone curve (monitoring-and-grading Requirement 5) ----------------------
+//
+// The interpolation and baking are covered exhaustively in core_tone_curve_test.cpp.
+// These are about the EFFECT: that the type is wired through the software reference,
+// that a curve with no points is a no-op, and that alpha is untouched.
+
+namespace {
+
+/// Parameters holding one channel's points, built through the production name builder.
+std::map<std::string, double> curveParams(CurveChannel channel,
+                                         const std::vector<CurvePoint>& points) {
+    std::map<std::string, double> params;
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        params.emplace(curvePointParameterName(channel, i, /*isY=*/false), points[i].x);
+        params.emplace(curvePointParameterName(channel, i, /*isY=*/true), points[i].y);
+    }
+    return params;
+}
+
+}  // namespace
+
+TEST(SoftwareToneCurve, AnEffectWithNoPointsLeavesEveryPixelUntouched) {
+    const auto before = solid(4, 4, 10, 128, 250, 77);
+    auto px = before;
+    applyEffectSoftware(makeEffect(EffectType::ToneCurve, {}), px.data(), 4, 4);
+    EXPECT_EQ(px, before) << "Requirement 5.5: an empty curve is the identity";
+}
+
+TEST(SoftwareToneCurve, AMasterCurveMapsEveryChannelThroughTheSameTransferFunction) {
+    // A curve from (0,0) to (1,0.5) halves everything.
+    auto px = solid(1, 1, 0, 128, 254, 200);
+    applyEffectSoftware(
+        makeEffect(EffectType::ToneCurve, curveParams(CurveChannel::Master, {{0.0, 0.0},
+                                                                            {1.0, 0.5}})),
+        px.data(), 1, 1);
+    EXPECT_EQ(px[0], 0u);
+    EXPECT_EQ(px[1], 64u);   // 128 -> 0.50196 -> 0.25098 -> 64.0
+    EXPECT_EQ(px[2], 127u);  // 254 -> 0.99608 -> 0.49804 -> 127.0
+    EXPECT_EQ(px[3], 200u) << "alpha is not a colour channel and must be untouched";
+}
+
+TEST(SoftwareToneCurve, APerChannelCurveTouchesOnlyItsOwnChannel) {
+    auto px = solid(1, 1, 200, 200, 200, 255);
+    applyEffectSoftware(
+        makeEffect(EffectType::ToneCurve, curveParams(CurveChannel::Green, {{0.0, 1.0},
+                                                                           {1.0, 0.0}})),
+        px.data(), 1, 1);
+    EXPECT_EQ(px[0], 200u);
+    EXPECT_EQ(px[2], 200u);
+    EXPECT_LT(px[1], 100u) << "an inverting green curve must actually invert green";
+}
+
+// The software reference and the table it is built from must agree for EVERY input
+// byte, which is the claim that makes the GPU kernel a pure lookup and therefore
+// exactly equal rather than merely within a tolerance (Requirement 5.3).
+TEST(SoftwareToneCurve, TheRenderedResultIsExactlyTheBakedTableForEveryInputByte) {
+    const std::map<std::string, double> params =
+        curveParams(CurveChannel::Master, {{0.1, 0.05}, {0.45, 0.7}, {0.9, 0.95}});
+    const ToneCurveTables tables = toneCurveTables(params);
+
+    // One pixel per possible byte value, identical across R, G and B.
+    std::vector<std::uint8_t> px(256u * 4u);
+    for (std::size_t v = 0; v < 256; ++v) {
+        px[v * 4 + 0] = px[v * 4 + 1] = px[v * 4 + 2] = static_cast<std::uint8_t>(v);
+        px[v * 4 + 3] = 255;
+    }
+    applyEffectSoftware(makeEffect(EffectType::ToneCurve, params), px.data(), 256, 1);
+
+    for (std::size_t v = 0; v < 256; ++v) {
+        EXPECT_EQ(px[v * 4 + 0], tables.red[v]) << "input byte " << v;
+        EXPECT_EQ(px[v * 4 + 1], tables.green[v]) << "input byte " << v;
+        EXPECT_EQ(px[v * 4 + 2], tables.blue[v]) << "input byte " << v;
+    }
+}
+
+TEST(SoftwareToneCurve, TheEffectTypeIsWiredToItsOwnKernelAndName) {
+    // The mapping half of "all seven sites": a type with no kernel silently renders
+    // nothing on the GPU path, and a type whose name does not round-trip becomes
+    // EffectType::Custom on open — both are silent failures rather than loud ones.
+    ASSERT_TRUE(kernelForEffectType(EffectType::ToneCurve).has_value());
+    EXPECT_EQ(*kernelForEffectType(EffectType::ToneCurve), EffectKernel::ToneCurve);
+    EXPECT_EQ(effectTypeForKernel(EffectKernel::ToneCurve), EffectType::ToneCurve);
+    EXPECT_EQ(effectKernelName(EffectKernel::ToneCurve), "tone_curve");
+
+    const std::string src{effectKernelSource(EffectKernel::ToneCurve)};
+    EXPECT_NE(src.find("#version 450"), std::string::npos);
+    // The kernel must be a LOOKUP, not an evaluation: it reads a table image and does
+    // no interpolation. If a future change moved curve arithmetic into the shader, the
+    // exactness argument in Requirement 5.3 would quietly stop holding.
+    EXPECT_NE(src.find("curveTables"), std::string::npos);
+    EXPECT_EQ(src.find("mix("), std::string::npos);
+}
+
 // --- InvertColors (upstream PR 408; Requirements 14.4, 14.5) ----------------
 
 TEST(SoftwareEffect, InvertColorsSubtractsEachRgbChannelFrom255) {
@@ -634,7 +728,7 @@ TEST(EffectKernels, RegistryBuildsAndRegistersEffectTypeKernels) {
 
     ASSERT_TRUE(built.isOk()) << built.error().toString();
     const EffectKernelRegistry& registry = built.value();
-    EXPECT_EQ(registry.size(), allEffectKernels().size()); // all 7 compiled
+    EXPECT_EQ(registry.size(), allEffectKernels().size()); // every kernel compiled
 
     // Every kernel module is valid SPIR-V, including the transition kernel.
     for (const EffectKernel kernel : allEffectKernels()) {
