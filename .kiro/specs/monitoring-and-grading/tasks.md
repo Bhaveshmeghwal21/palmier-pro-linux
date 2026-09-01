@@ -188,25 +188,106 @@ Applying the lesson from incident 1: every place a test needed the worker parked
 genuinely **blocks** (bounded, so a mistake fails rather than hangs). A gate that only signalled would
 let the worker finish and turn every "while in flight" assertion into a coin toss.
 
-- [ ] 3A. Audio playback transport wiring (Requirement 3A) — **S/M**
+- [x] 3A. Audio playback transport wiring (Requirement 3A) — **S/M**
 
   Added mid-flight, after Task 2, when wiring Task 3 showed its prerequisite was missing: nothing in
   production ever calls `AudioEngine::start()` or `pump()`, so audio has never been audible and
   Requirement 1's meter reads zero in a real build. Sequenced before task 3 because task 3 depends on it.
 
-  - [ ] 3A.1 Add a Qt-free component that observes (transport playing, transport position, engine
+  - [x] 3A.1 Add a Qt-free component that observes (transport playing, transport position, engine
         running, mix position, presentation position, scrubbing) and returns an intent: start, stop,
         restart, or pump N quanta.
-  - [ ] 3A.2 Compute the quanta to pump from the lead the engine has left, bounded per cycle so a slow
+  - [x] 3A.2 Compute the quanta to pump from the lead the engine has left, bounded per cycle so a slow
         decoder cannot stall the UI thread, and yielding zero when the engine is already far enough ahead.
-  - [ ] 3A.3 Drive it from the Editor_Shell on a timer, applying the intents to the one
+  - [x] 3A.3 Drive it from the Editor_Shell on a timer, applying the intents to the one
         `media::AudioEngine`, and stand off entirely while scrub audio owns the engine.
-  - [ ] 3A.4 Keep the missing-device case on the engine's existing null-sink path: the transport still
+  - [x] 3A.4 Keep the missing-device case on the engine's existing null-sink path: the transport still
         runs and audio is suppressed, rather than the wiring refusing to start.
-  - [ ] 3A.5 Tests: entering and leaving play starts and stops the engine; a seek while playing restarts
+  - [x] 3A.5 Tests: entering and leaving play starts and stops the engine; a seek while playing restarts
         rather than continuing; the pump yields zero when sufficiently ahead and is bounded when far
         behind; scrubbing suppresses the playback wiring and releasing restores it; no output device
         still starts.
+
+Landed across two commits, the first of which failed to compile — recorded as incident 2 below.
+
+| Commit | What landed | Suite |
+|---|---|---|
+| `22c6986` (run `33504146671`) | `ui::AudioTransportSync`, `ui::AudioPlaybackDriver`, the shell wiring | **failed to compile** |
+| `2c2deab` (run `33504812396`) | the one-line include fix | **1506/1506** (+23) |
+
+The +23 is 20 `AudioTransportSync.*` cases plus 3 `ShellUnitTest.*` cases
+(`TheShellDrivesTheAudioEngineFromTheTransport`, `SuspendingTheDriverStopsTheEngineAndItsCadence`,
+`AScrubGestureTakesTheEngineFromThePlaybackDriver`), all confirmed by name in the run log.
+
+The decisions worth keeping:
+
+- **The decision is a pure function of an observation, and the I/O is a separate 40-line object.**
+  `AudioTransportSync::decide()` takes (transport playing, transport position, engine running, mix
+  position, presentation position, scrubbing) and returns an action plus a quantum count. It touches no
+  engine, no Qt and no clock, which is why the whole of Requirement 3A.5 is testable without an audio
+  device, a running event loop or any sleeping — the cadence is simulated by calling `decide()` with
+  successive observations. `AudioPlaybackDriver` is then only a `QTimer` that applies what it is told.
+- **A seek is inferred, never announced.** Nothing in `PreviewController` signals "the user sought"; there
+  is only a playhead that can change between two observations. So the sync compares the transport
+  position against where the engine's mix has actually reached and calls it a seek when they have diverged
+  beyond a tolerance. This is what makes `HealthyPlaybackIsNeverMistakenForASeek` and
+  `ManyConsecutiveHealthyCyclesProduceNoRestartsAtAll` the two most important tests in the file: an
+  inference that fires spuriously restarts the engine on every cycle and produces continuous stuttering
+  rather than an obvious failure. A backward jump is tested separately from a forward one because a naive
+  signed comparison handles only one of them.
+- **The pump count is derived from the lead the engine has left, and is bounded both ways.** Zero when far
+  enough ahead (so the timer costs nothing during steady playback), one quantum for a small shortfall
+  rather than none (so the lead is actually recovered instead of decaying), and a hard per-cycle cap so a
+  slow decoder cannot turn one timer tick into an unbounded decode loop on the UI thread — Requirement
+  3A.2 is that cap. A negative lead, which is what a stalled sink looks like arithmetically, is treated as
+  an empty lead rather than trusted.
+- **Scrub suppression is total, including stop.** While a scrub gesture owns the engine the sync returns
+  no action at all, rather than "don't start". Two owners issuing `start`/`stop` at the engine on
+  different timers is the classic way to get audio that plays only sometimes, and it would be a race
+  rather than a reproducible bug. Releasing the scrub restores normal control on the following cycle, and
+  that handover is tested in both directions.
+- **The missing-device case is deliberately invisible here.** `AudioEngine::start()` already installs a
+  null sink and returns success when no device can be opened, so the sync has nothing to decide;
+  `TheDecisionDoesNotDependOnWhetherADeviceExists` pins that as an intended property rather than leaving
+  it as an accident of the engine's implementation. Requirement 3A.4 is satisfied by *not* adding a
+  special case.
+- **The defaults are checked against the engine's own geometry rather than restated.** A test asserts the
+  driver's cadence and lead target are consistent with `kOutputSampleRate` and
+  `kDefaultQuantumFrames`, so changing the engine's quantum size cannot silently leave the driver pumping
+  at the wrong rate.
+
+Two things this does not establish. Nothing here has been heard: CI has no audio device, so every test
+runs against the null-sink path, and the assertions are about which engine calls are made and with what
+arguments. And the *content* of the audio is the engine's existing, already-tested responsibility — this
+task supplies only the missing cadence.
+
+### CI incident 2 — a lost newline glued two `#include` directives into one
+
+- **Incident 2 — `TimelinePanel.cpp` and its moc TU failed to compile (run `33504146671`, commit
+  `22c6986`).** `PreviewController has not been declared`, then nine consequential errors about
+  `transport_`. The cause was mechanical rather than conceptual: an edit intended only to delete a blank
+  line also removed the newline after `#include "ui/GuiToolGateway.hpp"`, leaving that include and the
+  `PreviewController` one on a single line. The preprocessor reads that as one directive, so
+  `PreviewController.hpp` was never included at all. Fixed at `2c2deab` (run `33504812396`,
+  **1506/1506**) by restoring the newline; nothing else changed.
+
+- **Why the pre-push check did not catch it.** The structural checker run before every push looks for
+  newline loss with `;X` and `}XX` — a statement or a block glued to whatever follows. Neither matches a
+  *string* glued to a *directive*, and gluing two includes changes no bracket count, so the brace/paren
+  balance check passed as well. The rule is now explicit: a preprocessor directive must begin its own
+  line.
+
+- **The checker's own first version was wrong in a more instructive way.** It used `"\s*#\s*include`,
+  which reported 700+ hits across the tree — every ordinary pair of consecutive includes — because `\s`
+  spans newlines. Restricted to horizontal whitespace (`[^\S\n]`) it reports 4 hits across 335 files, all
+  of them `#include` text inside string literals in `repository_hygiene_property_test.cpp` and
+  `suite_hygiene_property_test.cpp`. That sweep is what established the `TimelinePanel` line was the
+  *only* genuine instance, so no other edit in this spec's work had done the same thing silently.
+
+- **Standing lesson.** A checker reporting implausibly many hits is reporting its own bug, and a clean
+  result from an unvalidated pattern is worth nothing. This is the same discipline already applied to the
+  brace checker, which is only trusted because its output is diffed against `git show HEAD:file` so
+  pre-existing false positives cancel and only the delta is read.
 
 - [ ] 3. Scrub audio (Requirement 3) — **S/M**
   - [ ] 3.1 Play programme audio at the dragged position while the playhead is dragged in
