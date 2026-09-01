@@ -74,6 +74,7 @@
 #include "ui/ProjectFileActions.hpp"
 #include "ui/QtTextRasterizer.hpp"
 #include "ui/ScrubAudioController.hpp"
+#include "ui/ScopesPanel.hpp"
 #include "ui/TimelineGraphView.hpp"
 #include "ui/TimelinePanel.hpp"
 #include "ui/TimelineViewModel.hpp"
@@ -106,7 +107,10 @@ TEST_F(ShellUnitTest, AllFivePanelsArePresentAndVisibleWithNoFurtherAction) {
     window.show();
 
     const QList<QDockWidget*> docks = window.findChildren<QDockWidget*>();
-    ASSERT_EQ(docks.size(), 4u);
+    // Four docks plus the Scopes dock added by monitoring-and-grading task 6. Kept exact
+    // rather than relaxed to >=, because an accidental duplicate dock is a real bug and
+    // this assertion is the only thing that would notice it.
+    ASSERT_EQ(docks.size(), 5u);
     for (QDockWidget* dock : docks) {
         EXPECT_FALSE(dock->isHidden()) << dock->objectName().toStdString();
         EXPECT_NE(dock->widget(), nullptr) << dock->objectName().toStdString();
@@ -1732,6 +1736,91 @@ TEST(QtTextRasterizerTest, LastSubstitutionResetsOnANextCallThatNeedsNone) {
 
     ASSERT_TRUE(rasterizer.rasterize(available, 32, 32).isOk());
     EXPECT_FALSE(rasterizer.lastSubstitution().has_value());
+}
+
+// --- Scopes panel (monitoring-and-grading Requirement 6.1, 6.6, 6.7) -------
+
+TEST_F(ShellUnitTest, TheShellPresentsAScopesDockCarryingAllThreeScopes) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+    window.show();
+
+    auto* panel = window.findChild<ScopesPanel*>();
+    ASSERT_NE(panel, nullptr) << "Requirement 6.1: the shell must present the three scopes";
+    for (const ScopeKind kind : kScopeKinds) {
+        EXPECT_TRUE(panel->isScopeVisible(kind)) << scopeKindName(kind);
+    }
+
+    // In a dock, so it can be moved and closed like every other panel.
+    const QList<QDockWidget*> docks = window.findChildren<QDockWidget*>();
+    bool found = false;
+    for (QDockWidget* dock : docks) {
+        if (dock->objectName() == QStringLiteral("ScopesDock")) {
+            found = true;
+            EXPECT_EQ(dock->widget(), panel);
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+// Requirement 6.6: with no project there is no frame, and the panel must SAY so rather
+// than showing a reading. Asserted through the view model, since a painted "No frame"
+// string cannot be read back from a QWidget.
+TEST_F(ShellUnitTest, WithNoFrameTheScopesReadAsExplicitlyEmptyRatherThanStale) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+    window.show();
+
+    auto* panel = window.findChild<ScopesPanel*>();
+    ASSERT_NE(panel, nullptr);
+    EXPECT_FALSE(panel->model().hasFrame());
+    EXPECT_TRUE(panel->model().histogram().isEmpty());
+    EXPECT_TRUE(panel->model().waveform().isEmpty());
+    EXPECT_TRUE(panel->model().vectorscope().isEmpty());
+}
+
+TEST_F(ShellUnitTest, EachScopeIsIndividuallyHideableAndTheOthersAreUnaffected) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+    window.show();
+
+    auto* panel = window.findChild<ScopesPanel*>();
+    ASSERT_NE(panel, nullptr);
+
+    panel->setScopeVisible(ScopeKind::Waveform, false);
+    EXPECT_FALSE(panel->isScopeVisible(ScopeKind::Waveform));
+    EXPECT_TRUE(panel->isScopeVisible(ScopeKind::Histogram));
+    EXPECT_TRUE(panel->isScopeVisible(ScopeKind::Vectorscope));
+
+    // And the project is untouched: showing or hiding a measurement is not an edit.
+    EXPECT_EQ(composition.timeline().undoDepth(), 0u);
+}
+
+// The persistence claim (6.7) without relaunching a process: saving then loading must
+// reproduce the flags. A shared QSettings scope is what carries them across a restart, so
+// a round trip through it is the whole mechanism.
+TEST_F(ShellUnitTest, ScopeVisibilitySurvivesASaveAndReloadOfTheSettings) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+    window.show();
+
+    auto* panel = window.findChild<ScopesPanel*>();
+    ASSERT_NE(panel, nullptr);
+
+    panel->setScopeVisible(ScopeKind::Vectorscope, false);
+    panel->saveVisibility();
+
+    // Flip it back in memory only, then reload: if loading were a no-op the assertion
+    // below would pass for the wrong reason, so the in-memory value is deliberately the
+    // OPPOSITE of the stored one first.
+    panel->setScopeVisible(ScopeKind::Vectorscope, true);
+    ASSERT_TRUE(panel->isScopeVisible(ScopeKind::Vectorscope));
+    panel->loadVisibility();
+    EXPECT_FALSE(panel->isScopeVisible(ScopeKind::Vectorscope));
+
+    // Leave the settings as found, so the next test does not inherit a hidden scope.
+    panel->setScopeVisible(ScopeKind::Vectorscope, true);
+    panel->saveVisibility();
 }
 
 }  // namespace palmier::ui

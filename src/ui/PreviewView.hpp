@@ -60,6 +60,21 @@ public:
     /// Access the underlying playback engine (transport, path selection, state).
     [[nodiscard]] PreviewController& controller() noexcept { return controller_; }
 
+    /// Observe every frame this view actually displays.
+    ///
+    /// Monitoring-and-grading Requirement 6.2 requires the scopes to be computed from the
+    /// output of the SAME gpu::Compositor the Preview displays, "so a scope can never
+    /// disagree with the picture beside it". This is that guarantee expressed in code:
+    /// the observer is called from uploadFrame with the very buffer being uploaded, so a
+    /// scope cannot be reading a different frame, a different compositor or a different
+    /// moment. A second PreviewFrameSink could not promise as much -- setFrameSink holds
+    /// only one sink, and installing another would displace this view's own.
+    ///
+    /// The frame's memory is only valid for the duration of the call, so an observer must
+    /// consume it rather than retain it.
+    using FrameObserver = std::function<void(const gpu::RenderedFrame&)>;
+    void setFrameObserver(FrameObserver observer);
+
 public slots:
     void play();
     void pause();
@@ -78,6 +93,7 @@ private:
     /// empty when bound to an externally-owned one via the second constructor.
     std::optional<PreviewController> ownedController_;
     PreviewController&                controller_;
+    FrameObserver                     frameObserver_;
     QTimer*           timer_{nullptr};
     QImage            frameImage_{};
 };

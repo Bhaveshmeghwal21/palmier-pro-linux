@@ -58,6 +58,7 @@ class PreviewView;
 class InspectorPanel;
 class MediaBrowserPanel;
 class AgentChatPanel;
+class ScopesPanel;
 class ExportDialog;
 class ProjectSettingsDialog;
 
@@ -147,6 +148,8 @@ private:
     QDockWidget* inspectorDock_ = nullptr;
     QDockWidget* mediaDock_ = nullptr;
     QDockWidget* agentChatDock_ = nullptr;
+    QDockWidget* scopesDock_ = nullptr;
+    ScopesPanel* scopesPanel_ = nullptr;
 
     // Menu actions that must reflect engine/session state (enabled/disabled).
     QAction* undoAction_ = nullptr;

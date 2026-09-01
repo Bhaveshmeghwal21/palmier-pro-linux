@@ -12,6 +12,7 @@
 
 #ifdef PALMIER_HAVE_QT
 
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -50,6 +51,7 @@
 #include "ui/InspectorPanel.hpp"
 #include "ui/MediaBrowserPanel.hpp"
 #include "ui/PreviewView.hpp"
+#include "ui/ScopesPanel.hpp"
 #include "ui/ScrubAudioController.hpp"
 #include "ui/TimelinePanel.hpp"
 
@@ -286,11 +288,38 @@ void MainWindow::buildDocks() {
     tabifyDockWidget(inspectorDock_, agentChatDock_);
     inspectorDock_->raise();
 
+    // Scopes (right, tabbed with Inspector and Agent Chat) — monitoring-and-grading
+    // Requirement 6.1. Tabbed rather than given its own area because a colourist reads a
+    // scope INSTEAD of the Inspector, not beside it, and a fifth visible column would cost
+    // the Preview width on the 1280x720 minimum the layout property test exercises.
+    scopesPanel_ = new ScopesPanel(this);
+    scopesDock_ = new QDockWidget(QStringLiteral("Scopes"), this);
+    scopesDock_->setObjectName(QStringLiteral("ScopesDock"));
+    scopesDock_->setMinimumSize(80, 60);
+    scopesDock_->setWidget(scopesPanel_);
+    addDockWidget(Qt::RightDockWidgetArea, scopesDock_);
+    tabifyDockWidget(inspectorDock_, scopesDock_);
+    inspectorDock_->raise();
+
+    // Requirement 6.2: the scopes measure the SAME buffer the Preview uploads, taken from
+    // the view that displays it, so a scope cannot disagree with the picture beside it.
+    if (previewView_ != nullptr) {
+        previewView_->setFrameObserver([this](const gpu::RenderedFrame& frame) {
+            scopesPanel_->observeFrame(frame);
+        });
+        // The 10 percent budget needs the Preview's interval; zero while stopped, because
+        // there is then no presented frame rate to protect.
+        scopesPanel_->setPreviewFrameInterval(
+            std::chrono::microseconds{composition_.playbackEngine().frameInterval().nanoseconds() /
+                                      1000});
+    }
+
     // All five panels visible with no further user action (Requirement 1.4).
     mediaDock_->show();
     timelineDock_->show();
     inspectorDock_->show();
     agentChatDock_->show();
+    scopesDock_->show();
 }
 
 // ---------------------------------------------------------------------------

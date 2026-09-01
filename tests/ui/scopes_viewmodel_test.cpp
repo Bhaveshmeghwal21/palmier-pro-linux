@@ -230,5 +230,24 @@ TEST(ScopesViewModel, TheReportedCostIsWhatTheCallerMeasuredSoItCanBeFedBackAsTh
     EXPECT_TRUE(vm.shouldRecompute(kT0 + 5ms, measured));
 }
 
+// A caller cannot know what a computation cost until it has run. Calling update() a second
+// time to record the real figure would compute every scope TWICE and spend double the
+// budget the cost exists to protect, so recordCost() corrects it without recomputing --
+// and computeCount() is what proves the work happened only once.
+TEST(ScopesViewModel, RecordingTheMeasuredCostDoesNotRecomputeAnything) {
+    ScopesViewModel vm;
+    const auto frame = solidFrame(8, 8, 128);
+    vm.update(frame.data(), 8, 8, kT0, 0us);
+    ASSERT_EQ(vm.computeCount(), 1u);
+    ASSERT_EQ(vm.lastCost(), 0us);
+
+    vm.recordCost(742us);
+    EXPECT_EQ(vm.lastCost(), 742us);
+    EXPECT_EQ(vm.computeCount(), 1u) << "the scopes must not have been computed again";
+    EXPECT_TRUE(vm.hasFrame());
+    EXPECT_EQ(vm.histogram().luma[128], 64u) << "and the reading is untouched";
+    EXPECT_EQ(*vm.lastUpdate(), kT0) << "as is when the work happened";
+}
+
 }  // namespace
 }  // namespace palmier::ui

@@ -86,10 +86,21 @@ void PreviewView::onTimer() {
     }
 }
 
+void PreviewView::setFrameObserver(FrameObserver observer) {
+    frameObserver_ = std::move(observer);
+}
+
 void PreviewView::uploadFrame(const gpu::RenderedFrame& frame, RenderPath /*path*/) {
     const auto* pixels = static_cast<const uchar*>(frame.hostData());
     if (pixels == nullptr || frame.width() == 0 || frame.height() == 0) {
         return;
+    }
+    // Requirement 6.2: the observer sees the very buffer being uploaded, so a scope is
+    // computed from the same compositor output at the same moment and cannot disagree with
+    // the picture beside it. Called BEFORE the copy, since the copy is this view's own
+    // concern and the observer needs only to read.
+    if (frameObserver_) {
+        frameObserver_(frame);
     }
     // Copy into an owned QImage (the frame's lease is released after the sink
     // returns, so we must not alias its memory).

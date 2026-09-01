@@ -107,6 +107,14 @@ public:
     /// Drop the current reading, for a closed project or a playhead past the end.
     void clear() noexcept;
 
+    /// Overwrite the recorded cost of the last computation.
+    ///
+    /// Exists because a caller cannot know what a computation cost until after it has run,
+    /// and calling update() twice to find out would compute every scope twice and so spend
+    /// double the budget the cost is meant to protect. update() takes a cost so a test can
+    /// state one exactly; the shell states the previous one and corrects it with this.
+    void recordCost(std::chrono::microseconds cost) noexcept { lastCost_ = cost; }
+
     [[nodiscard]] bool hasFrame() const noexcept { return hasFrame_; }
     [[nodiscard]] const gpu::Histogram& histogram() const noexcept { return histogram_; }
     [[nodiscard]] const gpu::LumaWaveform& waveform() const noexcept { return waveform_; }

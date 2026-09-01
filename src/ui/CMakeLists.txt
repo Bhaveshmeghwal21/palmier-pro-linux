@@ -250,6 +250,7 @@ if(TARGET Qt6::Widgets)
         AudioMeterWidget.cpp
         AudioPlaybackDriver.cpp
         CurveEditorWidget.cpp
+        ScopesPanel.cpp
         ExportDialog.cpp
         ProjectSettingsDialog.cpp)
     add_library(Palmier::ui_shell ALIAS palmier_ui_shell)
@@ -284,6 +285,7 @@ if(TARGET Qt6::Widgets)
         Palmier::ui_audio_meter_vm
         Palmier::ui_audio_transport
         Palmier::ui_curve_editor_vm
+        Palmier::ui_scopes_vm
         Palmier::ui_inspector_vm
         Palmier::ui_media_browser_vm
         Palmier::ui_agent_chat_vm
