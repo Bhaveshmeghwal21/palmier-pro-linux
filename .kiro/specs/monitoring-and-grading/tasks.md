@@ -474,21 +474,20 @@ against the software reference, which is what makes property P5 checkable on a r
 device; no image produced by an actual SPIR-V dispatch has been compared to anything.
 
 
-- [ ] 5. Tone curves (Requirement 5) — **L**
+- [x] 5. Tone curves (Requirement 5) — **L**
   - [x] 5.1 Add a tone-curve effect type through all seven sites of audit finding 4, with master plus
         independent R/G/B channels.
   - [x] 5.2 Implement a documented, deterministic interpolation between control points, identical on the
         GPU and software paths; empty and single-point curves are the identity, not an error.
   - [x] 5.3 Clamp output without wrapping, so an aggressive curve cannot produce an overflow hue shift.
-  - [ ] 5.4 Expose adding, moving and removing a control point on the Tool_Surface, each one undoable;
+  - [x] 5.4 Expose adding, moving and removing a control point on the Tool_Surface, each one undoable;
         round-trip the points' coordinates and order through save/open. (Control points are pairs, so
         Class 2 array-item-shape conformance needs its own check here.)
-  - [ ] 5.5 Add a directly editable curve control to the Inspector showing the current transfer function.
-  - [ ] 5.6 Tests: identity cases; a known curve's transfer function on both paths; GPU/CPU parity;
+  - [x] 5.5 Add a directly editable curve control to the Inspector showing the current transfer function.
+  - [x] 5.6 Tests: identity cases; a known curve's transfer function on both paths; GPU/CPU parity;
         determinism across repeated evaluation; clamping at both ends; point add/move/remove undo.
 
-**Partially complete: 5.1, 5.2 and 5.3 are done and CI-verified; 5.4 and 5.5 are outstanding.** Three
-commits so far, all green:
+**Complete.** Six commits, all green:
 
 | Commit | What landed | Suite |
 |---|---|---|
@@ -496,6 +495,9 @@ commits so far, all green:
 | `315928c` (run `33513623198`) | the one-line macro fix | **1542/1542** (+18) |
 | `2cc268e` (run `33514956539`) | `EffectType::ToneCurve` through every site, kernel, reference | **1546/1547** — 1 failed |
 | `2666480` (run `33516171510`) | the derived registration count | **1547/1547** (+5) |
+| `f40327e` (run `33541826614`) | `timeline.edit_curve_point` and its command | **1553/1555** — 2 failed |
+| `6be0c13` (run `33542641022`) | the doc fix, and the Qt-free curve editor logic | **1572/1572** (+17) |
+| `8ba290f` (run `33543504086`) | the Inspector's curve control | **1577/1577** (+5) |
 
 The decisions worth keeping:
 
@@ -573,17 +575,77 @@ Three incidents, all caught and all instructive about tooling rather than about 
   literal. Now computed from `allEffectKernels()` by excluding `Transition` (the only kernel with no
   `EffectType`, since it blends two inputs), so it cannot go stale at the next effect.
 
-**What is left, and the decision waiting to be made.** 5.4 needs the Tool_Surface to expose adding,
-moving and removing a control point, each as one undoable edit. `timeline.set_effect_parameter` cannot
-serve: adding a point sets two parameters and would therefore be two undo entries. The choice is between
-three new tools and one tool carrying an `operation` enum of add/move/remove. The single-tool shape is
-strongly preferred on the evidence of this spec's own conformance obligations — one registry entry, one
-schema, one `docs/TOOLS.md` row, one `drawValidInvocation` case and one increment to the tool count,
-against three of each — and it satisfies the criterion exactly, since each invocation is still one
-command. Either way the command should capture the whole prior parameter set for the affected channel, so
-`revert()` is an exact inverse even when removing a middle point renumbers the ones after it. 5.5 then
-needs a Qt curve widget; the arithmetic it needs already exists in `core::ToneCurve`, so it is
-presentation only.
+**The tool surface (5.7) is ONE tool with an add/move/remove `operation`, not three tools**, and one
+`core::EditCurvePointCommand` behind it. `timeline.set_effect_parameter` could not serve: a control point
+is a pair, so adding one sets two parameters and would be two history entries — a single Undo would leave
+an X with no Y behind, which `curvePoints` deliberately refuses to read as a point, so the user would
+watch their point vanish and the curve change shape in a way no single action explains. One tool rather
+than three because the three operations share their target and differ only in which coordinates matter,
+and because this repository's conformance obligations (registry entry, schema, `TOOLS.md` row,
+`drawValidInvocation` case, tool count, the exhaustive schema map) multiply by three otherwise while the
+criterion is satisfied either way.
+
+`revert()` restores **the whole channel's prior parameter set** rather than undoing the specific
+mutation, which is the design decision worth arguing about. It is not laziness: removing a middle point
+renumbers every point after it, so the inverse of "remove p1" is not "add a point at p1" — after the
+removal there is no p1 carrying the old p2's coordinates to put back. Capturing the channel wholesale
+makes the inverse exact for all three operations with no special case, and the captured set is at most a
+few dozen doubles. The capture is selected by **name prefix**, not by walking indices, because a walk
+stops at the first gap and would silently fail to restore anything past it.
+
+**Move and remove require an index and refuse without one.** Defaulting a missing index to 0 would
+silently move or delete the wrong point, and a plausible wrong answer is worse than a rejection. Add
+ignores the index and appends, because rendering sorts by x regardless, so an insertion position would be
+a distinction without a difference — while a point's index *is* its identity for a later move or remove.
+That makes which arguments are required depend on another argument's *value*, which the `ArgSpec`
+vocabulary cannot express; rather than weaken the tool to fit the schema, the gap is declared as **Class
+1** in `tool_schema_conformance_property_test.cpp`, which exists for exactly this.
+
+**The Inspector control (5.9) is split in two, and the Qt-free half carries all the behaviour.**
+`ui::CurveEditorViewModel` owns the pixel-to-coordinate mapping, the point hit test and the gesture;
+`ui::CurveEditorWidget` only paints and forwards mouse events. Nothing compiles `InspectorPanel.cpp`
+outside the shell build, so a panel-resident implementation would have had no behavioural coverage at all;
+this way 19 cases run on a host with no display, no Qt and no GPU.
+
+`release()` is the **single commit point**. The first version committed an Add on press and a Move on
+release, so clicking on empty space and dragging to place a point — one action as far as the user is
+concerned — cost two undo entries and took two presses to undo. Now `press()` and `drag()` only advance
+the working copy so the gesture can be drawn, and `release()` returns an Add carrying the *final*
+position, a Move when an existing point actually moved, or nothing when a point was grabbed and released
+without moving. A motionless click still adds, because requiring movement would make single clicks do
+nothing while drags worked.
+
+Three further hazards are pinned by test rather than reasoned about. A zero-sized widget mid-layout must
+not divide, since NaN in a control point does not glitch visibly — it silently poisons the baked table.
+The **nearest** point wins the hit test, or the earlier-added of two overlapping points would capture the
+pointer forever and dragging would quietly move the wrong one. And an external change (an undo, or an
+edit over MCP) **abandons a gesture in progress**, because the index being dragged may name a different
+point afterwards and continuing would move whichever point now holds it — a wrong edit that looks like a
+successful one.
+
+The widget plots `bakeToneCurve`'s own table, so the curve drawn is necessarily the curve applied. The
+panel hides the raw control points from its generic parameter loop: thirty-two `curveMasterP3Y` spin
+boxes beside the plot would be unreadable and would let the two widgets disagree about the same point.
+
+Two more incidents, both worth keeping:
+
+- **A `Result:` line in `docs/TOOLS.md` wrapped**, leaving `*(command result)*` alone on the following
+  line, and that marker is read from the `Result:` line itself — so two documentation-consistency tests
+  reported the tool returning an undocumented `status`. The four backticked field names on the first line
+  *were* harvested, which is why only one field was reported and the diagnosis was narrow. Checked rather
+  than assumed afterwards: 23 `Result:` lines carry the marker, all on the line itself; two others do
+  wrap and are green, because they continue with backticked field names, which the observer harvests from
+  the whole block. The rule is about the marker's placement, not about wrapping.
+
+- **The newline-eating `strReplace` happened again** — an edit whose only purpose was adding an include
+  glued `EditCommands.hpp` to `Effect.hpp` on one line, exactly CI incident 2's damage class. Caught
+  pre-push. That is four times this session from the same cause, all from edits touching only whitespace
+  or an include, which is why doctrine item 15 exists.
+
+Also moved the channel and operation **name** vocabularies out of `ToolRegistry`'s anonymous namespace
+into `core`, beside the types they name, because the Inspector needs them too — the same reasoning that
+moved the colour-grade defaults into `core` in task 4. Each parser is derived from its own name function
+by iteration, so a name added to one direction cannot be missing from the other.
 
 
 - [ ] 6. Video scopes (Requirement 6) — **M**

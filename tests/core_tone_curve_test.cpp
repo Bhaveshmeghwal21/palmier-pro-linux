@@ -299,5 +299,39 @@ TEST(ToneCurveTablesTest, ATableIsAnExactTransferFunctionForAnEightBitPipeline) 
     }
 }
 
+// Requirement 5.4 asks for interpolation that is deterministic, and subtask 5.6 for
+// determinism across REPEATED evaluation. Piecewise-linear interpolation in double
+// precision carries no state, so this ought to hold trivially -- which is exactly why it
+// is worth pinning: the moment anything caches, memoises or reorders, "trivially" stops
+// being true and nothing else in the suite would notice.
+TEST(ToneCurveTablesTest, RepeatedEvaluationAndBakingAreBitIdentical) {
+    const std::vector<CurvePoint> points{{0.05, 0.02}, {0.31, 0.66}, {0.62, 0.41}, {0.98, 1.0}};
+
+    for (int repeat = 0; repeat < 4; ++repeat) {
+        for (int i = 0; i <= 100; ++i) {
+            const double x = static_cast<double>(i) / 100.0;
+            EXPECT_EQ(evaluateToneCurve(points, x), evaluateToneCurve(points, x))
+                << "x=" << x << " repeat=" << repeat;
+        }
+        for (int i = 100; i >= 0; --i) {
+            // Descending, so an implementation carrying a "last segment" hint from the
+            // previous call would answer differently on the way back down.
+            const double x = static_cast<double>(i) / 100.0;
+            EXPECT_EQ(evaluateToneCurve(points, x), evaluateToneCurve(points, x)) << "x=" << x;
+        }
+    }
+
+    const ToneCurveTable first = bakeToneCurve(points);
+    for (int repeat = 0; repeat < 8; ++repeat) {
+        EXPECT_EQ(bakeToneCurve(points), first) << "bake repeat " << repeat;
+    }
+
+    // A table built from the same points in a different STORED order is identical, because
+    // baking sorts. Sorting inside bakeToneCurve rather than at each call site is what
+    // makes that true of every caller instead of only the careful ones.
+    const std::vector<CurvePoint> shuffled{points[2], points[0], points[3], points[1]};
+    EXPECT_EQ(bakeToneCurve(shuffled), first);
+}
+
 }  // namespace
 }  // namespace palmier
