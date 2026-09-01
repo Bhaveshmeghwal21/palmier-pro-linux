@@ -37,6 +37,7 @@
 
 #ifdef PALMIER_HAVE_QT
 
+#include <functional>
 #include <optional>
 
 #include <QWidget>
@@ -113,6 +114,38 @@ public:
     [[nodiscard]] ScrubAudioController& scrubAudio() noexcept { return scrubAudio_; }
     [[nodiscard]] const ScrubAudioController& scrubAudio() const noexcept { return scrubAudio_; }
 
+    /// Performs a scrub-audio decision against the Audio_Engine
+    /// (monitoring-and-grading Requirement 3.1).
+    ///
+    /// A std::function seam for the same reason AudioMeterWidget takes its levels
+    /// through one: this panel decides WHEN scrub audio should start, move and stop,
+    /// and stays entirely ignorant of what performs it. MainWindow installs the real
+    /// applier; a test installs one that records the decisions, so the whole of
+    /// Requirement 3 is assertable with no audio device and no engine.
+    ///
+    /// Deliberately handed only the decision. The transport half of Requirement 3.2
+    /// — pausing on drag start and resuming after StopAndResume — stays in this
+    /// panel, because this panel owns the transport and the applier must not be able
+    /// to change playback state as a side effect of touching audio.
+    using ScrubAudioApplier = std::function<void(const ScrubAudioDecision&)>;
+
+    /// Install the applier. Absent, every decision is computed and discarded: the
+    /// gestures, the transport restore and Requirement 3.5's drop accounting all
+    /// still work, and only the sound is missing — which is also exactly what a
+    /// suppressed controller looks like.
+    void setScrubAudioApplier(ScrubAudioApplier applier);
+
+    /// Requirement 3.3's two suppression inputs, routed through the panel rather than
+    /// set on the controller directly.
+    ///
+    /// Both exist because either can change PART-WAY THROUGH a drag, and both then
+    /// return a decision that has to be performed immediately — a user who switches
+    /// scrub audio off wants silence now, not at the next mouse move, and a device
+    /// that disappears mid-gesture is the same situation. Only this panel can perform
+    /// a decision, so only this panel should be asked to change the inputs.
+    void setScrubAudioEnabled(bool enabled);
+    void setScrubAudioOutputAvailable(bool available);
+
 signals:
     /// A clip row became the tree's current selection.
     void clipSelected(const QString& clipId);
@@ -146,6 +179,12 @@ private slots:
     void onTimecodeEdited();
     void onStepBackClicked();
     void onStepForwardClicked();
+    // The playhead gesture, from either surface that produces one: the ruler drag in
+    // TimelineGraphView and the scrub slider. Both funnel here rather than each
+    // driving the controller its own way, so "the transport was playing when the
+    // drag began" is recorded identically for both (Requirement 3.2).
+    void onPlayheadDragBegan();
+    void onPlayheadDragEnded();
 
 private:
     void buildLayout();
@@ -159,6 +198,9 @@ private:
     // existing convention (refreshTransportState() computed this inline before;
     // it is now shared with the timecode field's display).
     [[nodiscard]] QString formatPlayheadTimecode() const;
+    // Hand one decision to the installed applier, if any. Every path that produces a
+    // decision goes through here, so there is exactly one place that can perform one.
+    void applyScrubDecision(const ScrubAudioDecision& decision);
 
     TimelineModel       model_;
     PreviewController&  transport_;
@@ -175,6 +217,8 @@ private:
     /// (monitoring-and-grading task 3). Qt-free and I/O-free by design, which is
     /// why it is held by value rather than allocated as a child widget.
     ScrubAudioController scrubAudio_{};
+    /// Performs the decisions above; empty until MainWindow installs one.
+    ScrubAudioApplier scrubApplier_{};
     QSlider*     scrubSlider_ = nullptr;
     QLineEdit*   timecodeEdit_ = nullptr;
     QToolButton* stepBackButton_ = nullptr;

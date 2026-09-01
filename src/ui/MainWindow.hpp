@@ -96,6 +96,8 @@ private slots:
     void onPlayPause();
     void onStop();
     void onGoToStart();
+    /// The Scrub Audio menu item was toggled (monitoring-and-grading Requirement 3.3).
+    void onScrubAudioToggled(bool enabled);
     void onExportVideo();
     void onCancelExport();
     void onProjectSettings();  // task 10.2; Requirement 7.2
@@ -136,7 +138,8 @@ private:
     /// Runs the one media::AudioEngine from the transport's state
     /// (monitoring-and-grading Requirement 3A). A child QObject, so it is destroyed
     /// with this window and stops the engine on its way out.
-    AudioPlaybackDriver* audioDriver_ = nullptr;    InspectorPanel*     inspectorPanel_ = nullptr;
+    AudioPlaybackDriver* audioDriver_ = nullptr;
+    InspectorPanel*     inspectorPanel_ = nullptr;
     MediaBrowserPanel*  mediaBrowserPanel_ = nullptr;
     AgentChatPanel*     agentChatPanel_ = nullptr;
 
@@ -158,6 +161,9 @@ private:
     QAction* addTextTrackAction_ = nullptr;  ///< usable-editor task 12; Requirement 9.
     QAction* addCaptionTrackAction_ = nullptr;  ///< usable-editor task 13; Requirement 10.
     QAction* placeAtPlayheadAction_ = nullptr;
+    /// The Scrub Audio toggle (monitoring-and-grading Requirement 3.3). Held because
+    /// its checked state is synchronised from the controller after the panel exists.
+    QAction* scrubAudioAction_ = nullptr;
 
     // Status bar: the three persistent notices (GPU, software-compositing,
     // audio) plus the export progress surface's parent dialog.

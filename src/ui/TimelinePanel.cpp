@@ -11,7 +11,9 @@
 #ifdef PALMIER_HAVE_QT
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <utility>
 
 #include <QHBoxLayout>
 #include <QLabel>
@@ -45,6 +47,10 @@ TimelinePanel::TimelinePanel(TimelineEngine& engine, PreviewController& transpor
             &TimelinePanel::onGraphSelectionChanged);
     connect(graph_, &TimelineGraphView::seekRequested, this,
             &TimelinePanel::onGraphSeekRequested);
+    connect(graph_, &TimelineGraphView::playheadDragBegan, this,
+            &TimelinePanel::onPlayheadDragBegan);
+    connect(graph_, &TimelineGraphView::playheadDragEnded, this,
+            &TimelinePanel::onPlayheadDragEnded);
 
     refreshTransportState();
 }
@@ -118,6 +124,12 @@ void TimelinePanel::buildLayout() {
     scrubSlider_->setMaximum(0);  // updated by refreshTransportState() as the project changes
     scrubSlider_->setTracking(true);
     connect(scrubSlider_, &QSlider::valueChanged, this, &TimelinePanel::onScrubSliderMoved);
+    // The slider IS a playhead drag, so it drives the same gesture the ruler does
+    // (monitoring-and-grading Requirement 3.1). sliderPressed/sliderReleased rather
+    // than valueChanged alone: only they distinguish a drag from a programmatic
+    // setValue() or a keyboard step, and scrub audio must not start for either.
+    connect(scrubSlider_, &QSlider::sliderPressed, this, &TimelinePanel::onPlayheadDragBegan);
+    connect(scrubSlider_, &QSlider::sliderReleased, this, &TimelinePanel::onPlayheadDragEnded);
 
     stepForwardButton_ = new QToolButton(playheadBar);
     stepForwardButton_->setText(QStringLiteral("►|"));
@@ -237,6 +249,69 @@ void TimelinePanel::movePlayheadToMs(qint64 requestedMs) {
         }
     }
     transport_.seek(snapped);
+    refreshTransportState();
+
+    // monitoring-and-grading Requirement 3.1: while a playhead drag is in progress,
+    // every position it reaches is offered to the scrub controller — and it is the
+    // SNAPPED, CLAMPED position, so the audio is positioned at the same frame the
+    // picture and the timecode field show rather than at the raw pointer coordinate.
+    //
+    // Guarded on isDragging() rather than connected only to the drag paths, because
+    // this one function is where all five playhead-moving gestures converge: a
+    // keyboard step or a timecode edit must not be mistaken for a scrub, and the
+    // controller's own state is the authority on whether a gesture is running.
+    if (scrubAudio_.isDragging()) {
+        applyScrubDecision(scrubAudio_.dragTo(snapped, std::chrono::steady_clock::now()));
+    }
+}
+
+void TimelinePanel::setScrubAudioApplier(ScrubAudioApplier applier) {
+    scrubApplier_ = std::move(applier);
+}
+
+void TimelinePanel::applyScrubDecision(const ScrubAudioDecision& decision) {
+    if (decision.isNoOp() || !scrubApplier_) {
+        return;
+    }
+    scrubApplier_(decision);
+}
+
+void TimelinePanel::setScrubAudioEnabled(bool enabled) {
+    applyScrubDecision(scrubAudio_.setEnabled(enabled));
+}
+
+void TimelinePanel::setScrubAudioOutputAvailable(bool available) {
+    applyScrubDecision(scrubAudio_.setOutputAvailable(available));
+}
+
+void TimelinePanel::onPlayheadDragBegan() {
+    // Requirement 3.2: remember whether the transport was playing, and interrupt it
+    // for the duration of the gesture. The interruption is deliberately independent
+    // of whether scrub audio will actually sound — a suppressed drag still takes the
+    // playhead somewhere, so it must still stop and resume playback, and the
+    // controller's own tests already pin that a suppressed drag which interrupted
+    // playback resumes at the position it reached.
+    const bool wasPlaying = transport_.isPlaying();
+    if (wasPlaying) {
+        transport_.pause();
+    }
+    applyScrubDecision(
+        scrubAudio_.beginDrag(transport_.playhead(), wasPlaying, std::chrono::steady_clock::now()));
+    refreshTransportState();
+}
+
+void TimelinePanel::onPlayheadDragEnded() {
+    const ScrubAudioDecision decision = scrubAudio_.endDrag(std::chrono::steady_clock::now());
+    applyScrubDecision(decision);
+
+    // Requirement 3.2's other half. The resume lives here and not in the applier
+    // because this panel owns the transport: an applier that could call play() would
+    // be able to change playback state as a side effect of touching audio, and a
+    // suppressed drag (which produces no audio decision to apply at all) must resume
+    // playback just the same.
+    if (decision.action == ScrubAudioAction::StopAndResume) {
+        transport_.play();
+    }
     refreshTransportState();
 }
 

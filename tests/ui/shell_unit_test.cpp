@@ -73,6 +73,7 @@
 #include "ui/PreviewController.hpp"
 #include "ui/ProjectFileActions.hpp"
 #include "ui/QtTextRasterizer.hpp"
+#include "ui/ScrubAudioController.hpp"
 #include "ui/TimelineGraphView.hpp"
 #include "ui/TimelinePanel.hpp"
 #include "ui/TimelineViewModel.hpp"
@@ -1388,6 +1389,220 @@ TEST_F(TimelineGraphViewTest, DraggingAClipIsNotAPlayheadGestureAndStillMovesThe
                                     [&](const Clip& c) { return c.id == seed.firstClipId; });
     ASSERT_NE(moved, after.tracks[0].clips.end());
     EXPECT_EQ(moved->timelineStart, Duration::fromMilliseconds(200));
+}
+
+// --- Scrub audio over a real gesture (monitoring-and-grading Requirement 3) ---
+//
+// The controller's own Qt-free cases already pin the decision logic with simulated
+// time. These assert the WIRING: that a real ruler drag reaches it, that the transport
+// is restored, that the setting suppresses it, and — the one that matters most — that
+// nothing about scrub audio reaches the project or the undo history.
+//
+// Each installs a recording applier, replacing the one MainWindow installed, so the
+// Audio_Engine is never touched and the decisions themselves are the observable.
+
+TEST_F(TimelineGraphViewTest, ARulerDragScrubsAudioAndLeavesTheProjectAndUndoHistoryUntouched) {
+    app::ApplicationComposition composition;
+    (void)seedTwoClipProject(composition);
+    MainWindow window(composition);
+    window.show();
+
+    TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+    TimelinePanel* panel = window.findChild<TimelinePanel*>();
+    ASSERT_NE(panel, nullptr);
+
+    std::vector<ScrubAudioDecision> decisions;
+    panel->setScrubAudioApplier(
+        [&decisions](const ScrubAudioDecision& d) { decisions.push_back(d); });
+
+    // Requirement 3.4's baseline. The seed project already left undo history behind,
+    // so the depth — not canUndo() — is what distinguishes "nothing happened" from
+    // "something happened earlier".
+    const Project     before = composition.timeline().snapshot();
+    const std::size_t undoDepthBefore = composition.timeline().undoDepth();
+
+    const int kRulerY = kRulerHeight / 2;
+    press(graph, QPoint(30, kRulerY));
+
+    ASSERT_FALSE(decisions.empty()) << "a drag must start scrub audio";
+    EXPECT_EQ(decisions.front().action, ScrubAudioAction::Start);
+    // Positioned where the playhead ACTUALLY went — the clamped, frame-snapped
+    // position — rather than at the raw pointer coordinate, which at a project frame
+    // rate not dividing 500 ms evenly are different numbers.
+    EXPECT_EQ(decisions.front().position, composition.playbackEngine().playhead());
+    EXPECT_TRUE(panel->scrubAudio().isScrubbing());
+
+    move(graph, QPoint(60, kRulerY));
+    move(graph, QPoint(90, kRulerY));
+    release(graph, QPoint(90, kRulerY));
+
+    ASSERT_GE(decisions.size(), 2u);
+    EXPECT_EQ(decisions.back().action, ScrubAudioAction::Stop)
+        << "the transport was stopped beforehand, so it must be left stopped";
+    EXPECT_FALSE(panel->scrubAudio().isScrubbing());
+    EXPECT_FALSE(panel->scrubAudio().isDragging());
+
+    // Requirement 3.4, end to end. The drag moved the playhead — which is transport
+    // state, not project state — and touched nothing else. This is the assertion the
+    // controller's structural argument (it holds no Project and no undo stack) exists
+    // to guarantee, checked through the whole wired path rather than in isolation.
+    const Project after = composition.timeline().snapshot();
+    ASSERT_EQ(after.tracks.size(), before.tracks.size());
+    ASSERT_EQ(after.tracks[0].clips.size(), before.tracks[0].clips.size());
+    for (std::size_t i = 0; i < after.tracks[0].clips.size(); ++i) {
+        EXPECT_EQ(after.tracks[0].clips[i].id, before.tracks[0].clips[i].id);
+        EXPECT_EQ(after.tracks[0].clips[i].timelineStart,
+                  before.tracks[0].clips[i].timelineStart);
+        EXPECT_EQ(after.tracks[0].clips[i].sourceIn, before.tracks[0].clips[i].sourceIn);
+        EXPECT_EQ(after.tracks[0].clips[i].sourceOut, before.tracks[0].clips[i].sourceOut);
+    }
+    EXPECT_EQ(composition.timeline().undoDepth(), undoDepthBefore)
+        << "scrubbing must never record an undo entry";
+}
+
+TEST_F(TimelineGraphViewTest, ARulerDragThatInterruptedPlaybackResumesItOnRelease) {
+    app::ApplicationComposition composition;
+    (void)seedTwoClipProject(composition);
+    MainWindow window(composition);
+    window.show();
+
+    TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+    TimelinePanel* panel = window.findChild<TimelinePanel*>();
+    ASSERT_NE(panel, nullptr);
+
+    std::vector<ScrubAudioDecision> decisions;
+    panel->setScrubAudioApplier(
+        [&decisions](const ScrubAudioDecision& d) { decisions.push_back(d); });
+
+    composition.playbackEngine().play();
+    ASSERT_TRUE(composition.playbackEngine().isPlaying());
+
+    const int kRulerY = kRulerHeight / 2;
+    press(graph, QPoint(30, kRulerY));
+
+    // Requirement 3.2: the gesture interrupts playback for its duration. Leaving the
+    // transport rolling would have the picture running away from the dragged playhead
+    // and two things competing for the audio output at once.
+    EXPECT_FALSE(composition.playbackEngine().isPlaying()) << "the drag must interrupt playback";
+
+    move(graph, QPoint(90, kRulerY));
+    release(graph, QPoint(90, kRulerY));
+
+    ASSERT_FALSE(decisions.empty());
+    EXPECT_EQ(decisions.back().action, ScrubAudioAction::StopAndResume);
+    EXPECT_TRUE(composition.playbackEngine().isPlaying())
+        << "the transport must be left exactly as it was found";
+    // And resumed where the drag ended, not where it began.
+    EXPECT_EQ(composition.playbackEngine().playhead(), decisions.back().position);
+}
+
+TEST_F(TimelineGraphViewTest, SwitchingScrubAudioOffSuppressesTheSoundButNotTheDrag) {
+    app::ApplicationComposition composition;
+    (void)seedTwoClipProject(composition);
+    MainWindow window(composition);
+    window.show();
+
+    TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+    TimelinePanel* panel = window.findChild<TimelinePanel*>();
+    ASSERT_NE(panel, nullptr);
+
+    std::vector<ScrubAudioDecision> decisions;
+    panel->setScrubAudioApplier(
+        [&decisions](const ScrubAudioDecision& d) { decisions.push_back(d); });
+
+    // Requirement 3.3's user-visible half, driven through the menu the user actually
+    // has rather than by calling the controller directly — which is the only way to
+    // establish that the menu item is wired to anything at all.
+    QMenu* playbackMenu = window.menuBar()->actions()[2]->menu();
+    ASSERT_NE(playbackMenu, nullptr);
+    QAction* scrubAction = nullptr;
+    for (QAction* action : playbackMenu->actions()) {
+        if (action->text() == QStringLiteral("Scrub &Audio")) {
+            scrubAction = action;
+            break;
+        }
+    }
+    ASSERT_NE(scrubAction, nullptr) << "Requirement 3.3 asks for a USER-VISIBLE setting";
+    EXPECT_TRUE(scrubAction->isCheckable());
+    EXPECT_TRUE(scrubAction->isChecked()) << "and it must agree with the controller's default";
+
+    scrubAction->trigger();
+    EXPECT_FALSE(scrubAction->isChecked());
+    EXPECT_FALSE(panel->scrubAudio().isEnabled());
+    EXPECT_TRUE(panel->scrubAudio().isSuppressed());
+
+    const int kRulerY = kRulerHeight / 2;
+    press(graph, QPoint(30, kRulerY));
+    move(graph, QPoint(90, kRulerY));
+
+    // Silent, but the drag itself is unaffected: it is still tracked, the playhead
+    // still moved, and nothing waited on audio (Requirement 3.3's "without blocking
+    // or slowing the drag").
+    EXPECT_TRUE(decisions.empty()) << "a suppressed drag must produce no audio at all";
+    EXPECT_TRUE(panel->scrubAudio().isDragging()) << "but the gesture must still be tracked";
+    EXPECT_FALSE(panel->scrubAudio().isScrubbing());
+    EXPECT_GT(composition.playbackEngine().playhead().milliseconds(), 0);
+
+    release(graph, QPoint(90, kRulerY));
+    EXPECT_FALSE(panel->scrubAudio().isDragging());
+    EXPECT_EQ(panel->scrubAudio().stats().suppressedDrags, 1u);
+
+    // Switching it back on restores it for the NEXT gesture. Cleared first because
+    // endDrag() reports a Stop even for a drag that never sounded — the transport's
+    // state is owed back regardless of audibility — so the vector is not empty here.
+    decisions.clear();
+    scrubAction->trigger();
+    EXPECT_TRUE(panel->scrubAudio().isEnabled());
+    press(graph, QPoint(30, kRulerY));
+    ASSERT_FALSE(decisions.empty());
+    EXPECT_EQ(decisions.front().action, ScrubAudioAction::Start);
+    release(graph, QPoint(30, kRulerY));
+}
+
+TEST_F(TimelineGraphViewTest, AFloodOfDragPositionsIsDroppedRatherThanQueued) {
+    app::ApplicationComposition composition;
+    (void)seedTwoClipProject(composition);
+    MainWindow window(composition);
+    window.show();
+
+    TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+    TimelinePanel* panel = window.findChild<TimelinePanel*>();
+    ASSERT_NE(panel, nullptr);
+
+    const int kRulerY = kRulerHeight / 2;
+    press(graph, QPoint(30, kRulerY));
+
+    // Thirty positions delivered as fast as the machine can, which is what a real
+    // mouse drag looks like relative to a decoder seek. They arrive well inside
+    // kMinRepositionInterval, so Requirement 3.5 requires them DROPPED: the drag is
+    // never delayed and no queue is allowed to build up behind it.
+    for (int x = 31; x <= 60; ++x) {
+        move(graph, QPoint(x, kRulerY));
+    }
+    release(graph, QPoint(60, kRulerY));
+
+    const ScrubAudioStats stats = panel->scrubAudio().stats();
+    EXPECT_EQ(stats.starts, 1u);
+    EXPECT_EQ(stats.stops, 1u);
+
+    // The conservation law is the assertion that cannot flake: every one of the 30
+    // positions was either served or deliberately dropped, and none was queued behind
+    // the drag or lost. The RATIO is deliberately not asserted here — it depends on
+    // how long 30 synthetic mouse events take on the runner, which is exactly the kind
+    // of wall-clock dependency that makes a test pass until it does not. The ratio is
+    // pinned deterministically in the controller's own simulated-time case instead,
+    // where 100 positions across a second yield exactly 16 repositions and 84 drops.
+    EXPECT_EQ(stats.restarts + stats.drops, 30u)
+        << "every dragged position must be accounted for as served or dropped";
+
+    // Every position still reached the playhead: only the AUDIO can be dropped, which
+    // is the whole point — the gesture keeps its full resolution. x=60 is 1000 ms at
+    // the default 60 px/s.
+    EXPECT_GT(composition.playbackEngine().playhead().milliseconds(), 500);
 }
 
 // ---------------------------------------------------------------------------

@@ -50,6 +50,7 @@
 #include "ui/InspectorPanel.hpp"
 #include "ui/MediaBrowserPanel.hpp"
 #include "ui/PreviewView.hpp"
+#include "ui/ScrubAudioController.hpp"
 #include "ui/TimelinePanel.hpp"
 
 namespace palmier::ui {
@@ -168,6 +169,60 @@ void MainWindow::buildDocks() {
             [panel = timelinePanel_] {
                 return panel != nullptr && panel->scrubAudio().isScrubbing();
             });
+    }
+
+    // Scrub audio (monitoring-and-grading Requirement 3).
+    //
+    // The panel decides WHEN scrub audio starts, moves and stops; this closure is the
+    // only thing that performs it. Start and Restart are the same two engine calls,
+    // because repositioning scrub audio IS stopping and starting it — the engine
+    // begins mixing from a given position and has no reposition operation, and
+    // pretending otherwise would leave the old position's audio queued ahead of the
+    // new one.
+    //
+    // A failed start is deliberately swallowed. Scrub audio is a monitoring aid, and
+    // Requirement 3.3's rule is that it must never block or slow the drag; putting a
+    // dialog in front of the user mid-gesture would do exactly that. The engine
+    // already treats a missing device as silence rather than an error, and the
+    // suppression installed below is the real answer to "no output device".
+    {
+        media::AudioEngine* engine = &composition_.audioEngine();
+        timelinePanel_->setScrubAudioApplier([engine](const ScrubAudioDecision& decision) {
+            switch (decision.action) {
+                case ScrubAudioAction::Start:
+                case ScrubAudioAction::Restart:
+                    engine->stop();
+                    (void)engine->start(decision.position);
+                    break;
+                case ScrubAudioAction::Stop:
+                case ScrubAudioAction::StopAndResume:
+                    // The resume half belongs to the panel, not to this closure: an
+                    // applier able to call play() could change playback state as a
+                    // side effect of touching audio.
+                    engine->stop();
+                    break;
+                case ScrubAudioAction::None:
+                    break;
+            }
+        });
+
+        // Requirement 3.3's automatic half. `audioOutputAvailable()` rather than
+        // `AudioEngine::outputAvailable()`, on the composition's own documented
+        // advice: the engine reports whether the sink it was GIVEN opened, which is
+        // necessarily true once selection has handed it a working NullAudioSink, so
+        // only the selection knows its choice was the null fallback and not a device.
+        //
+        // Routed through the panel, which is the only thing that can perform the
+        // decision this returns. At construction no drag can be in progress, so the
+        // decision is a no-op here; it matters when a device disappears later.
+        timelinePanel_->setScrubAudioOutputAvailable(composition_.audioOutputAvailable());
+
+        // The menu action was created before this panel existed (buildMenus() runs
+        // before buildDocks()), so its checked state is synchronised here rather than
+        // guessed there. Equal values emit nothing, so this cannot re-enter the slot.
+        if (scrubAudioAction_ != nullptr) {
+            scrubAudioAction_->setChecked(timelinePanel_->scrubAudio().isEnabled());
+        }
     }
 
 
@@ -351,6 +406,19 @@ void MainWindow::buildMenus() {
 
     QAction* goToStartAction = playbackMenu->addAction(QStringLiteral("&Go to Start"));
     connect(goToStartAction, &QAction::triggered, this, &MainWindow::onGoToStart);
+
+    // Requirement 3.3's user-visible half. Checkable, and its initial state is
+    // synchronised from the controller in buildDocks() once the panel exists —
+    // buildMenus() runs FIRST, so it cannot read the panel here, and hard-coding
+    // "checked" would let the menu silently disagree with the state it controls if
+    // the controller's default ever changed.
+    //
+    // Toggling it mid-drag produces a decision that must be performed at once: a user
+    // who switches scrub audio off wants silence now, not at the next mouse move.
+    // That is why setEnabled() returns a decision at all.
+    scrubAudioAction_ = playbackMenu->addAction(QStringLiteral("Scrub &Audio"));
+    scrubAudioAction_->setCheckable(true);
+    connect(scrubAudioAction_, &QAction::toggled, this, &MainWindow::onScrubAudioToggled);
 
     QMenu* exportMenu = menuBar()->addMenu(QStringLiteral("&Export"));
     QAction* exportVideoAction = exportMenu->addAction(QStringLiteral("Export &Video…"));
@@ -721,6 +789,15 @@ void MainWindow::onStop() {
 void MainWindow::onGoToStart() {
     if (previewView_ != nullptr) {
         previewView_->seekSeconds(0.0);
+    }
+}
+
+void MainWindow::onScrubAudioToggled(bool enabled) {
+    // Routed through the panel because the panel is the only thing that can perform
+    // the decision this produces — switching the setting off part-way through a drag
+    // has to silence audio that is already running.
+    if (timelinePanel_ != nullptr) {
+        timelinePanel_->setScrubAudioEnabled(enabled);
     }
 }
 
