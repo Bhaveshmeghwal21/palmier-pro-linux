@@ -40,6 +40,7 @@
 #include <gtest/gtest.h>
 
 #include "core/Error.hpp"
+#include "core/Effect.hpp"
 #include "core/FrameRate.hpp"
 #include "core/Project.hpp"
 #include "core/Resolution.hpp"
@@ -523,6 +524,15 @@ TEST(ToolRegistrySchema, ClosedValueSetsArePublished) {
               (std::vector<std::string>{"brightness", "contrast", "blur", "crop_transform",
                                         "color_grade", "invert_colors", "tone_curve",
                                         "lut", "custom"}));
+
+    // Requirement 8.1: the advertised set must be EXACTLY the core's set. The list above pins
+    // the names and their order; this pins the COUNT against the enum itself, so adding an
+    // enumerator without adding its name fails here rather than shipping an effect type that
+    // renders but cannot be created through any tool -- invisible to the agent surface and to
+    // every scripted workflow, with nothing failing to say so.
+    EXPECT_EQ(enumValues(*effect.find("properties")->find("type")).size(),
+              kAllEffectTypes.size())
+        << "every core::EffectType must be creatable through timeline.add_effect";
 
     // Requirement 5.7 — both closed sets on the curve-point tool. Asserted here, where
     // the advertised schema is read back out, so a value set that exists only in the

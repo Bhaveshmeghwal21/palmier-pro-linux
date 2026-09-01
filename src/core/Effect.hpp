@@ -126,6 +126,18 @@ struct ColorGradeValues {
 /// The parameter names a ColorGrade effect understands, in presentation order.
 /// Exposed so the Inspector can group them and a test can assert the set is the same
 /// one the renderer reads, rather than two lists that happen to match today.
+/// Every EffectType, in declaration order.
+///
+/// Exists so a test can assert that the Tool_Surface's closed value set is EXACTLY the core's
+/// set (monitoring-and-grading Requirement 8.1) without a hand-written list -- which is the
+/// thing that falls behind the enum. An effect type that renders but cannot be created through
+/// a tool is invisible to the agent surface and to every scripted workflow, with nothing
+/// failing to say so; this spec added three effect types, and the risk was identical each time.
+inline constexpr std::array<EffectType, 9> kAllEffectTypes{
+    EffectType::Brightness,    EffectType::Contrast,     EffectType::Blur,
+    EffectType::CropTransform, EffectType::ColorGrade,   EffectType::InvertColors,
+    EffectType::ToneCurve,     EffectType::Lut,          EffectType::Custom};
+
 inline constexpr std::array<const char*, 10> kColorGradeParameterNames{
     "liftR", "liftG", "liftB", "gammaR", "gammaG", "gammaB",
     "gainR", "gainG", "gainB", "saturation"};

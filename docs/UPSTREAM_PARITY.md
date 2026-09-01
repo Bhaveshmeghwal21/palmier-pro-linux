@@ -16,8 +16,8 @@ find is a defect in this document, not in the parser.
   side of every row below is therefore taken from the upstream description recorded in
   `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
   also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: 4ecc030b29c641e82a031616e71d456ba823e519 (branch `main`)
-- comparison-date: 2026-08-31
+- linux-ref: 25ef5840ef3f4547141b964431f143ba437e93eb (branch `main`)
+- comparison-date: 2026-09-02
 
 ## Status definitions (Requirement 13.7)
 
@@ -68,7 +68,7 @@ every `N. ` line as a build-order item.
 | texts | present | core::TextStyle, core::Clip::textStyle, services::ToolRegistry timeline.add_text_clip/set_text_content/set_text_style, gpu::Compositor, ui::QtTextRasterizer | - | - | - | - |
 | captions | partial | core::TrackKind::Caption, core::Clip::captionText, services::ToolRegistry timeline.add_caption_cue/set_caption_text/retime_caption_cue/remove_caption_cue/transcribe_to_captions, gpu::Compositor, services::CaptionExport | should | core::TrackKind::Caption, Clip::captionText and four cue tools plus burn-in and sidecar SRT export all work; transcribe_to_captions always reports Unsupported, since no recognizer is bundled. | - | - |
 | transcription | partial | services::TranscriptionService, services::ToolRegistry timeline.transcribe_to_captions | should | services::TranscriptionService is now constructed and reachable through timeline.transcribe_to_captions, but no recognizer backend is bundled or pluggable, so it always reports Unsupported by name. | - | - |
-| color | partial | core::EffectType::ColorGrade, core::ColorSpace, gpu::EffectKernels | should | Only one color_grade effect is reachable via timeline.add_effect; no curve, wheel, scope or LUT operation exists, so a grade cannot be shaped or judged. | - | - |
+| color | partial | core::EffectType::ColorGrade/ToneCurve/Lut, core::ToneCurve, gpu::CubeLut, gpu::VideoScopes, services::ToolRegistry timeline.edit_curve_point/set_effect_resource | later | Per-channel lift/gamma/gain, tone curves and .cube LUTs are all tool-reachable and scopes are in the shell; no colour-wheel control or secondary grading. | - | - |
 | effects | present | core::EffectType, gpu::EffectKernels, gpu::Compositor, services::ToolRegistry timeline.add_effect/remove_effect/reorder_effects/set_effect_parameter, ui::InspectorPanel | - | - | - | - |
 | denoise | absent | none | later | No denoise effect type and no denoise kernel exist in core::Effect or gpu::EffectKernels, so noise reduction is unavailable on every surface. | - | - |
 | multicam | partial | core::ClipGroup, core::EditCommands::RippleTrimCommand, services::ToolRegistry timeline.ripple_trim | should | A ripple-trim on a grouped clip propagates the same source-time delta to every clipGroups member (PR 397); no angle-switching tool exists, so angles trim in sync but cannot be cut between. | - | - |
@@ -94,8 +94,8 @@ every `N. ` line as a build-order item.
 | multicam | partial | core::ClipGroup, core::EditCommands::RippleTrimCommand, services::ToolRegistry timeline.ripple_trim | should | A ripple-trim on a grouped clip propagates in sync to every clipGroups member (PR 397); angle switching is still deferred, so multi-angle footage trims together but cannot be cut between angles. | - | - |
 | transcription and captions | partial | core::TrackKind::Caption, services::TranscriptionService, services::ToolRegistry, services::CaptionExport, gpu::Compositor | should | Caption cues can be authored, edited, retimed, burned in and written as an SRT sidecar; the audio-to-cues bridge always reports Unsupported, since no recognizer backend is bundled or pluggable. | - | - |
 | text and graphics | partial | core::TextStyle, core::Clip::textStyle, services::ToolRegistry timeline.add_text_clip/set_text_content/set_text_style, gpu::Compositor, ui::QtTextRasterizer, ui::InspectorPanel | should | A title/lower-third text clip type, three creation/edit/style tools and a QPainter-backed renderer shared by preview and export now exist; no shape layer does. | - | - |
-| color and effects | partial | gpu::EffectKernels, gpu::Compositor, core::EffectType, services::ToolRegistry timeline.add_effect/remove_effect/reorder_effects/set_effect_parameter | should | Six effects including invert_colors render on both paths, and remove/reorder/re-parameterise are all reachable; there is still no curve, wheel, scope, LUT or denoise. | - | - |
-| audio scrub and metering | absent | none | should | The audio pipeline mixes and outputs, but no level meter, waveform or scrub-audio component exists, so levels cannot be monitored while editing. | SwiftUI | Qt 6 Widgets |
+| color and effects | partial | gpu::EffectKernels, gpu::Compositor, core::ToneCurve, gpu::CubeLut, gpu::LutCache, gpu::VideoScopes, ui::CurveEditorWidget, ui::ScopesPanel | later | Eight effects render on both paths, including tone curves and LUTs, with histogram, waveform and vectorscope beside the Preview; no denoise or colour wheel. | - | - |
+| audio scrub and metering | present | media::measureLevels, ui::AudioMeterWidget, media::PeakEnvelopeService, ui::TimelineGraphView waveforms, ui::ScrubAudioController, ui::AudioPlaybackDriver | - | - | SwiftUI | Qt 6 Widgets |
 | generation and upscaling | present | services::GenerationModelCatalog, services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::OpenSslGenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator, services::ToolRegistry generation.list_models/generation.generate | - | - | - | - |
 | project browser and search | partial | ui::MediaBrowserViewModel, ui::MediaBrowserPanel, core::MediaAssetRef::tags | later | The media browser panel lists the library with per-asset tags and a name/path/tag filter field now; no bin, folder structure or indexed search exists, so assets cannot be organised hierarchically. | SwiftUI | Qt 6 Widgets |
 | MCP and agent chat | partial | services::McpServer, services::McpProtocolHandler, services::McpSessionRegistry, services::RemoteAccessGate, services::AgentOrchestrator, services::OfflineIntentInterpreter, ui::AgentChatPanel | must | initialize, tools/list and tools/call work over JSON-RPC 2.0, the offline interpreter maps utterances, and the agent chat panel is mounted; no SSE stream or tools/list_changed. | SwiftUI | Qt 6 Widgets |
@@ -105,14 +105,15 @@ every `N. ` line as a build-order item.
 
 ## Build order (Requirement 13.9)
 
-Exactly the `absent` and `partial` entries of both tables — 23 of the 34 — sorted `must` before
+Exactly the `absent` and `partial` entries of both tables — 22 of the 34 — sorted `must` before
 `should` before `later`. This list is a **projection** of the two tables and carries no
 independent facts: an entry appears here if and only if its status above is `absent` or `partial`,
-with the priority recorded above. The eleven omitted entries are the eleven `present` ones —
+with the priority recorded above. The twelve omitted entries are the twelve `present` ones —
 `import`, `export`, `projects`, `generate`, `clips`, `effects`, `project settings`, `texts` and
 `capture frame` (all table 1, the last two as of usable-editor tasks 12 and 14 respectively), plus
-`generation and upscaling` and `timeline editing` (both capability areas, the latter as of
-usable-editor task 11).
+`generation and upscaling`, `timeline editing` and `audio scrub and metering` (all capability
+areas; the second as of usable-editor task 11 and the third as of monitoring-and-grading tasks 1
+to 3).
 
 Each item is written `<name> (<table>) — <priority>` because `multicam` appears in both tables.
 
@@ -120,29 +121,28 @@ Each item is written `<name> (<table>) — <priority>` because `multicam` appear
 2. timeline (tool category) — should
 3. captions (tool category) — should
 4. transcription (tool category) — should
-5. color (tool category) — should
-6. multicam (tool category) — should
-7. media (tool category) — should
-8. multicam (capability area) — should
-9. transcription and captions (capability area) — should
-10. text and graphics (capability area) — should
-11. color and effects (capability area) — should
-12. audio scrub and metering (capability area) — should
-13. settings (capability area) — should
-14. denoise (tool category) — later
-15. organize (tool category) — later
-16. layout (tool category) — later
-17. search (tool category) — later
-18. sync (tool category) — later
-19. beats (tool category) — later
-20. words (tool category) — later
-21. project browser and search (capability area) — later
-22. telemetry (capability area) — later
-23. auto-update (capability area) — later
+5. multicam (tool category) — should
+6. media (tool category) — should
+7. multicam (capability area) — should
+8. transcription and captions (capability area) — should
+9. text and graphics (capability area) — should
+10. settings (capability area) — should
+11. color (tool category) — later
+12. denoise (tool category) — later
+13. organize (tool category) — later
+14. layout (tool category) — later
+15. search (tool category) — later
+16. sync (tool category) — later
+17. beats (tool category) — later
+18. words (tool category) — later
+19. color and effects (capability area) — later
+20. project browser and search (capability area) — later
+21. telemetry (capability area) — later
+22. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 11 `present`, 15 `partial`, 8 `absent`; 23 in this list, of which 1 `must`, 12 `should` and 10 `later`. Per table:
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 12 `present`, 15 `partial`, 7 `absent`; 22 in this list, of which 1 `must`, 9 `should` and 12 `later`. Per table:
 table 1 holds 22 entries (9 `present`, 8 `partial`, 5 `absent`, so 13 appear below) and table 2
-holds 12 (2 `present`, 7 `partial`, 3 `absent`, so 10 appear below).
+holds 12 (3 `present`, 7 `partial`, 2 `absent`, so 9 appear below).
 
 ## Known limits of this comparison
 
@@ -309,3 +309,25 @@ those claims rest on weaker evidence than the rest.
   13) added no product capability any of the 34 entries measures — it packages the existing
   binary, so no row's status or rationale needed a change for it. No other row's Linux-side facts
   moved at this ref.
+
+- **2026-09-02 re-check (`.kiro/specs/monitoring-and-grading`, tasks 1-7).** Three rows changed.
+  `audio scrub and metering` (capability area) moves `absent` to `present`: the three components
+  its rationale said did not exist all do now and are wired into the shell - `media::measureLevels`
+  behind `ui::AudioMeterWidget` in the transport bar, `media::PeakEnvelopeService` drawing clip
+  waveforms in `ui::TimelineGraphView`, and `ui::ScrubAudioController` driving the audio engine
+  from a ruler drag. `color` (tool category) and `color and effects` (capability area) both stay
+  `partial` but drop from `should` to `later`, because the specific gaps each rationale named are
+  now mostly closed: per-channel lift/gamma/gain, tone curves via `core::ToneCurve` and 3D LUTs via
+  `gpu::CubeLut` all render on both the GPU and software paths, `timeline.edit_curve_point` and
+  `timeline.set_effect_resource` make both reachable from the Tool_Surface, and a histogram,
+  waveform monitor and vectorscope sit beside the Preview computed from the same
+  `gpu::Compositor` output it displays. What remains in both rows is a colour-wheel control,
+  secondary/qualifier grading and denoise - real gaps, but no longer ones that stop a grade being
+  shaped or judged, which is what `should` was recording.
+
+  Nothing else was re-read, so no other row's status or rationale changed. The build-order
+  projection and its counts were recomputed from the tables rather than edited: 34 entries, now
+  12 `present`, 15 `partial`, 7 `absent`, with 22 in the list (1 `must`, 9 `should`, 12 `later`).
+  Three mutation anchors in `tests/docs/report_parser_test.cpp` embedded build-order item
+  *numbers*, which this re-score renumbered; they are now computed from the document by name, so
+  the next re-score does not break them.

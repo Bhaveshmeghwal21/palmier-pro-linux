@@ -368,12 +368,29 @@ TEST(ParityCheckFalsifiability, DetectsAStatusOutsideItsValueSet) {
         << testsupport::toString(defects);
 }
 
+/// The whole line containing `needle`, so a mutation can be anchored on something stable.
+///
+/// Three mutations below used to spell out a build-order item including its NUMBER, and those
+/// numbers are a projection of the tables: re-scoring any row renumbers everything after it.
+/// Anchoring on "the line mentioning denoise" instead survives that, while still asserting the
+/// line exists -- mutated() fails loudly if the anchor is absent, so this cannot pass vacuously.
+[[nodiscard]] std::string lineWith(const std::string& text, std::string_view needle) {
+    const std::size_t at = text.find(needle);
+    if (at == std::string::npos) {
+        return std::string{needle};  // let mutated() report the missing anchor
+    }
+    const std::size_t begin = text.rfind('\n', at);
+    const std::size_t end = text.find('\n', at);
+    return text.substr(begin == std::string::npos ? 0 : begin + 1,
+                       (end == std::string::npos ? text.size() : end) -
+                           (begin == std::string::npos ? 0 : begin + 1));
+}
+
 TEST(ParityCheckFalsifiability, DetectsAPriorityOutsideItsValueSet) {
     const std::vector<Defect> defects = checkParity(
-        mutated(parityMarkdown(), "| audio scrub and metering | absent | none | should |",
-                "| audio scrub and metering | absent | none | urgent |"));
-    EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::InvalidPriority,
-                                       "audio scrub and metering"))
+        mutated(parityMarkdown(), lineWith(parityMarkdown(), "| telemetry |"),
+                "| telemetry | absent | none | urgent | placeholder rationale. | - | - |"));
+    EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::InvalidPriority, "telemetry"))
         << testsupport::toString(defects);
 }
 
@@ -464,15 +481,16 @@ TEST(ParityCheckFalsifiability, DetectsAnUnsortedBuildOrderList) {
 
 TEST(ParityCheckFalsifiability, DetectsAnEntryMissingFromTheBuildOrderList) {
     const std::vector<Defect> defects =
-        checkParity(mutated(parityMarkdown(), "14. denoise (tool category) \u2014 later\n", ""));
+        checkParity(mutated(parityMarkdown(),
+                            lineWith(parityMarkdown(), "denoise (tool category)") + "\n", ""));
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::MissingEntry, "denoise"))
         << testsupport::toString(defects);
 }
 
 TEST(ParityCheckFalsifiability, DetectsABuildOrderPriorityThatDisagreesWithItsTable) {
     const std::vector<Defect> defects = checkParity(
-        mutated(parityMarkdown(), "23. auto-update (capability area) \u2014 later",
-                "29. auto-update (capability area) \u2014 should"));
+        mutated(parityMarkdown(), lineWith(parityMarkdown(), "auto-update (capability area)"),
+                "99. auto-update (capability area) \u2014 should"));
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::InvalidPriority, "auto-update"))
         << testsupport::toString(defects);
 }
