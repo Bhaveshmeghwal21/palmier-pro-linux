@@ -148,6 +148,29 @@ void MainWindow::buildDocks() {
             [composition] { return composition->playbackEngine().isPlaying(); });
     }
 
+    // Audio playback wiring (monitoring-and-grading Requirement 3A).
+    //
+    // Until this existed the Audio_Engine was complete, tested and never run:
+    // nothing called start() or pump(), so running() was permanently false, the
+    // master clock was never consulted, and no audio was audible — which also meant
+    // Requirement 1's level meter above read zero however correct it was. The driver
+    // owns the cadence; every decision about start/stop/restart and how much to
+    // pump lives in the Qt-free ui::AudioTransportSync it holds.
+    audioDriver_ = new AudioPlaybackDriver(composition_.audioEngine(), this);
+    {
+        app::ApplicationComposition* composition = &composition_;
+        audioDriver_->setProviders(
+            [composition] { return composition->playbackEngine().isPlaying(); },
+            [composition] { return composition->playbackEngine().playhead(); },
+            // Requirement 3A.6: scrub audio takes ownership of the engine while a
+            // drag is in progress, and this driver must stand off. The timeline
+            // panel owns that gesture, so the predicate is read from there.
+            [panel = timelinePanel_] {
+                return panel != nullptr && panel->scrubAudio().isScrubbing();
+            });
+    }
+
+
     // Timeline audio waveforms (monitoring-and-grading Requirement 2.3, 2.4).
     //
     // The graph view asks for an envelope once per audio clip per repaint; the

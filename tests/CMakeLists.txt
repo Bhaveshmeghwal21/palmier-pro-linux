@@ -369,25 +369,34 @@ palmier_register_test(palmier_ui_audio_meter_tests)
 
 
 # ---------------------------------------------------------------------------
-# Scrub-audio decision tests (monitoring-and-grading task 3; Requirement 3).
-# Exercise the Qt-free ui::ScrubAudioController: that suppression (by setting or
-# by missing output device) silences the audio without changing the DRAG, that a
-# flood of dragged positions is dropped rather than queued, and that the
-# transport is owed its prior state back whether or not the drag was audible.
-# Both timing rules are driven with simulated milliseconds, so these need no
-# audio device, no display and no sleeping. Links Palmier::ui_scrub_audio, which
-# is defined above src/ui's PALMIER_BUILD_UI guard so this runs headless too.
+# Audio-transport decision tests (monitoring-and-grading tasks 3 and 3A;
+# Requirements 3 and 3A). Two Qt-free components, one binary:
+#
+#   * ui::ScrubAudioController — that suppression (by setting or by missing output
+#     device) silences the audio without changing the DRAG, that a flood of dragged
+#     positions is dropped rather than queued, and that the transport is owed its
+#     prior state back whether or not the drag was audible.
+#   * ui::AudioTransportSync — start/stop/restart on transport changes, that a
+#     healthy playback cycle is never mistaken for a seek (which would restart the
+#     engine continuously), that a sufficiently-ahead cycle asks for nothing, and
+#     that a scrub gesture suppresses the playback wiring entirely.
+#
+# Both take their inputs as arguments — simulated time for one, an observation for
+# the other — so these need no audio device, no display, no timer and no sleeping.
+# Links Palmier::ui_audio_transport, defined above src/ui's PALMIER_BUILD_UI guard
+# so this runs headless too.
 # ---------------------------------------------------------------------------
-add_executable(palmier_ui_scrub_audio_tests
-    ui/scrub_audio_controller_test.cpp)
-target_include_directories(palmier_ui_scrub_audio_tests PRIVATE
+add_executable(palmier_ui_audio_transport_tests
+    ui/scrub_audio_controller_test.cpp
+    ui/audio_transport_sync_test.cpp)
+target_include_directories(palmier_ui_audio_transport_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
-target_link_libraries(palmier_ui_scrub_audio_tests PRIVATE
-    Palmier::ui_scrub_audio
+target_link_libraries(palmier_ui_audio_transport_tests PRIVATE
+    Palmier::ui_audio_transport
     Palmier::core
     Palmier::test_support)
 
-palmier_register_test(palmier_ui_scrub_audio_tests)
+palmier_register_test(palmier_ui_audio_transport_tests)
 
 
 # ---------------------------------------------------------------------------

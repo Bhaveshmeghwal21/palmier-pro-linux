@@ -59,6 +59,7 @@
 #include "core/TimelineEngine.hpp"
 #include "core/Track.hpp"
 #include "core/Uuid.hpp"
+#include "media/AudioEngine.hpp"
 #include "media/PeakEnvelope.hpp"
 #include "media/PeakEnvelopeService.hpp"
 #include "services/Json.hpp"
@@ -66,6 +67,7 @@
 #include "services/ProjectSession.hpp"
 #include "services/ToolRegistry.hpp"
 #include "ui/AudioMeterWidget.hpp"
+#include "ui/AudioPlaybackDriver.hpp"
 #include "ui/GuiToolGateway.hpp"
 #include "ui/MediaBrowserPanel.hpp"
 #include "ui/PreviewController.hpp"
@@ -395,6 +397,103 @@ TEST_F(ShellUnitTest, MediaBrowserFilterFieldNarrowsTheLibraryWithoutChangingIt)
 
     // The library itself, and the project it lives in, are untouched.
     EXPECT_EQ(composition.mediaLibrary().assetCount(), assetCountBefore);
+}
+
+// monitoring-and-grading task 3A (Requirement 3A): the Audio_Engine is finally
+// driven. Before this it was complete, tested and never run — nothing called
+// start() or pump() — so no audio was audible and Requirement 1's level meter read
+// zero however correct it was.
+TEST_F(ShellUnitTest, TheShellDrivesTheAudioEngineFromTheTransport) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+
+    AudioPlaybackDriver* driver = window.findChild<AudioPlaybackDriver*>();
+    ASSERT_NE(driver, nullptr) << "the shell must own a driver, or audio never plays";
+    EXPECT_TRUE(driver->isRunning()) << "its cadence must be active";
+
+    media::AudioEngine& engine = composition.audioEngine();
+
+    // Stopped transport: a tick must neither start the engine nor pump anything.
+    ASSERT_FALSE(composition.playbackEngine().isPlaying());
+    EXPECT_EQ(driver->tick(), 0u);
+    EXPECT_FALSE(engine.running());
+
+    // Playing transport: the very next tick starts the engine and pumps it. The
+    // engine reports ok() even with no output device (it installs a null sink and
+    // keeps its clock), which is Requirement 3A.5 — so this holds on a CI runner
+    // with no sound card.
+    composition.playbackEngine().play();
+    ASSERT_TRUE(composition.playbackEngine().isPlaying());
+
+    const std::size_t pumped = driver->tick();
+    EXPECT_TRUE(engine.running()) << "entering play must start the engine";
+    EXPECT_GT(pumped, 0u) << "and must pump it, or the sink starves";
+    EXPECT_EQ(driver->sync().stats().starts, 1u);
+
+    // A steady cycle immediately afterwards is far enough ahead to ask for nothing,
+    // so this is not a busy loop (Requirement 3A.4).
+    const std::size_t again = driver->tick();
+    EXPECT_EQ(again, 0u);
+    EXPECT_TRUE(engine.running());
+
+    // Leaving play stops it.
+    composition.playbackEngine().pause();
+    EXPECT_EQ(driver->tick(), 0u);
+    EXPECT_FALSE(engine.running()) << "leaving play must stop the engine";
+    EXPECT_EQ(driver->sync().stats().stops, 1u);
+    EXPECT_EQ(driver->pumpFailures(), 0u);
+}
+
+TEST_F(ShellUnitTest, AScrubGestureTakesTheEngineFromThePlaybackDriver) {
+    // Requirement 3A.6: two owners issuing start()/stop() at each other would
+    // produce exactly the stutter scrubbing exists to avoid, so the driver stands
+    // off entirely while a drag owns the engine.
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+
+    AudioPlaybackDriver* driver = window.findChild<AudioPlaybackDriver*>();
+    ASSERT_NE(driver, nullptr);
+    TimelinePanel* timeline = window.findChild<TimelinePanel*>();
+    ASSERT_NE(timeline, nullptr);
+
+    composition.playbackEngine().play();
+
+    // A drag begins: the panel's scrub controller now owns the engine.
+    (void)timeline->scrubAudio().beginDrag(Duration::fromMilliseconds(1'000),
+                                           /*transportWasPlaying=*/true,
+                                           std::chrono::steady_clock::now());
+    ASSERT_TRUE(timeline->scrubAudio().isScrubbing());
+
+    const auto beforeStarts = driver->sync().stats().starts;
+    EXPECT_EQ(driver->tick(), 0u) << "the driver must not pump while scrub owns the engine";
+    EXPECT_EQ(driver->sync().stats().starts, beforeStarts) << "nor start it";
+    EXPECT_GE(driver->sync().stats().deferredToScrub, 1u);
+
+    // The drag ends and the driver resumes control.
+    (void)timeline->scrubAudio().endDrag(std::chrono::steady_clock::now());
+    ASSERT_FALSE(timeline->scrubAudio().isScrubbing());
+    (void)driver->tick();
+    EXPECT_TRUE(composition.audioEngine().running()) << "control returns to the driver";
+}
+
+TEST_F(ShellUnitTest, SuspendingTheDriverStopsTheEngineAndItsCadence) {
+    app::ApplicationComposition composition;
+    MainWindow window(composition);
+
+    AudioPlaybackDriver* driver = window.findChild<AudioPlaybackDriver*>();
+    ASSERT_NE(driver, nullptr);
+
+    composition.playbackEngine().play();
+    (void)driver->tick();
+    ASSERT_TRUE(composition.audioEngine().running());
+
+    driver->suspend();
+    EXPECT_FALSE(driver->isRunning());
+    EXPECT_FALSE(composition.audioEngine().running());
+
+    driver->suspend();  // idempotent
+    driver->resume();
+    EXPECT_TRUE(driver->isRunning());
 }
 
 // monitoring-and-grading task 2 (Requirement 2.3, 2.6): the graph view draws an

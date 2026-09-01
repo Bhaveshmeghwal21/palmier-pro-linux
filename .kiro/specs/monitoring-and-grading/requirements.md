@@ -144,6 +144,47 @@ can cut on a transient or a word boundary without scrubbing blindly.
 8. THE envelope SHALL be derived from the same decoder path playback uses, so that what is drawn and
    what is heard cannot disagree about the asset's content.
 
+## Requirement 3A: Audio Playback Transport Wiring
+
+**User Story:** As an editor, I want to hear my timeline when I press play, so that I can cut to sound at
+all — today the audio engine exists, is tested, and is never run.
+
+**Why this requirement exists.** It was added after Requirements 1–8 were written, when wiring
+Requirement 3 revealed that its prerequisite is absent. The original audit checked whether metering,
+waveforms and scrub audio existed; it did not check whether audio playback itself was *driven*. It is not:
+
+| Finding | Evidence |
+|---|---|
+| `media::AudioEngine::pump()` is called from no production code. The only `pump()` call sites in `src/` are `ui::PreviewController::pump()` (video, driven by `PreviewView`'s timer) and `services::ExportCoordinator::pump()`. | `src/media/AudioEngine.cpp:139` (definition); `src/ui/PreviewView.cpp:81`; `src/ui/ExportDialog.cpp:223`. |
+| `media::AudioEngine::start()` is never called in production either, so `running()` is permanently false. | No call site in `src/`. |
+| The composition root wires the engine only as a *read* seam — a master clock consulted when `running()` — and as the export renderer. | `src/app/ApplicationComposition.cpp:487`, `:515`. |
+| `ui::PreviewController` has no audio start/stop hook. `AudioMasterClock` is `std::function<std::optional<Duration>()>`: it reads a position, it cannot drive anything. | `src/ui/PreviewController.hpp:212`. |
+| The engine's own header says the wiring is somebody else's job and was deferred. | `src/media/AudioEngine.hpp:58`; "Composition-root wiring … is task 8.7 and deliberately not done here". |
+
+Consequently no audio is audible during ordinary playback, the master clock is never used (preview paces
+off the wall clock), and Requirement 1's level meter — correct and tested — reads zero in a real build
+because nothing fills the report it reads. Requirement 3 cannot be satisfied without this.
+
+1. WHEN the transport enters the playing state, THE system SHALL start the Audio_Engine at the
+   transport's current position, and WHEN it leaves the playing state THE system SHALL stop the engine.
+2. WHEN the playhead is repositioned while playing, THE system SHALL restart the engine at the new
+   position rather than continue from the old one.
+3. WHILE the transport is playing, THE system SHALL pump the Audio_Engine often enough to keep the mixed
+   cursor ahead of the played-out position, and SHALL bound the work done in any single pump cycle so a
+   slow decoder cannot stall the UI thread.
+4. THE pump SHALL NOT be a busy loop and SHALL NOT block: a cycle that finds the engine sufficiently far
+   ahead SHALL do nothing.
+5. IF no output device is available, THEN THE system SHALL still run the transport, and audio SHALL be
+   suppressed by the Audio_Engine's existing null-sink path rather than by refusing to start — the
+   existing "silent, not failed" rule (Requirement 6.7 of the predecessor spec).
+6. WHEN scrub audio owns the Audio_Engine (Requirement 3), THE playback wiring SHALL stand off and SHALL
+   NOT compete for the engine, and SHALL resume normal control once the drag ends.
+7. THE decision of what to do to the engine — start, stop, restart, or pump N quanta — SHALL live in a
+   Qt-free `ui::AudioTransportSync` that observes the transport and the engine and returns an intent, so
+   the lifecycle is testable with no audio device, no timer and no real engine. Both audio-transport
+   decision components — this and `ui::ScrubAudioController` — SHALL therefore hold no engine and perform
+   no I/O.
+
 ## Requirement 3: Scrub Audio
 
 **User Story:** As an editor, I want to hear the audio while I drag the playhead, so that I can find a

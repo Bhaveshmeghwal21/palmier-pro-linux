@@ -38,6 +38,7 @@
 #include <QMainWindow>
 
 #include "ui/AgentChatViewModel.hpp"
+#include "ui/AudioPlaybackDriver.hpp"
 #include "ui/GuiToolGateway.hpp"
 #include "ui/InspectorViewModel.hpp"
 #include "ui/ProjectFileActions.hpp"
@@ -132,7 +133,10 @@ private:
 
     TimelinePanel*      timelinePanel_ = nullptr;
     PreviewView*        previewView_ = nullptr;
-    InspectorPanel*     inspectorPanel_ = nullptr;
+    /// Runs the one media::AudioEngine from the transport's state
+    /// (monitoring-and-grading Requirement 3A). A child QObject, so it is destroyed
+    /// with this window and stops the engine on its way out.
+    AudioPlaybackDriver* audioDriver_ = nullptr;    InspectorPanel*     inspectorPanel_ = nullptr;
     MediaBrowserPanel*  mediaBrowserPanel_ = nullptr;
     AgentChatPanel*     agentChatPanel_ = nullptr;
 

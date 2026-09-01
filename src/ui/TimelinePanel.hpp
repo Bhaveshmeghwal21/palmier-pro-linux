@@ -45,8 +45,8 @@
 #include "core/TimelineEngine.hpp"
 #include "core/Uuid.hpp"
 #include "ui/AudioMeterWidget.hpp"
-#include "ui/GuiToolGateway.hpp"
-#include "ui/PreviewController.hpp"
+#include "ui/GuiToolGateway.hpp"#include "ui/PreviewController.hpp"
+#include "ui/ScrubAudioController.hpp"
 #include "ui/TimelineGraphView.hpp"
 #include "ui/TimelineModel.hpp"
 
@@ -100,6 +100,17 @@ public:
     /// envelope provider, so neither this panel nor the view depends on the
     /// composition root or on the envelope service.
     [[nodiscard]] TimelineGraphView* graphView() const noexcept { return graph_; }
+
+    /// The scrub-audio decision state for this panel's playhead gestures
+    /// (monitoring-and-grading Requirement 3).
+    ///
+    /// Owned here because this panel receives the gestures — the scrub slider is the
+    /// playhead drag. Exposed because two other parties need it and neither should
+    /// own it: MainWindow applies its intents to the Audio_Engine, and
+    /// ui::AudioPlaybackDriver reads isScrubbing() to stand off while a drag owns
+    /// the engine (Requirement 3A.6).
+    [[nodiscard]] ScrubAudioController& scrubAudio() noexcept { return scrubAudio_; }
+    [[nodiscard]] const ScrubAudioController& scrubAudio() const noexcept { return scrubAudio_; }
 
 signals:
     /// A clip row became the tree's current selection.
@@ -159,6 +170,10 @@ private:
     QToolButton* redoButton_ = nullptr;
     QLabel*      playheadLabel_ = nullptr;
     AudioMeterWidget* levelMeter_ = nullptr;  ///< monitoring-and-grading task 1.
+    /// Scrub-audio decisions for this panel's playhead gestures
+    /// (monitoring-and-grading task 3). Qt-free and I/O-free by design, which is
+    /// why it is held by value rather than allocated as a child widget.
+    ScrubAudioController scrubAudio_{};
     QSlider*     scrubSlider_ = nullptr;
     QLineEdit*   timecodeEdit_ = nullptr;
     QToolButton* stepBackButton_ = nullptr;

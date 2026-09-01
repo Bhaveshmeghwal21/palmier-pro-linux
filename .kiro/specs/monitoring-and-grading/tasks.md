@@ -188,6 +188,26 @@ Applying the lesson from incident 1: every place a test needed the worker parked
 genuinely **blocks** (bounded, so a mistake fails rather than hangs). A gate that only signalled would
 let the worker finish and turn every "while in flight" assertion into a coin toss.
 
+- [ ] 3A. Audio playback transport wiring (Requirement 3A) — **S/M**
+
+  Added mid-flight, after Task 2, when wiring Task 3 showed its prerequisite was missing: nothing in
+  production ever calls `AudioEngine::start()` or `pump()`, so audio has never been audible and
+  Requirement 1's meter reads zero in a real build. Sequenced before task 3 because task 3 depends on it.
+
+  - [ ] 3A.1 Add a Qt-free component that observes (transport playing, transport position, engine
+        running, mix position, presentation position, scrubbing) and returns an intent: start, stop,
+        restart, or pump N quanta.
+  - [ ] 3A.2 Compute the quanta to pump from the lead the engine has left, bounded per cycle so a slow
+        decoder cannot stall the UI thread, and yielding zero when the engine is already far enough ahead.
+  - [ ] 3A.3 Drive it from the Editor_Shell on a timer, applying the intents to the one
+        `media::AudioEngine`, and stand off entirely while scrub audio owns the engine.
+  - [ ] 3A.4 Keep the missing-device case on the engine's existing null-sink path: the transport still
+        runs and audio is suppressed, rather than the wiring refusing to start.
+  - [ ] 3A.5 Tests: entering and leaving play starts and stops the engine; a seek while playing restarts
+        rather than continuing; the pump yields zero when sufficiently ahead and is bounded when far
+        behind; scrubbing suppresses the playback wiring and releasing restores it; no output device
+        still starts.
+
 - [ ] 3. Scrub audio (Requirement 3) — **S/M**
   - [ ] 3.1 Play programme audio at the dragged position while the playhead is dragged in
         `ui::TimelineGraphView`, stopping within 200 ms of the drag ending and restoring the transport's

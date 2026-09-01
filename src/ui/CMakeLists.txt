@@ -66,30 +66,42 @@ target_link_libraries(palmier_ui_audio_meter_vm PUBLIC
     Palmier::media)
 
 # ---------------------------------------------------------------------------
-# palmier_ui_scrub_audio — the Qt-free scrub-audio decision logic
-# (monitoring-and-grading task 3; Requirement 3).
+# palmier_ui_audio_transport — the Qt-free audio-transport decision logic
+# (monitoring-and-grading tasks 3 and 3A; Requirements 3 and 3A).
 #
-# ScrubAudioController decides and remembers; it performs no I/O and returns an
-# INTENT its caller applies to the Audio_Engine. That shape is load-bearing:
-# because the class has no Project, no TimelineEngine and no way to reach one,
-# Requirement 3.4 (scrub audio must not touch the project, the undo history or
-# the committed playhead) holds by construction rather than by assertion.
+# Two components that decide what to do to the one media::AudioEngine and do no
+# I/O themselves, each returning an INTENT its caller applies:
 #
-# Time is an argument, so the 60 ms drop interval and the 200 ms stop deadline
-# are tested with simulated milliseconds and no audio device. Declared ABOVE the
-# PALMIER_BUILD_UI guard, like the two view models above, so it builds and is
-# unit-tested on hosts with no Qt. Needs only Palmier::core (Duration).
+#   * ScrubAudioController — when to start, reposition and stop scrub audio while
+#     the playhead is dragged, and what state the transport is owed back.
+#   * AudioTransportSync   — the ordinary playback lifecycle: start on play, stop
+#     on pause, restart on a seek, and how many quanta to pump to keep the mix
+#     cursor ahead of the played-out position.
+#
+# Grouped in one library because they are the same kind of thing and must agree:
+# AudioTransportSync stands off entirely while a scrub owns the engine, so the two
+# cannot fight over it.
+#
+# The no-I/O shape is load-bearing rather than stylistic. Because neither class can
+# reach a Project, a TimelineEngine or an undo stack, Requirement 3.4 (scrub audio
+# must not touch the project, the undo history or the committed playhead) holds by
+# construction rather than by assertion. And because both take their inputs as
+# arguments — time for one, an observation for the other — the timing rules and the
+# awkward transitions are testable with no audio device, no timer and no real
+# engine. Declared ABOVE the PALMIER_BUILD_UI guard, like the view models above, so
+# they build and are unit-tested on hosts with no Qt. Needs only Palmier::core.
 # ---------------------------------------------------------------------------
-add_library(palmier_ui_scrub_audio STATIC
-    ScrubAudioController.cpp)
-add_library(Palmier::ui_scrub_audio ALIAS palmier_ui_scrub_audio)
+add_library(palmier_ui_audio_transport STATIC
+    ScrubAudioController.cpp
+    AudioTransportSync.cpp)
+add_library(Palmier::ui_audio_transport ALIAS palmier_ui_audio_transport)
 
-target_include_directories(palmier_ui_scrub_audio PUBLIC
+target_include_directories(palmier_ui_audio_transport PUBLIC
     "${PROJECT_SOURCE_DIR}/src")
 
-target_compile_features(palmier_ui_scrub_audio PUBLIC cxx_std_20)
+target_compile_features(palmier_ui_audio_transport PUBLIC cxx_std_20)
 
-target_link_libraries(palmier_ui_scrub_audio PUBLIC
+target_link_libraries(palmier_ui_audio_transport PUBLIC
     Palmier::core)
 
 # ---------------------------------------------------------------------------
@@ -180,6 +192,7 @@ if(TARGET Qt6::Widgets)
         TimelinePanel.cpp
         TimelineGraphView.cpp
         AudioMeterWidget.cpp
+        AudioPlaybackDriver.cpp
         ExportDialog.cpp
         ProjectSettingsDialog.cpp)
     add_library(Palmier::ui_shell ALIAS palmier_ui_shell)
@@ -212,7 +225,7 @@ if(TARGET Qt6::Widgets)
         Palmier::ui_project_file_actions
         Palmier::ui_preview_vm
         Palmier::ui_audio_meter_vm
-        Palmier::ui_scrub_audio
+        Palmier::ui_audio_transport
         Palmier::ui_inspector_vm
         Palmier::ui_media_browser_vm
         Palmier::ui_agent_chat_vm
