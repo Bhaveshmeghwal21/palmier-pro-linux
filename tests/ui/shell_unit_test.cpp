@@ -1270,6 +1270,126 @@ TEST_F(TimelineGraphViewTest, ADeletedSelectedClipReportsSelectionClearedAfterRe
     EXPECT_FALSE(graph->selectedClipId().has_value());
 }
 
+// --- Playhead dragging on the ruler (monitoring-and-grading Requirement 3.1) --
+//
+// The gesture the scrub-audio wiring is built on. Requirement 3 says the playhead
+// is "dragged across the timeline"; before this the ruler only supported a click
+// that jumped to one point, so there was no gesture to attach audio to at all.
+//
+// These assert the SIGNAL CONTRACT rather than any audio behaviour: that the
+// begin/end pair brackets exactly one gesture, that positions arrive throughout it,
+// and that no other interaction in the widget emits it. The panel-level wiring that
+// turns these into engine calls is tested separately.
+
+TEST_F(TimelineGraphViewTest, DraggingTheRulerReportsEveryPositionBracketedByOneGesture) {
+    app::ApplicationComposition composition;
+    (void)seedTwoClipProject(composition);
+    MainWindow window(composition);
+    window.show();
+
+    TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+
+    int              begans = 0;
+    int              endeds = 0;
+    std::vector<qint64> positions;
+    QObject::connect(graph, &TimelineGraphView::playheadDragBegan, graph,
+                     [&begans]() { ++begans; });
+    QObject::connect(graph, &TimelineGraphView::playheadDragEnded, graph,
+                     [&endeds]() { ++endeds; });
+    QObject::connect(graph, &TimelineGraphView::seekRequested, graph,
+                     [&positions](qint64 ms) { positions.push_back(ms); });
+
+    // A press at x=30 is 0.5 s at the default 60 px/s, then three moves rightwards.
+    const int kRulerY = kRulerHeight / 2;
+    press(graph, QPoint(30, kRulerY));
+    move(graph, QPoint(60, kRulerY));
+    move(graph, QPoint(90, kRulerY));
+    move(graph, QPoint(120, kRulerY));
+    release(graph, QPoint(120, kRulerY));
+
+    EXPECT_EQ(begans, 1);
+    EXPECT_EQ(endeds, 1);
+
+    // One position for the press plus one per move: the drag reports continuously
+    // rather than only at its endpoints, which is what makes it a scrub instead of
+    // two jumps.
+    ASSERT_EQ(positions.size(), 4u);
+    EXPECT_EQ(positions[0], 500);
+    EXPECT_EQ(positions[1], 1000);
+    EXPECT_EQ(positions[2], 1500);
+    EXPECT_EQ(positions[3], 2000);
+}
+
+TEST_F(TimelineGraphViewTest, APlainRulerClickIsStillAClosedGestureWithNoIntermediatePositions) {
+    app::ApplicationComposition composition;
+    (void)seedTwoClipProject(composition);
+    MainWindow window(composition);
+    window.show();
+
+    TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+
+    int begans = 0;
+    int endeds = 0;
+    int seeks = 0;
+    QObject::connect(graph, &TimelineGraphView::playheadDragBegan, graph,
+                     [&begans]() { ++begans; });
+    QObject::connect(graph, &TimelineGraphView::playheadDragEnded, graph,
+                     [&endeds]() { ++endeds; });
+    QObject::connect(graph, &TimelineGraphView::seekRequested, graph,
+                     [&seeks](qint64) { ++seeks; });
+
+    const int kRulerY = kRulerHeight / 2;
+    press(graph, QPoint(30, kRulerY));
+    release(graph, QPoint(30, kRulerY));
+
+    // The motionless case is the one that would leak: the clip-drag path treats a
+    // zero delta as "a click, not a drag" and returns early, so a scrub that took
+    // the same shortcut would never be closed and audio started on press would run
+    // forever. Exactly one begin and one end, and the single seek a click always
+    // produced.
+    EXPECT_EQ(begans, 1);
+    EXPECT_EQ(endeds, 1);
+    EXPECT_EQ(seeks, 1);
+}
+
+TEST_F(TimelineGraphViewTest, DraggingAClipIsNotAPlayheadGestureAndStillMovesTheClip) {
+    app::ApplicationComposition composition;
+    const Seeded seed = seedTwoClipProject(composition);
+    MainWindow window(composition);
+    window.show();
+
+    TimelineGraphView* graph = window.findChild<TimelineGraphView*>();
+    ASSERT_NE(graph, nullptr);
+
+    int begans = 0;
+    int endeds = 0;
+    QObject::connect(graph, &TimelineGraphView::playheadDragBegan, graph,
+                     [&begans]() { ++begans; });
+    QObject::connect(graph, &TimelineGraphView::playheadDragEnded, graph,
+                     [&endeds]() { ++endeds; });
+
+    // Drag the first clip's body from x=30 to x=42 (+200 ms) — well clear of the
+    // second clip at 1500 ms, so the move is accepted.
+    press(graph, QPoint(30, kFirstLaneMidY));
+    move(graph, QPoint(42, kFirstLaneMidY));
+    release(graph, QPoint(42, kFirstLaneMidY));
+
+    EXPECT_EQ(begans, 0);
+    EXPECT_EQ(endeds, 0);
+
+    // And the edit still happened: adding a fifth DragKind must not have diverted
+    // the clip path, which the new enumerator's presence in two switch statements
+    // makes a real risk rather than a theoretical one.
+    const Project after = composition.timeline().snapshot();
+    ASSERT_FALSE(after.tracks.empty());
+    const auto moved = std::find_if(after.tracks[0].clips.begin(), after.tracks[0].clips.end(),
+                                    [&](const Clip& c) { return c.id == seed.firstClipId; });
+    ASSERT_NE(moved, after.tracks[0].clips.end());
+    EXPECT_EQ(moved->timelineStart, Duration::fromMilliseconds(200));
+}
+
 // ---------------------------------------------------------------------------
 // QtTextRasterizer (usable-editor task 12; Requirement 9) — the production
 // gpu::TextRasterizer implementation. These exercise it directly, independent

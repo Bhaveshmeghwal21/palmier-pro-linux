@@ -31,6 +31,12 @@
 //     TimelinePanel connects to the SAME movePlayheadToMs() the scrub slider and
 //     timecode field already use, so every playhead-moving gesture in the panel
 //     snaps to the project's edit frame rate identically (Requirement 4.2).
+//   * Drag on the ruler -> the same seekRequested(ms) per mouse move, bracketed by
+//     playheadDragBegan()/playheadDragEnded() so TimelinePanel can drive scrub
+//     audio across the gesture (monitoring-and-grading Requirement 3.1). Dragging
+//     is confined to the ruler: a press on an empty lane also selects that lane as
+//     the placement target, and treating that as a scrub would start and stop audio
+//     on an ordinary selection.
 //   * Click on a clip rectangle -> selects it (clipSelected()/selectionCleared(),
 //     matching TimelinePanel's existing signal contract) and repaints it
 //     highlighted (Requirement 8.7).
@@ -147,6 +153,22 @@ signals:
     /// playhead-moving gesture in the panel).
     void seekRequested(qint64 ms);
 
+    /// A press on the ruler began dragging the playhead
+    /// (monitoring-and-grading Requirement 3.1).
+    ///
+    /// Carries no position deliberately. The press itself already emitted
+    /// `seekRequested`, and the position scrub audio must play at is the SNAPPED,
+    /// CLAMPED one the playhead actually moved to — which only TimelinePanel's
+    /// movePlayheadToMs() knows. Emitting a raw position here as well would invite
+    /// the audio to be positioned a fraction of a frame away from the picture.
+    /// These two signals therefore have one job each: `seekRequested` moves the
+    /// playhead, and this delimits the gesture around it.
+    void playheadDragBegan();
+
+    /// The playhead drag ended (button released). Requirement 3.2's 200 ms stop
+    /// bound is measured from here.
+    void playheadDragEnded();
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -165,9 +187,10 @@ private:
     // call mouseMoveEvent() directly instead of depending on that delivery
     // path, without widening the class's own public surface for it.
     friend class TimelineGraphViewFriendAccess;
-    // What a press on a clip rectangle is about to do, decided by where inside
-    // the rectangle the press landed.
-    enum class DragKind { None, Move, TrimStart, TrimEnd };
+    // What a press is about to do. The first four are decided by where inside a
+    // clip rectangle the press landed; Playhead is a press on the ruler, which
+    // scrubs rather than editing anything (monitoring-and-grading Requirement 3.1).
+    enum class DragKind { None, Move, TrimStart, TrimEnd, Playhead };
 
     struct DragState {
         // Captured at press time, so every intermediate paint frame — and a

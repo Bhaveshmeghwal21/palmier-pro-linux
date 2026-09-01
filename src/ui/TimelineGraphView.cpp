@@ -245,7 +245,9 @@ void TimelineGraphView::paintEvent(QPaintEvent* /*event*/) {
             // While this exact clip is being dragged, paint its LIVE (not yet
             // committed) position/extent instead of the model's — the model
             // only changes once the gesture is actually applied on release.
-            if (drag_ && drag_->clipId == clip->id) {
+            // A playhead drag is excluded explicitly rather than relying on its
+            // default-constructed clip id failing to match a real one.
+            if (drag_ && drag_->kind != DragKind::Playhead && drag_->clipId == clip->id) {
                 switch (drag_->kind) {
                     case DragKind::Move:
                         start = drag_->originalStart + drag_->liveDelta;
@@ -266,6 +268,7 @@ void TimelineGraphView::paintEvent(QPaintEvent* /*event*/) {
                         sourceOut = drag_->originalSourceOut + drag_->liveDelta;
                         break;
                     case DragKind::None:
+                    case DragKind::Playhead:
                         break;
                 }
             }
@@ -396,6 +399,24 @@ void TimelineGraphView::mousePressEvent(QMouseEvent* event) {
             clearSelection();
         }
         emit seekRequested(durationForX(event->pos().x()).milliseconds());
+
+        // monitoring-and-grading Requirement 3.1: a press on the RULER also begins
+        // a playhead drag, so the playhead can be dragged across the timeline
+        // rather than only jumped to a clicked point. Restricted to the ruler on
+        // purpose: a press on an empty lane also selects that lane as the placement
+        // target, and turning every such press into a scrub gesture would mean an
+        // ordinary lane selection started and stopped audio.
+        //
+        // `seekRequested` above is emitted BEFORE this, so the panel has already
+        // moved the playhead by the time it is told a drag began — which is what
+        // lets it record the press position rather than the stale previous one.
+        if (event->pos().y() < kRulerHeight) {
+            DragState scrub;
+            scrub.kind = DragKind::Playhead;
+            scrub.pressX = event->pos().x();
+            drag_ = scrub;
+            emit playheadDragBegan();
+        }
         return;
     }
 
@@ -420,6 +441,15 @@ void TimelineGraphView::mouseMoveEvent(QMouseEvent* event) {
     if (!drag_ || drag_->kind == DragKind::None) {
         return;
     }
+    if (drag_->kind == DragKind::Playhead) {
+        // Requirement 3.1: report every dragged position. The visual playhead is
+        // NOT moved here — TimelinePanel's seek triggers refreshTransportState(),
+        // which calls setPlayhead() — so the marker follows the same clamped,
+        // frame-snapped position as the scrub slider and the timecode field, and a
+        // drag past either end of the timeline cannot draw the marker off the ends.
+        emit seekRequested(durationForX(event->pos().x()).milliseconds());
+        return;
+    }
     const int deltaPx = event->pos().x() - drag_->pressX;
     const double deltaSeconds = static_cast<double>(deltaPx) / pixelsPerSecond_;
     drag_->liveDelta = Duration::fromNanoseconds(
@@ -433,6 +463,17 @@ void TimelineGraphView::mouseReleaseEvent(QMouseEvent* event) {
     }
     const DragState state = *drag_;
     drag_.reset();
+
+    if (state.kind == DragKind::Playhead) {
+        // Ends the gesture whether or not the mouse moved, so a plain ruler CLICK
+        // is a begin/end pair with no positions in between rather than an unclosed
+        // gesture. Returning here before the liveDelta check below matters: that
+        // check exists to treat a motionless clip drag as a click, and a motionless
+        // scrub still has to be closed or the controller would stay dragging
+        // forever and audio started on press would never be stopped.
+        emit playheadDragEnded();
+        return;
+    }
 
     if (state.liveDelta.isZero()) {
         update();
@@ -465,6 +506,7 @@ void TimelineGraphView::mouseReleaseEvent(QMouseEvent* event) {
             break;
         }
         case DragKind::None:
+        case DragKind::Playhead:
             break;
     }
     update();  // the engine's own change notification also triggers refresh(),
