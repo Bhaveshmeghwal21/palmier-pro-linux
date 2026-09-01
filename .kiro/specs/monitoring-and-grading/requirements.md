@@ -301,6 +301,19 @@ judge exposure and colour against a measurement instead of against an uncalibrat
    documented, asserted reading on every scope, so a wrongly scaled axis is caught by test rather than
    by eye.
 
+**Design constraint (mechanism for criteria 4, 6 and 8).** The three computations are `gpu::Histogram`
+from `computeHistogram`, `gpu::LumaWaveform` from `computeLumaWaveform`, and `gpu::Vectorscope` from
+`computeVectorscope`, each a pure function of a tightly packed RGBA8 buffer with no Qt and no Vulkan
+anywhere in its call graph. Luma and chroma are Rec.601 full range via `scopeLuma`, `scopeCb` and
+`scopeCr` — deliberately the *same* coefficients `gpu::Compositor`'s saturation step uses, because a
+scope computed in a different space from the effect that moved the picture would show a colourist a
+correction they did not make. Each result reports `isEmpty()`, and a null or zero-sized buffer produces
+an empty result rather than an error: criterion 6's empty state has to be distinguishable from a black
+frame, and a computation that failed would leave the shell choosing between showing nothing and showing
+the last reading, which is the stale display criterion 6 forbids. A waveform's columns are *bucketed and
+summed* rather than sampled, so a 3840-wide frame in a 200-wide panel drops no pixel — sampling is
+exactly how a waveform loses the overexposed streak being looked for.
+
 ## Requirement 7: LUT Application
 
 **User Story:** As a colourist, I want to apply a `.cube` LUT, so that I can use a look my client
