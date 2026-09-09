@@ -165,13 +165,29 @@ format: ## Reformat this repository's C++ sources in place
 	@printf 'formatting %s files\n' '$(words $(CXX_SOURCES))'
 	clang-format -i $(CXX_SOURCES)
 
-format-check: ## Fail if the files changed against origin/main are not formatted
+format-check: ## Fail if the lines changed against origin/main are not formatted
 	@if [ -z "$(CHANGED_CXX)" ]; then \
 		printf 'no C++ files changed against origin/main; nothing to check\n'; \
 	else \
-		printf 'checking formatting of:\n'; \
-		for f in $(CHANGED_CXX); do printf '  %s\n' "$$f"; done; \
-		clang-format --dry-run --Werror $(CHANGED_CXX); \
+		status=0; \
+		for f in $(CHANGED_CXX); do \
+			args=$$(git diff -U0 --diff-filter=ACMR origin/main...HEAD -- "$$f" \
+			        | sed -n 's/^@@ -[0-9,]* +\([0-9][0-9]*\),\{0,1\}\([0-9]*\) @@.*/\1 \2/p' \
+			        | awk '{ c = ($$2 == "" ? 1 : $$2); if (c > 0) printf " --lines=%d:%d", $$1, $$1 + c - 1 }'); \
+			if [ -z "$$args" ]; then \
+				printf '  ---- %s (no added or modified lines)\n' "$$f"; \
+			elif clang-format $$args "$$f" | diff -q - "$$f" >/dev/null 2>&1; then \
+				printf '  OK   %s\n' "$$f"; \
+			else \
+				status=1; \
+				printf '  FAIL %s — the lines you changed are not formatted:\n' "$$f"; \
+				clang-format $$args "$$f" | diff -u "$$f" - | sed 's/^/    /' | head -40; \
+			fi; \
+		done; \
+		if [ "$$status" -ne 0 ]; then \
+			printf "run 'make format' or clang-format -i on the lines you changed\n"; \
+			exit 1; \
+		fi; \
 		printf 'formatting OK\n'; \
 	fi
 
