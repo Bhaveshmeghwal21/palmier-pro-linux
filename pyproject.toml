@@ -1,0 +1,91 @@
+# Python tooling configuration for Palmier Pro for Linux.
+#
+# WHAT PYTHON IS FOR HERE. The product is C++; Python appears only in scripts/, which
+# holds two CI report generators (ctest_summary.py, l4_validation_report.py) and their
+# own unit tests. Those scripts import nothing outside the standard library, on
+# purpose: a CI reporter that needs its dependencies installed before it can explain
+# why the build failed is a reporter that fails when you most need it.
+#
+# So there is no runtime requirements file, because there are no runtime requirements.
+# Claiming otherwise with an invented dependency list would be worse than declaring
+# none. requirements-dev.txt pins the tools that CHECK this code, which is a real
+# dependency set with real versions worth tracking.
+#
+# No [project] table and no build backend: scripts/ is not a distributable package and
+# is never installed. This file exists to configure ruff and mypy in one place.
+
+[tool.ruff]
+# 100 columns, matching .clang-format's ColumnLimit so both languages in the
+# repository wrap at the same place.
+line-length = 100
+target-version = "py310"
+src = ["scripts"]
+extend-exclude = ["build", "build-*", "_cfgtest"]
+
+[tool.ruff.lint]
+# This set was chosen by running the wider one and reading every finding. With
+# pyupgrade and flake8-use-pathlib added, ruff reports 178 findings across these four
+# files, of which 174 are "rewrite working code in a more modern idiom" (typing.List ->
+# list, str.format -> f-string, os.path -> pathlib) and 4 are real defects. Enabling a
+# family and then ignoring its output is worse than not enabling it, so the two
+# modernisation families are left out and named here, and everything the selected set
+# reports is fixed rather than suppressed.
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes: unused imports and names, genuine mistakes
+    "I",    # import sorting
+    "B",    # bugbear: likely bugs and dubious design
+    "C4",   # comprehension simplifications
+    "SIM",  # simplifiable constructs
+    "RET",  # return-statement hygiene
+    "RUF",  # ruff's own checks, including stale noqa directives
+]
+
+# Deliberately NOT selected:
+#
+#   UP (pyupgrade) — 138 findings, every one a rewrite of code that works. These two
+#     scripts are CI tooling that must run on whatever Python a runner or a
+#     contributor's distribution provides; `typing.List` and `str.format` work on every
+#     version back to 3.7, and the scripts declare `from __future__ import annotations`
+#     where it matters. Churning them buys nothing and risks breaking the one tool that
+#     explains why a build failed.
+#
+#   PTH (use-pathlib) — 36 findings. `os.path` is not a defect. These scripts take
+#     paths from argparse and hand them straight to `open()`; pathlib would add an
+#     import and a conversion at every boundary for no behavioural change.
+
+ignore = [
+    # Line length is checked by the formatter, which knows about strings it cannot
+    # split. Reporting it twice only produces findings that cannot be fixed.
+    "E501",
+]
+
+
+[tool.ruff.lint.per-file-ignores]
+# Both self-test modules import the script under test after inserting scripts/ on
+# sys.path, so the import genuinely cannot sit at the top of the file. Declaring that
+# here is better than a per-line `noqa`, which ruff reports as unused (RUF100) because
+# it does not raise E402 for this shape — leaving a comment that looks like it is
+# doing something while doing nothing.
+"scripts/test_*.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.10"
+files = ["scripts"]
+# Advisory rather than strict: these are two report generators, and the value is in
+# catching a genuine type error, not in annotating every local.
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+# Deliberately NOT enabled: disallow_untyped_defs. The scripts predate this config and
+# turning it on would demand annotations across every helper for no defect found.
+disallow_untyped_defs = false
+ignore_missing_imports = true

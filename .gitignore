@@ -11,6 +11,30 @@ cmake_install.cmake
 compile_commands.json
 CTestTestfile.cmake
 
+# Local environment. `.env` can hold a real PALMIER_REMOTE_BEARER_TOKEN, so it must
+# never be committed; the checked-in template beside it is the documentation.
+.env
+.env.*
+!.env.example
+
+# Coverage instrumentation and reports (`make coverage`)
+*.gcda
+*.gcno
+*.gcov
+coverage.info
+coverage-html/
+
+# Test and CI output produced in the working tree
+ctest-results.xml
+configure.log
+palmier_options.txt
+
+# Packaging output
+*.deb
+*.ddeb
+*.rpm
+*.AppImage
+
 # Editor / IDE
 .vscode/
 .idea/
@@ -19,6 +43,14 @@ CTestTestfile.cmake
 # OS
 .DS_Store
 
-# Python bytecode
+# Python bytecode and tool caches
 __pycache__/
 *.pyc
+.mypy_cache/
+.ruff_cache/
+
+# Local planning and agent scratch space, deliberately not part of the repository.
+# `.kiro/specs/` and `.kiro/agents/` ARE tracked; only local settings are not.
+/specs/
+/.kiro/settings/
+/_cfgtest/

@@ -1,0 +1,50 @@
+# Keep the Docker build context small and free of host-specific artefacts.
+#
+# Anything excluded here is absent inside the image. The Makefile tolerates a missing
+# .git (its `format-check` target degrades to "no C++ files changed" rather than
+# failing), so excluding version-control metadata is safe and saves copying it.
+
+# Version control
+.git
+.gitignore
+.github
+
+# Build trees, from the host and from earlier container builds
+build
+build-*
+_cfgtest
+_smoke
+*.o
+*.a
+*.so
+*.gcda
+*.gcno
+*.gcov
+coverage.info
+coverage-html
+ctest-results.xml
+configure.log
+
+# Editor, agent and planning material that has no bearing on a build
+.kiro
+specs
+.vscode
+.idea
+*.swp
+
+# Packaging output
+*.deb
+*.rpm
+*.AppImage
+*.flatpak
+
+# Container definitions do not need to be inside the context they describe
+Dockerfile
+.dockerignore
+docker-compose.yml
+.devcontainer
+
+# Local environment files must never be baked into an image
+.env
+.env.*
+!.env.example

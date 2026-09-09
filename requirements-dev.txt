@@ -1,0 +1,27 @@
+# Developer and CI tooling for the Python helpers under scripts/.
+#
+# THERE IS NO requirements.txt BESIDE THIS FILE, and that is deliberate. The scripts in
+# scripts/ import only the Python standard library — argparse, dataclasses, os, re, sys,
+# tempfile, typing, unittest and xml.etree. A CI reporter whose dependencies must be
+# installed before it can explain why a build failed is a reporter that is unavailable
+# exactly when it is needed, so it has none. Inventing a runtime requirements file to
+# make a dependency scanner happier would be a false statement about this project.
+#
+# What IS a real dependency set is the tooling that checks that code, pinned here to
+# exact versions so `make py-lint` and the CI lint job agree with each other and with a
+# contributor's machine. A range would let a new ruff release fail CI on a commit that
+# changed nothing.
+#
+# Install with:
+#
+#     python3 -m pip install -r requirements-dev.txt
+#
+# Tracked by .github/dependabot.yml (pip ecosystem), which will raise a pull request
+# when either tool releases a new version.
+
+# Linter and formatter for scripts/. Configured in pyproject.toml under [tool.ruff].
+ruff==0.16.6
+
+# Static type checker. Advisory rather than blocking — see the note in pyproject.toml
+# under [tool.mypy] explaining why disallow_untyped_defs stays off.
+mypy==2.3.1

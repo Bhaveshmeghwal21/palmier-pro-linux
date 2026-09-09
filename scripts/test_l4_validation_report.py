@@ -26,7 +26,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import l4_validation_report as l4  # noqa: E402
+import l4_validation_report as l4
 
 EMITTING_TEST_SOURCE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -80,10 +80,7 @@ class MeasurementBlockMatchesTheEmittingTest(unittest.TestCase):
         self.assertIn('"{0}"'.format(l4.BLOCK_END), self.source)
 
     def test_every_key_the_script_reads_is_a_key_the_test_prints(self):
-        emitted = {
-            match.lower()
-            for match in re.findall(r'"PALMIER_L4_([A-Z_]+)=', self.source)
-        }
+        emitted = {match.lower() for match in re.findall(r'"PALMIER_L4_([A-Z_]+)=', self.source)}
         self.assertTrue(emitted, "no PALMIER_L4_* keys found in the emitting test")
         for _output_name, key in l4.OUTPUT_KEYS:
             self.assertIn(key, emitted)
@@ -239,9 +236,7 @@ class CommandLine(unittest.TestCase):
         self.assertIn("1234567 bytes", report)
 
     def test_a_zero_byte_output_exits_nonzero(self):
-        status = l4.main(
-            [self._log(ctest_log(output_bytes=0)), "--github-output", self.outputs]
-        )
+        status = l4.main([self._log(ctest_log(output_bytes=0)), "--github-output", self.outputs])
         self.assertEqual(status, 1)
         self.assertEqual(self._written_outputs()["output-bytes"], "0")
 

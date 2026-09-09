@@ -21,7 +21,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import ctest_summary as cs  # noqa: E402
+import ctest_summary as cs
 
 # Captured verbatim from `ctest --test-dir build-nogui -R
 # "RejectsAnUnwritableParentDirectory|HardwareAndSoftware" --output-junit`,

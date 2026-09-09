@@ -135,9 +135,7 @@ def _as_bool(values: Dict[str, str], key: str) -> Optional[bool]:
     return None
 
 
-def evaluate(
-    values: Dict[str, str], expected_encoder: str = DEFAULT_EXPECTED_ENCODER
-) -> List[str]:
+def evaluate(values: Dict[str, str], expected_encoder: str = DEFAULT_EXPECTED_ENCODER) -> List[str]:
     """Requirement 8.10's conditions that hold for `values`, as failure reasons.
 
     An empty list is a passing validation.
@@ -158,8 +156,7 @@ def evaluate(
     elif fallback:
         reason = values.get("fallback_reason", "")
         failures.append(
-            "the export fell back to software encoding"
-            + (": {0}".format(reason) if reason else "")
+            "the export fell back to software encoding" + (": {0}".format(reason) if reason else "")
         )
 
     size = _as_int(values, "output_bytes")
@@ -225,9 +222,7 @@ def publish(
     return outputs
 
 
-def render_markdown(
-    outputs: Dict[str, str], failures: Sequence[str], expected_encoder: str
-) -> str:
+def render_markdown(outputs: Dict[str, str], failures: Sequence[str], expected_encoder: str) -> str:
     verdict = "FAILED" if failures else "PASSED"
     lines = [
         "# NVIDIA L4 hardware-encode validation: {0}".format(verdict),

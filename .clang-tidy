@@ -1,0 +1,87 @@
+# clang-tidy configuration for Palmier Pro for Linux.
+#
+# Scope: the bugprone, performance, readability, modernize and concurrency families,
+# minus the checks that fight conventions this codebase holds deliberately. Every
+# exclusion below names its reason, because a silently disabled check is
+# indistinguishable from one that was never considered.
+#
+# How this runs in CI: the `lint` job in .github/workflows/ci.yml runs clang-tidy over
+# the files a commit touches, using the compile_commands.json produced by the ordinary
+# CMake configure. It is advisory on a first pass over a 133k-line tree that predates
+# the check set; the format gate next to it is the blocking one. Tighten by moving
+# families out of the advisory list as they come clean, not by enabling everything and
+# ignoring the output.
+#
+# Run locally with `make tidy` (needs a configured build/ for compile_commands.json).
+---
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  readability-*,
+  modernize-*,
+  concurrency-*,
+  misc-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-function-cognitive-complexity,
+  -readability-braces-around-statements,
+  -readability-uppercase-literal-suffix,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  -misc-non-private-member-variables-in-classes,
+  -misc-include-cleaner,
+  -misc-no-recursion
+
+# Reasons for each exclusion above, in order:
+#
+#   bugprone-easily-swappable-parameters
+#     Fires on every (width, height), (x, y) and (start, end) pair in a video
+#     editor. The signal-to-noise ratio on geometry-heavy code is close to zero.
+#
+#   bugprone-narrowing-conversions
+#     The compositor and scope code converts between sample, pixel and index types
+#     constantly and deliberately, with the clamping written out. -Wconversion in
+#     the build already covers the cases that matter.
+#
+#   readability-magic-numbers
+#     Colour-space coefficients (Rec.601 luma weights), 256-entry table sizes and
+#     8-bit maxima are clearer as literals next to the comment deriving them than
+#     hoisted into named constants far from their justification.
+#
+#   readability-identifier-length
+#     Rejects `id`, `dt`, `x`, `y`. All four are the clearest available names here.
+#
+#   readability-function-cognitive-complexity
+#     Would fire on the tool-dispatch and parser switch statements, which are long
+#     because they are exhaustive. Exhaustiveness is enforced by the compiler's
+#     -Wswitch and by size assertions on the enum arrays.
+#
+#   readability-braces-around-statements
+#     The tree already braces every statement; the check adds nothing but cost.
+#
+#   readability-uppercase-literal-suffix
+#     Cosmetic, and would churn every float literal in the GPU kernels.
+#
+#   modernize-use-trailing-return-type
+#     A whole-codebase signature rewrite for no behavioural gain.
+#
+#   modernize-avoid-c-arrays
+#     Needed at the FFmpeg and Vulkan boundaries, which take C arrays.
+#
+#   misc-non-private-member-variables-in-classes
+#     Fires on every plain aggregate (CurvePoint, LutEntry, Histogram), which are
+#     structs by intent.
+#
+#   misc-include-cleaner
+#     Its transitive-include model produces false positives on Qt's umbrella
+#     headers; include hygiene is checked separately in the pre-push sweep.
+#
+#   misc-no-recursion
+#     The curve and project-tree walkers are naturally recursive and bounded.
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '^.*/src/(app|core|gpu|media|services|ui)/.*\.(hpp|h)$'
+FormatStyle: file

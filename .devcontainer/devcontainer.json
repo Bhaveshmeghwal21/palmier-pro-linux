@@ -1,0 +1,85 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
+  "name": "Palmier Pro for Linux",
+
+  // Reuses the project Dockerfile rather than defining a second environment. There is
+  // one description of this project's toolchain and everything reads it: the Makefile,
+  // CI, Compose and this file all resolve back to packaging/apt-packages.txt.
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": "..",
+    "args": {
+      "UID": "1000",
+      "GID": "1000"
+    }
+  },
+
+  "workspaceFolder": "/workspace",
+  "remoteUser": "palmier",
+
+  // /dev/dri when the host has it, so Vulkan can find a real device. The editor runs
+  // without it and reports CPU processing, so this is an optimisation, not a
+  // requirement. Remove the mount if your host has no DRI device.
+  "runArgs": [
+    "--device=/dev/dri:/dev/dri"
+  ],
+
+  // ccache in a named volume, so a rebuild after reopening the container is fast.
+  "mounts": [
+    "source=palmier-ccache,target=/ccache,type=volume"
+  ],
+  "containerEnv": {
+    "CCACHE_DIR": "/ccache"
+  },
+
+  // The image already compiled the tree during `docker build`. This re-runs the build
+  // against the live bind-mounted workspace, which is what the editor will index.
+  "postCreateCommand": "make build",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cpptools-extension-pack",
+        "ms-vscode.cmake-tools",
+        "twxs.cmake",
+        "xaver.clang-format",
+        "notskm.clang-tidy",
+        "charliermarsh.ruff",
+        "ms-python.python"
+      ],
+      "settings": {
+        "C_Cpp.default.compileCommands": "/workspace/build/compile_commands.json",
+        "C_Cpp.default.cppStandard": "c++20",
+        "C_Cpp.clang_format_style": "file",
+        "cmake.buildDirectory": "/workspace/build",
+        "cmake.configureArgs": [
+          "-DPALMIER_BUILD_TESTS=ON",
+          "-DPALMIER_BUILD_UI=ON",
+          "-DPALMIER_ENABLE_VAAPI=ON",
+          "-DPALMIER_ENABLE_NVENC=ON",
+          "-DPALMIER_ENABLE_QSV=ON"
+        ],
+        "editor.formatOnSave": true,
+        "files.insertFinalNewline": true,
+        "files.trimTrailingWhitespace": true,
+        "[cpp]": {
+          "editor.defaultFormatter": "xaver.clang-format"
+        },
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        }
+      }
+    }
+  },
+
+  // The in-process MCP server. Loopback-only by design; see docs/REMOTE_ACCESS.md
+  // before exposing it beyond this container.
+  "forwardPorts": [19789],
+  "portsAttributes": {
+    "19789": {
+      "label": "MCP endpoint (loopback only)",
+      "onAutoForward": "silent"
+    }
+  }
+}

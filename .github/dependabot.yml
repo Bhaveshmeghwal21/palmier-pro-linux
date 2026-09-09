@@ -1,0 +1,67 @@
+# Dependency update tooling for Palmier Pro for Linux.
+#
+# Three ecosystems are declared because three are real:
+#
+#   * github-actions — .github/workflows/ci.yml pins actions/checkout, actions/cache
+#     and actions/upload-artifact by major version, which is exactly the kind of pin
+#     that silently stops receiving fixes.
+#   * docker — the Dockerfile pins ubuntu:24.04 by digest, so the base image cannot
+#     move on its own. That is the right default, but it means an abandoned digest
+#     stays abandoned until something tells us. This is that something.
+#   * pip — the Python CI tooling under scripts/ has no runtime dependencies (it is
+#     stdlib only, deliberately), but its linting and type-checking tools are pinned
+#     in requirements-dev.txt and do need tracking.
+#
+# NOT DECLARED, and why: the C++ dependencies. Qt 6, FFmpeg, Vulkan, libva, oneVPL,
+# lcms2, libsecret and OpenSSL are consumed as distribution packages through
+# pkg-config, so their versions are the Ubuntu 24.04 LTS archive's versions and are
+# updated by the distribution's security process, not by a manifest in this
+# repository. Dependabot has no ecosystem for that. packaging/apt-packages.txt is the
+# authoritative list of them, and docs/BUILD.md records the minimum version each
+# feature needs, so the set is auditable by hand where it cannot be automated.
+
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
+      - ci
+    groups:
+      # One pull request for all first-party actions rather than three: they are
+      # released together and reviewing them together is less work than reviewing
+      # them apart.
+      actions:
+        patterns:
+          - "actions/*"
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build"
+    labels:
+      - dependencies
+      - container
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore"
+    labels:
+      - dependencies
+      - tooling

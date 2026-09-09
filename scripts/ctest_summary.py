@@ -57,12 +57,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import re
 import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence
 
 PASSED = "passed"
 FAILED = "failed"
@@ -199,9 +200,8 @@ def _parse_testcase(element: ET.Element) -> TestResult:
         if not result.skip_reasons:
             message = (skipped.get("message") or "").strip()
             if message in _UNINFORMATIVE_SKIP_MESSAGES:
-                text = (
-                    "no reason recorded — the test printed no GTEST_SKIP() reason"
-                    + (" (ctest reported {0})".format(message) if message else "")
+                text = "no reason recorded — the test printed no GTEST_SKIP() reason" + (
+                    " (ctest reported {0})".format(message) if message else ""
                 )
             else:
                 text = message
@@ -369,9 +369,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "listing every test's name, outcome and recorded skip reason."
     )
     parser.add_argument("junit_xml", help="the file ctest --output-junit wrote")
-    parser.add_argument(
-        "-o", "--output", help="write the summary here instead of standard output"
-    )
+    parser.add_argument("-o", "--output", help="write the summary here instead of standard output")
     parser.add_argument(
         "--format", choices=("markdown", "text"), default="markdown", help="output format"
     )
@@ -434,11 +432,10 @@ def _emit(report: str, output: Optional[str]) -> None:
         try:
             sys.stdout.write(report)
         except BrokenPipeError:
-            # `... | head` closed the pipe. Not an error worth a traceback.
-            try:
+            # `... | head` closed the pipe. Not an error worth a traceback, and the
+            # close() can raise the same thing for the same reason.
+            with contextlib.suppress(BrokenPipeError):
                 sys.stdout.close()
-            except BrokenPipeError:
-                pass
 
 
 if __name__ == "__main__":

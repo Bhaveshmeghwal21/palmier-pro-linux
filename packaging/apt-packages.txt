@@ -1,0 +1,79 @@
+# Native build dependencies for Palmier Pro for Linux — Ubuntu 24.04 (noble).
+#
+# This is the project's dependency manifest. A C++/CMake project that links system
+# libraries through pkg-config has no package-manager lockfile to commit, so the
+# honest equivalent is this: one authoritative list, consumed by everything that
+# installs dependencies, rather than the same list copied into a workflow, a
+# Dockerfile and a README where the three drift apart.
+#
+# Consumed by:
+#   * `make deps`                    — installs these on the host
+#   * Dockerfile                     — installs these in the image
+#   * .devcontainer/devcontainer.json — via the same Dockerfile
+#   * .github/workflows/ci.yml       — installs these on the runner
+#
+# Format: one package per line. `#` starts a comment; blank lines are ignored.
+# Parse with: sed -e 's/#.*//' packaging/apt-packages.txt
+#
+# NOT LISTED HERE: nv-codec-headers (ffnvcodec). It is intermittently absent from the
+# archive snapshot the GitHub runner resolves against, so it is installed from its
+# upstream source at a pinned tag instead — see the Dockerfile and docs/BUILD.md.
+# Without it the NVENC path simply reports itself unavailable and the software
+# encoder is used; nothing else changes.
+#
+# Version policy: these are tracked at the distribution's noble versions rather than
+# pinned individually. Ubuntu 24.04 is an LTS with a frozen archive, so the
+# distribution release IS the pin; pinning each package to an exact version would
+# break on the first security update without making the build more reproducible.
+# The container path exists for when byte-level reproducibility is required.
+
+# --- Toolchain -------------------------------------------------------------
+build-essential
+cmake
+ninja-build
+pkg-config
+ccache
+
+# --- Headless test and launch environment ---------------------------------
+xvfb
+
+# --- Qt 6: UI, widgets, QML runtime ---------------------------------------
+qt6-base-dev
+qt6-base-dev-tools
+qt6-declarative-dev
+qt6-tools-dev
+qt6-tools-dev-tools
+qml6-module-qtquick
+qml6-module-qtquick-controls
+qml6-module-qtquick-window
+qml6-module-qtqml-workerscript
+libgl1-mesa-dev
+
+# --- FFmpeg: media decode, encode, filtering, scaling ---------------------
+libavcodec-dev
+libavformat-dev
+libavutil-dev
+libavfilter-dev
+libswscale-dev
+libswresample-dev
+libavdevice-dev
+
+# --- Vulkan: GPU compositing and the shader toolchain ---------------------
+libvulkan-dev
+vulkan-validationlayers
+glslang-tools
+spirv-tools
+libshaderc-dev
+
+# --- Vendor hardware codec SDKs (VAAPI, Quick Sync) ----------------------
+libva-dev
+libvpl-dev
+
+# --- Colour management, secret storage, TLS ------------------------------
+liblcms2-dev
+libsecret-1-dev
+libssl-dev
+
+# --- Audio output sinks (PipeWire preferred, ALSA fallback) --------------
+libpipewire-0.3-dev
+libasound2-dev

@@ -1,0 +1,120 @@
+# Palmier Pro for Linux — one-command environments.
+#
+#   docker compose run --rm test      # build and run the whole suite
+#   docker compose run --rm shell     # interactive shell in the toolchain
+#   docker compose up editor          # launch the editor on your X display
+#   docker compose up mcp             # serve the MCP endpoint on loopback
+#
+# AN HONEST NOTE ON WHAT THIS FILE IS. Palmier Pro is a desktop application. It has
+# no database, no message broker and no backing service to orchestrate — the project
+# stores documents as files and runs its MCP server in-process. So this file is not
+# service orchestration dressed up as a stack; it exists to make the four things a
+# reviewer or contributor actually wants reproducible in one command each, including
+# the display and device passthrough that is otherwise fiddly to get right.
+#
+# Every service shares one image, built once from the Dockerfile.
+
+services:
+  # ---------------------------------------------------------------------------
+  # Build and run the full GoogleTest + RapidCheck suite headlessly. This is the
+  # service to run first: it proves the toolchain, the build and the tests on a
+  # machine that has only Docker.
+  # ---------------------------------------------------------------------------
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: palmier-pro:local
+    command: ["make", "test"]
+    # ccache survives between runs, so a second invocation recompiles only what changed.
+    volumes:
+      - ccache:/ccache
+    environment:
+      CCACHE_DIR: /ccache
+
+  # ---------------------------------------------------------------------------
+  # Line coverage. Separate from `test` because it needs its own instrumented
+  # build tree and runs markedly slower.
+  # ---------------------------------------------------------------------------
+  coverage:
+    image: palmier-pro:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["make", "coverage"]
+    volumes:
+      - ccache:/ccache
+    environment:
+      CCACHE_DIR: /ccache
+
+  # ---------------------------------------------------------------------------
+  # The editor itself, on the host's X display.
+  #
+  # SECURITY: mounting the X11 socket gives the container the same access to your
+  # display as any local application — it can read your keystrokes and screen. That
+  # is the standard trade-off for running a GUI from a container and is why this is
+  # opt-in rather than the default service. On Wayland, run `xhost +local:` first or
+  # prefer `make build && make run` on the host.
+  #
+  # GPU: /dev/dri is passed through when present so Vulkan can find a real device.
+  # Without it the editor reports "no compatible GPU was found; using CPU
+  # processing" and keeps working.
+  # ---------------------------------------------------------------------------
+  editor:
+    image: palmier-pro:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./build/bin/palmier-pro"]
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+      QT_X11_NO_MITSHM: "1"
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - ccache:/ccache
+      # Your media and projects, so work survives the container.
+      - ${PALMIER_MEDIA_DIR:-./media}:/workspace/media
+    devices:
+      - /dev/dri:/dev/dri
+    # A GUI process needs a TTY to report startup failures legibly.
+    tty: true
+
+  # ---------------------------------------------------------------------------
+  # The MCP endpoint on its own, for driving the editor from an external agent.
+  #
+  # SECURITY: the published port is deliberately bound to 127.0.0.1 rather than
+  # 0.0.0.0. The endpoint is unauthenticated on loopback by design; publishing it on
+  # every interface would expose editor control to the network. Non-loopback access
+  # is a separate, opt-in feature with a token, TLS and an Origin allow-list — see
+  # docs/REMOTE_ACCESS.md. Do not change this binding to 0.0.0.0 as a shortcut.
+  # ---------------------------------------------------------------------------
+  mcp:
+    image: palmier-pro:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["sh", "-c", "xvfb-run -a ./build/bin/palmier-pro --mcp-port=19789"]
+    ports:
+      - "127.0.0.1:19789:19789"
+    volumes:
+      - ccache:/ccache
+
+  # ---------------------------------------------------------------------------
+  # An interactive shell with the whole toolchain, for `make lint`, `make tidy`,
+  # `make package` or exploratory work.
+  # ---------------------------------------------------------------------------
+  shell:
+    image: palmier-pro:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["/bin/bash"]
+    stdin_open: true
+    tty: true
+    volumes:
+      - ccache:/ccache
+    environment:
+      CCACHE_DIR: /ccache
+
+volumes:
+  ccache:

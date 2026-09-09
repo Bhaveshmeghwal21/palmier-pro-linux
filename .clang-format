@@ -1,0 +1,42 @@
+# clang-format configuration for Palmier Pro for Linux.
+#
+# This file DESCRIBES the style already present in the tree rather than imposing a
+# new one. It was derived by measurement, not preference:
+#
+#   * IndentWidth 4      — 56206 of the tree's indented lines are a multiple of 4
+#                          and exactly zero lines are tab-indented.
+#   * ColumnLimit 100    — the 99th percentile line is 95 characters and the 99.5th
+#                          is 97; only 145 lines of 133255 exceed 100.
+#   * BasedOnStyle Google — of LLVM, Google, Chromium, Mozilla and WebKit, Google
+#                          rewrites the tree least. The three overrides below were
+#                          each kept only because they measurably reduced the
+#                          difference against the checked-in code.
+#
+# ReflowComments is off deliberately. Much of this codebase's value is in long
+# explanatory comment blocks that contain hand-aligned parameter tables, worked
+# examples and ASCII layout; reflowing them to a column limit would destroy that
+# alignment. Comments are already within the limit, so this costs nothing today and
+# protects those blocks from a future clang-format release changing its heuristics.
+#
+# Enforcement: `make format-check` locally, and the `lint` job in
+# .github/workflows/ci.yml, which checks the files a commit actually touches.
+# Run `make format` to apply.
+---
+Language: Cpp
+BasedOnStyle: Google
+IndentWidth: 4
+ColumnLimit: 100
+
+# Include order in this tree is meaningful and hand-maintained (project headers
+# before Qt before FFmpeg before the standard library, with the Qt/FFmpeg blocks
+# kept together), so it is preserved rather than re-sorted.
+SortIncludes: false
+IncludeBlocks: Preserve
+
+# `public:` / `private:` sit flush with the enclosing `class` keyword.
+AccessModifierOffset: -4
+
+# A multi-line string literal continues on the line it starts on.
+AlwaysBreakBeforeMultilineStrings: false
+
+ReflowComments: false
