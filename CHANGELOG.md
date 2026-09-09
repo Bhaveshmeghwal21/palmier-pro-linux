@@ -13,6 +13,27 @@ task's completion commit, its CI run and the suite size at that point.
 
 ### Added
 
+- **Structured, levelled logging** (`core/Logging.hpp`). Six severities plus `off`, a
+  free-form subsystem category, key/value fields, and two rendered formats — one
+  human-readable line or newline-delimited JSON — selected by `PALMIER_LOG_FORMAT`.
+  `PALMIER_LOG_LEVEL` sets the threshold. Records are data and both formatters are pure
+  functions of one, so a test states a whole expected line in closed form; the sink and
+  the clock are both injectable. Replaces the twelve `std::cerr` writes that were the
+  entire diagnostic surface, all of them in the startup path. See
+  [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
+- **A line-coverage gate in CI.** A dedicated job builds instrumented, runs the whole
+  suite, and fails below a stated floor. First measurement: 80.1% of lines (15570 of
+  19443); the floor is 78%. Cobertura XML, an lcov `coverage.info` and drill-down HTML
+  are published as an artifact.
+- **A lint job in CI**, gating `clang-format` over the files a commit touches, `ruff`
+  and `ruff format` over the Python tooling, and a new repository-consistency check
+  that asserts `.env.example` matches the variables the code actually reads, that every
+  relative link in the root documents resolves, and that the Makefile's documented
+  targets and `.PHONY` list agree.
+- **Reproducible setup**: a `Makefile` with 27 documented targets, a `Dockerfile` pinned
+  to `ubuntu:24.04` by digest, `docker-compose.yml`, a devcontainer, and
+  `packaging/apt-packages.txt` as the single native dependency manifest that the
+  Makefile, the container and CI all install from.
 - **Programme output level metering.** Per-channel peak and RMS measured in the audio
   graph immediately before submission, so the meter cannot disagree with what was
   heard. Peaks above full scale latch for at least a second and decay no faster than

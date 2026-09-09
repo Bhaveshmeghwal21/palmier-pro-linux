@@ -34,10 +34,14 @@ import sys
 from typing import List, Optional, Sequence
 
 #: Sources whose string literals are the authority on which variables are read.
+#: core/Logging.hpp is a header rather than a .cpp because the two logging variables are
+#: declared as constants there, so that the application, .env.example and this check all
+#: agree with one definition instead of three spellings.
 ENV_SOURCES = (
     "src/app/AppSettings.cpp",
     "src/services/LocalizationManager.cpp",
     "src/gpu/GpuSelectionStore.cpp",
+    "src/core/Logging.hpp",
 )
 
 #: Root documents whose relative links must resolve.

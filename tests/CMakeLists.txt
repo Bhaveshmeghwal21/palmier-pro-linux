@@ -323,6 +323,25 @@ target_link_libraries(palmier_core_tone_curve_tests PRIVATE
     Palmier::test_support)
 palmier_register_test(palmier_core_tone_curve_tests)
 
+# ---------------------------------------------------------------------------
+# Structured logging (core/Logging.hpp).
+#
+# The levelled Logger, its two rendered formats, and the configuration resolver.
+# Almost none of this needs a stream to test: a LogRecord is data, both formatters
+# are pure functions of one, and the Logger's clock and sink are injectable. So every
+# assertion states a whole expected value in closed form — there is no substring
+# matching against log output and no regular expression over a timestamp in the file.
+#
+# Links only Palmier::core: the logger deliberately has no dependency on Qt, FFmpeg
+# or Vulkan so that every layer can report diagnostics through the same facade.
+# ---------------------------------------------------------------------------
+add_executable(palmier_core_logging_tests
+    core/logging_test.cpp)
+target_link_libraries(palmier_core_logging_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+palmier_register_test(palmier_core_logging_tests)
+
 palmier_register_test(palmier_core_media_manager_tests)
 
 

@@ -652,10 +652,12 @@ jobs:
   #   * build*/         — generated moc_/qrc_/ui_ translation units, not authored code
   #   * /usr/           — Qt, FFmpeg and standard library headers
   #
-  # THE FLOOR IS PROVISIONAL. Nothing has measured this tree yet, so it is set low
-  # enough not to fail a first run and will be raised to just under the measured value
-  # once this job has reported one. A floor that was guessed high would fail a run that
-  # found nothing wrong, and a floor of zero would be a gate in name only.
+  # THE FLOOR IS 78%, derived from measurement rather than taste: the first instrumented
+  # run reported 80.1% line coverage (15570 of 19443 lines), so 78 is close enough that a
+  # real regression trips it and far enough that ordinary variation in which conditional
+  # paths a run takes does not. Branch coverage measured 45.5% and is deliberately not
+  # gated — most of the unhit branches are the vendor codec and Vulkan paths no hosted
+  # runner can execute, so gating on them would gate on the absence of a GPU.
   # ---------------------------------------------------------------------------
   coverage:
     name: Coverage (line coverage over the full suite)
@@ -663,7 +665,7 @@ jobs:
     timeout-minutes: 120
 
     env:
-      COVERAGE_MIN_LINE: 40
+      COVERAGE_MIN_LINE: 78
 
     steps:
       - name: Checkout

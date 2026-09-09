@@ -27,13 +27,18 @@
 // and reports the verdict on stderr, so the application target is buildable and
 // the launch gate is exercisable even where Qt is not installed.
 
+#include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
 
 #include "app/AppSettings.hpp"
 #include "app/ApplicationComposition.hpp"
 #include "app/ComponentConstructionError.hpp"
 #include "app/PlatformCompatibility.hpp"
+#include "core/Logging.hpp"
 #include "core/Result.hpp"
 
 #ifdef PALMIER_HAVE_QT
@@ -48,15 +53,50 @@
 
 namespace {
 
-using palmier::app::AppSettings;
 using palmier::app::AppConfig;
 using palmier::app::ApplicationComposition;
+using palmier::app::AppSettings;
 using palmier::app::CompatibilityReport;
+using palmier::core::LogFormat;
+using palmier::core::LogLevel;
+using palmier::core::sharedLogger;
 
-/// Print the incompatibility report to stderr (used on every build, and as the
-/// only channel in a headless build without Qt).
+/// Configure the process-wide logger from the environment, before anything else has a
+/// chance to report something.
+///
+/// This runs FIRST in main — ahead of even settings resolution — because a diagnostic
+/// produced while resolving settings is itself worth logging, and a logger configured
+/// afterwards would have missed it. The two variables are read directly with
+/// `std::getenv` rather than through `AppSettings`: the logger has to be usable before
+/// settings exist, and adding two keys to the settings table would make the logger
+/// depend on the thing it is meant to be able to report failures in.
+///
+/// The sink writes to stderr, which is where every diagnostic went before this existed,
+/// so redirecting `2>` still captures everything. Standard output stays reserved for
+/// `--help`.
+void configureLoggingFromEnvironment() {
+    const char* rawLevel = std::getenv(palmier::core::kLogLevelEnvironmentVariable);
+    const char* rawFormat = std::getenv(palmier::core::kLogFormatEnvironmentVariable);
+
+    const auto configuration = palmier::core::resolveLoggingConfiguration(
+        rawLevel != nullptr ? std::optional<std::string_view>(rawLevel) : std::nullopt,
+        rawFormat != nullptr ? std::optional<std::string_view>(rawFormat) : std::nullopt);
+
+    sharedLogger().setThreshold(configuration.level);
+    sharedLogger().setSink(palmier::core::makeStreamSink(std::cerr, configuration.format));
+
+    // A rejected value is reported rather than silently defaulted, so a typo in
+    // PALMIER_LOG_LEVEL does not quietly hide output the operator asked for. Reported
+    // AFTER the sink is installed, so the report itself is a log record.
+    for (const std::string& diagnostic : configuration.diagnostics) {
+        sharedLogger().warning("startup", diagnostic);
+    }
+}
+
+/// Report the incompatibility report (used on every build, and as the only channel in a
+/// headless build without Qt). Critical rather than error: the caller exits after this.
 void reportToConsole(const CompatibilityReport& report) {
-    std::cerr << report.message() << '\n';
+    sharedLogger().critical("startup", report.message());
 }
 
 /// Report every input `AppSettings` could not make sense of — a malformed config
@@ -73,8 +113,11 @@ void reportSettingsDiagnostics(const AppSettings& settings) {
         return;
     }
     for (const std::string& diagnostic : settings.diagnostics()) {
-        std::cerr << "palmier-pro: " << diagnostic << '\n';
+        sharedLogger().warning("startup", diagnostic);
     }
+    // The accepted-option list stays a direct stderr write rather than a log record: it
+    // is a multi-line help block, and prefixing each of its lines with a timestamp and
+    // a level would make it unreadable for no gain.
     std::cerr << '\n' << AppSettings::usage();
 }
 
@@ -87,19 +130,26 @@ void reportSettingsDiagnostics(const AppSettings& settings) {
 /// safe fallback installed.
 void reportStartupErrors(const ApplicationComposition& composition) {
     for (const std::string& error : composition.startupErrors()) {
-        std::cerr << "palmier-pro: " << error << '\n';
+        sharedLogger().error("startup", error);
     }
     if (!composition.remoteAccessStartupError().empty()) {
-        std::cerr << "palmier-pro: " << composition.remoteAccessStartupError() << '\n';
+        sharedLogger().error("remote", composition.remoteAccessStartupError());
     }
     if (!composition.remoteAccessWarning().empty()) {
-        std::cerr << "palmier-pro: " << composition.remoteAccessWarning() << '\n';
+        // A warning rather than an error: the endpoint is up, but traffic is
+        // unencrypted (Requirement 10.7).
+        sharedLogger().warning("remote", composition.remoteAccessWarning());
     }
 }
 
-} // namespace
+}  // namespace
 
 int main(int argc, char** argv) {
+    // Configure the log before anything else can report something: a diagnostic
+    // produced while resolving settings below is itself worth logging, and a logger
+    // configured afterwards would have missed it.
+    configureLoggingFromEnvironment();
+
     // Resolve the runtime configuration BEFORE anything else: built-in defaults,
     // then $XDG_CONFIG_HOME/palmier-pro/config, then the PALMIER_* environment
     // variables, then the command line (Requirements 10.2, 16.3). This is what
@@ -129,11 +179,9 @@ int main(int argc, char** argv) {
     if (!report.compatible()) {
         // Requirements 1.4 / 1.5: name each unmet item and exit without the editor.
         reportToConsole(report);
-        const QString title = report.unsupportedPlatform()
-                                  ? QStringLiteral("Unsupported platform")
-                                  : QStringLiteral("Missing dependencies");
-        QMessageBox::critical(nullptr, title,
-                              QString::fromStdString(report.message()));
+        const QString title = report.unsupportedPlatform() ? QStringLiteral("Unsupported platform")
+                                                           : QStringLiteral("Missing dependencies");
+        QMessageBox::critical(nullptr, title, QString::fromStdString(report.message()));
         return 1;
     }
 
@@ -177,15 +225,15 @@ int main(int argc, char** argv) {
     try {
         compositionPtr = std::make_unique<ApplicationComposition>(std::move(config));
     } catch (const palmier::app::ComponentConstructionError& ex) {
-        std::cerr << "palmier-pro: " << ex.what() << '\n';
+        sharedLogger().critical("startup", ex.what());
         QMessageBox::critical(
             nullptr, QStringLiteral("Startup failed"),
             QStringLiteral("Palmier Pro could not start: failed to construct '%1':\n%2")
                 .arg(QString::fromStdString(ex.componentName()),
-                    QString::fromStdString(ex.reason())));
+                     QString::fromStdString(ex.reason())));
         return 1;
     } catch (const std::exception& ex) {
-        std::cerr << "palmier-pro: startup failed: " << ex.what() << '\n';
+        sharedLogger().critical("startup", std::string("startup failed: ") + ex.what());
         QMessageBox::critical(nullptr, QStringLiteral("Startup failed"),
                               QStringLiteral("Palmier Pro could not start:\n%1")
                                   .arg(QString::fromStdString(ex.what())));
@@ -198,12 +246,13 @@ int main(int argc, char** argv) {
     // unchanged (Requirement 7.3); we surface a non-blocking warning and continue
     // running the editor, which is fully usable without the agent endpoint.
     if (const palmier::Result<void> started = composition.start(); !started) {
-        std::cerr << "MCP server did not start: " << started.error().toString() << '\n';
+        sharedLogger().error(
+            "mcp", "server did not start",
+            {palmier::core::LogField{"error", std::string(started.error().toString())}});
         QMessageBox::warning(
             nullptr, QStringLiteral("MCP server unavailable"),
-            QString::fromStdString(
-                "The MCP server could not start:\n" + started.error().message() +
-                "\n\nThe editor will run, but external agents cannot connect."));
+            QString::fromStdString("The MCP server could not start:\n" + started.error().message() +
+                                   "\n\nThe editor will run, but external agents cannot connect."));
     }
 
     // Every non-fatal condition that changed how a component was installed, now
@@ -243,15 +292,17 @@ int main(int argc, char** argv) {
     try {
         compositionPtr = std::make_unique<ApplicationComposition>(settings.config());
     } catch (const palmier::app::ComponentConstructionError& ex) {
-        std::cerr << "palmier-pro: " << ex.what() << '\n';
+        sharedLogger().critical("startup", ex.what());
         return 1;
     } catch (const std::exception& ex) {
-        std::cerr << "palmier-pro: startup failed: " << ex.what() << '\n';
+        sharedLogger().critical("startup", std::string("startup failed: ") + ex.what());
         return 1;
     }
     ApplicationComposition& composition = *compositionPtr;
     if (const palmier::Result<void> started = composition.start(); !started) {
-        std::cerr << "MCP server did not start: " << started.error().toString() << '\n';
+        sharedLogger().error(
+            "mcp", "server did not start",
+            {palmier::core::LogField{"error", std::string(started.error().toString())}});
     } else {
         std::cout << "MCP server listening on " << settings.config().mcpHost << ":"
                   << composition.mcpBoundPort() << "/mcp\n";

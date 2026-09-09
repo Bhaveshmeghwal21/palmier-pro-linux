@@ -55,7 +55,8 @@ add_library(palmier_core STATIC
     TimelineEngine.cpp
     EditCommands.cpp
     MediaManager.cpp
-    ToneCurve.cpp)
+    ToneCurve.cpp
+    Logging.cpp)
 add_library(Palmier::core ALIAS palmier_core)
 
 # Public headers are included as "core/<Header>.hpp" from the src/ root.

@@ -43,11 +43,19 @@ COVERAGE_DIR   ?= build-coverage
 # in parallel and non-atomic counters lose increments.
 COVERAGE_FLAGS ?= --coverage -fprofile-update=atomic -O0 -g0
 
-# Minimum line coverage `coverage-report` will accept. Provisional: it is deliberately
-# below any plausible real figure until the CI coverage job has reported one, because a
-# floor guessed high fails runs that found nothing wrong. Raise it to just under the
-# measured value once measured. CI passes its own value from the job's env.
-COVERAGE_MIN_LINE ?= 40
+# Minimum line coverage `coverage-report` will accept.
+#
+# 78 because the first instrumented run measured 80.1% (15570 of 19443 lines), so this
+# is just under the real figure: close enough that a genuine regression trips it, with
+# enough headroom that ordinary variation in which conditional paths a run takes does
+# not. Raise it when the measured figure rises; do not raise it above what a run has
+# actually reported.
+#
+# Line coverage only. Branch coverage measured 45.5%, which is a much weaker number and
+# is deliberately NOT gated: a large share of the unhit branches are the vendor
+# hardware-codec and Vulkan paths that no CI runner can execute, so gating branches
+# would be gating on the absence of a GPU rather than on the quality of the tests.
+COVERAGE_MIN_LINE ?= 78
 
 # The vendor hardware paths are configured ON deliberately, matching CI: it is what
 # makes the VAAPI/NVENC/QSV code compile and type-check. Hardware *execution* still
