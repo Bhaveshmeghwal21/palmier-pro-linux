@@ -35,6 +35,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -43,6 +44,25 @@
 #include "gpu/GpuTypes.hpp"
 
 namespace palmier::gpu {
+
+/// Fill in which video codecs a device can carry in hardware, from the Vulkan
+/// extensions it advertises.
+///
+/// The queue-family flags establish only THAT a device has a video encode or decode
+/// queue, never which codecs that queue carries; Vulkan advertises those separately,
+/// as one device extension per codec family. `caps.hwDecode` and `caps.hwEncode` are
+/// the gate on the way in — an extension is unusable without a queue to submit to —
+/// and are cleared on the way out if no recognised codec was found, because a video
+/// queue carrying nothing this build understands is not a usable hardware path.
+///
+/// Exposed rather than kept private so it can be tested on a machine with no GPU.
+/// `GpuCaps::encodeCodecs` was previously never populated by anything, which left it
+/// empty on every device; since `EncoderSelector` requires the codec to be IN that
+/// set before it will choose a hardware encoder, hardware encode could not be
+/// selected on any GPU at all. Nothing caught that because the only code that could
+/// populate the set needed a real device to run.
+[[nodiscard]] GpuCaps withVideoCodecsFromExtensions(GpuCaps caps,
+                                                    const std::set<std::string>& extensions);
 
 class FramePool;
 

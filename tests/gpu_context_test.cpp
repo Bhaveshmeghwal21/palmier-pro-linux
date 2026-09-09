@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <filesystem>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -235,6 +236,113 @@ TEST(GpuContext, PersistedSoftwareChoiceHonoredOnAuto) {
     EXPECT_TRUE(ctx.value().isSoftwareFallback());
 
     std::filesystem::remove(path);
+}
+
+// ===========================================================================
+// withVideoCodecsFromExtensions — which codecs a device can carry in hardware
+//
+// This is the mapping that was MISSING. GpuCaps::encodeCodecs was declared and
+// read but never populated, so it was empty on every device; EncoderSelector
+// requires the codec to be in that set before it will choose a hardware encoder,
+// so hardware encode could not be selected on any GPU at all. These cases pin the
+// mapping down on a machine with no GPU, which is what nothing did before.
+// ===========================================================================
+
+// The extension list a real NVIDIA L4 (driver 580.173.02) advertises.
+std::set<std::string> nvidiaL4Extensions() {
+    return {"VK_KHR_video_queue",       "VK_KHR_video_encode_queue", "VK_KHR_video_encode_h264",
+            "VK_KHR_video_encode_h265", "VK_KHR_video_encode_av1",   "VK_KHR_video_decode_h264",
+            "VK_KHR_video_decode_h265", "VK_KHR_video_decode_av1",   "VK_KHR_video_decode_vp9",
+            "VK_KHR_swapchain"};
+}
+
+GpuCaps capsWithQueues(bool hwDecode, bool hwEncode) {
+    GpuCaps caps;
+    caps.vendor = "NVIDIA";
+    caps.vendorId = GpuVendor::NVIDIA;
+    caps.hwDecode = hwDecode;
+    caps.hwEncode = hwEncode;
+    return caps;
+}
+
+TEST(VideoCodecExtensions, AnL4ReportsTheCodecsItAdvertises) {
+    const GpuCaps caps = withVideoCodecsFromExtensions(
+        capsWithQueues(/*hwDecode=*/true, /*hwEncode=*/true), nvidiaL4Extensions());
+
+    EXPECT_TRUE(caps.hwEncode);
+    EXPECT_TRUE(caps.hwDecode);
+    EXPECT_EQ(caps.encodeCodecs, (std::set<CodecId>{CodecId::H264, CodecId::HEVC, CodecId::AV1}));
+    EXPECT_EQ(caps.decodeCodecs,
+              (std::set<CodecId>{CodecId::H264, CodecId::HEVC, CodecId::AV1, CodecId::VP9}));
+}
+
+// The regression this whole change exists for: the condition EncoderSelector
+// applies must now hold for H.264 on hardware that advertises it.
+TEST(VideoCodecExtensions, TheConditionGatingHardwareEncoderSelectionNowHolds) {
+    const GpuCaps caps = withVideoCodecsFromExtensions(
+        capsWithQueues(/*hwDecode=*/true, /*hwEncode=*/true), nvidiaL4Extensions());
+
+    EXPECT_TRUE(caps.hwEncode && caps.encodeCodecs.find(CodecId::H264) != caps.encodeCodecs.end());
+}
+
+// VP9 has a Vulkan DECODE extension but no encode one, so it must not leak across.
+TEST(VideoCodecExtensions, Vp9IsDecodeOnlyAndMpeg2IsNeverHardwareBacked) {
+    const GpuCaps caps = withVideoCodecsFromExtensions(
+        capsWithQueues(/*hwDecode=*/true, /*hwEncode=*/true), nvidiaL4Extensions());
+
+    EXPECT_NE(caps.decodeCodecs.find(CodecId::VP9), caps.decodeCodecs.end());
+    EXPECT_EQ(caps.encodeCodecs.find(CodecId::VP9), caps.encodeCodecs.end());
+    EXPECT_EQ(caps.encodeCodecs.find(CodecId::MPEG2), caps.encodeCodecs.end());
+    EXPECT_EQ(caps.decodeCodecs.find(CodecId::MPEG2), caps.decodeCodecs.end());
+}
+
+// An extension is unusable without a queue to submit to, so the queue flags gate
+// the codec sets rather than the other way round.
+TEST(VideoCodecExtensions, WithoutAnEncodeQueueTheEncodeSetStaysEmpty) {
+    const GpuCaps caps = withVideoCodecsFromExtensions(
+        capsWithQueues(/*hwDecode=*/true, /*hwEncode=*/false), nvidiaL4Extensions());
+
+    EXPECT_FALSE(caps.hwEncode);
+    EXPECT_TRUE(caps.encodeCodecs.empty());
+    // The decode half is unaffected by the missing encode queue.
+    EXPECT_TRUE(caps.hwDecode);
+    EXPECT_FALSE(caps.decodeCodecs.empty());
+}
+
+// A video queue that carries no codec this build understands is not a usable
+// hardware path, and must not claim to be one.
+TEST(VideoCodecExtensions, AnEncodeQueueWithNoRecognisedCodecClearsTheFlag) {
+    const GpuCaps caps = withVideoCodecsFromExtensions(
+        capsWithQueues(/*hwDecode=*/true, /*hwEncode=*/true),
+        {"VK_KHR_video_queue", "VK_KHR_video_encode_queue", "VK_KHR_video_decode_h264"});
+
+    EXPECT_FALSE(caps.hwEncode);
+    EXPECT_TRUE(caps.encodeCodecs.empty());
+    EXPECT_TRUE(caps.hwDecode);
+    EXPECT_EQ(caps.decodeCodecs, (std::set<CodecId>{CodecId::H264}));
+}
+
+TEST(VideoCodecExtensions, ADeviceWithNoVideoExtensionsAtAllReportsNoHardwareCodecs) {
+    const GpuCaps caps = withVideoCodecsFromExtensions(
+        capsWithQueues(/*hwDecode=*/true, /*hwEncode=*/true), {"VK_KHR_swapchain"});
+
+    EXPECT_FALSE(caps.hwDecode);
+    EXPECT_FALSE(caps.hwEncode);
+    EXPECT_TRUE(caps.decodeCodecs.empty());
+    EXPECT_TRUE(caps.encodeCodecs.empty());
+}
+
+TEST(VideoCodecExtensions, TheVendorAndVramFieldsAreCarriedThroughUntouched) {
+    GpuCaps in = capsWithQueues(/*hwDecode=*/true, /*hwEncode=*/true);
+    in.vramBytes = 23034ULL * 1024 * 1024;
+    in.supportsCompute = true;
+
+    const GpuCaps caps = withVideoCodecsFromExtensions(in, nvidiaL4Extensions());
+
+    EXPECT_EQ(caps.vendor, "NVIDIA");
+    EXPECT_EQ(caps.vendorId, GpuVendor::NVIDIA);
+    EXPECT_EQ(caps.vramBytes, 23034ULL * 1024 * 1024);
+    EXPECT_TRUE(caps.supportsCompute);
 }
 
 } // namespace

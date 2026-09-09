@@ -10,7 +10,10 @@
 
 #include "gpu/GpuContext.hpp"
 
+#include <set>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "gpu/FramePool.hpp"
 #include "gpu/GpuSelection.hpp"
@@ -20,6 +23,38 @@
 #endif
 
 namespace palmier::gpu {
+
+// Which of a device's advertised Vulkan extensions correspond to codecs this
+// build understands. Separate from the probe, and pure, so it is testable on a
+// machine with no GPU — the previous absence of any such test is exactly why
+// GpuCaps::encodeCodecs stayed empty on every device without anyone noticing.
+//
+// `caps.hwDecode` / `caps.hwEncode` come in from the queue-family probe and act
+// as the gate: an extension is unusable without a queue to submit to. They are
+// also narrowed on the way out, because a video queue that carries no codec this
+// build recognises is not a usable hardware path and must not claim to be one.
+GpuCaps withVideoCodecsFromExtensions(GpuCaps caps, const std::set<std::string>& extensions) {
+    const auto advertises = [&extensions](const char* name) {
+        return extensions.find(std::string{name}) != extensions.end();
+    };
+
+    if (caps.hwDecode) {
+        if (advertises("VK_KHR_video_decode_h264")) caps.decodeCodecs.insert(CodecId::H264);
+        if (advertises("VK_KHR_video_decode_h265")) caps.decodeCodecs.insert(CodecId::HEVC);
+        if (advertises("VK_KHR_video_decode_av1")) caps.decodeCodecs.insert(CodecId::AV1);
+        if (advertises("VK_KHR_video_decode_vp9")) caps.decodeCodecs.insert(CodecId::VP9);
+        if (caps.decodeCodecs.empty()) caps.hwDecode = false;
+    }
+    // Vulkan publishes no MPEG-2 video extension, and no VP9 ENCODE extension, so
+    // CodecId::MPEG2 is never hardware-backed here and VP9 is decode-only.
+    if (caps.hwEncode) {
+        if (advertises("VK_KHR_video_encode_h264")) caps.encodeCodecs.insert(CodecId::H264);
+        if (advertises("VK_KHR_video_encode_h265")) caps.encodeCodecs.insert(CodecId::HEVC);
+        if (advertises("VK_KHR_video_encode_av1")) caps.encodeCodecs.insert(CodecId::AV1);
+        if (caps.encodeCodecs.empty()) caps.hwEncode = false;
+    }
+    return caps;
+}
 
 // ---------------------------------------------------------------------------
 // Vulkan-backed enumeration (compiled only when the headers are present).
@@ -69,6 +104,54 @@ void probeQueueCapabilities(VkPhysicalDevice device, GpuCaps& caps) {
     }
 }
 
+// Which codecs the device can actually carry in hardware.
+//
+// The queue-family flags above establish only THAT a device has a video encode or
+// decode queue, never which codecs that queue can carry. Vulkan advertises the
+// codecs separately, as one device extension per codec family, so the extension
+// list is what turns "has an encode queue" into "can encode H.264".
+//
+// This matters more than it looks. GpuCaps::encodeCodecs and decodeCodecs were
+// declared and READ — EncoderSelector requires `hwEncode && encodeCodecs contains
+// codec` before it will choose a hardware encoder, and CodecBridge consults the
+// same sets — but nothing ever populated them. They were empty on every device, so
+// the second half of that condition was always false and a hardware encoder could
+// never be selected on ANY GPU, whatever the hardware supported. The vendor SDK
+// paths compiled, the queue bit was detected, and selection still fell back to
+// software every time. Verified against an NVIDIA L4, which advertises
+// VK_KHR_video_encode_h264 revision 14 and a queue family with
+// VK_QUEUE_VIDEO_ENCODE_BIT_KHR: before this, encodeCodecs was empty and the
+// export chose libx264.
+//
+// Codec support is reported per operation, so the two sets are populated
+// independently: this hardware decodes VP9 but cannot encode it, and Vulkan has no
+// MPEG-2 video extension at all, so CodecId::MPEG2 is never hardware-backed here.
+//
+// Gated on the queue bits because an extension is unusable without a queue to
+// submit to; that is why this must run AFTER probeQueueCapabilities.
+void probeVideoCodecs(VkPhysicalDevice device, GpuCaps& caps) {
+    if (!caps.hwDecode && !caps.hwEncode) return;
+
+    uint32_t count = 0;
+    if (vkEnumerateDeviceExtensionProperties(device, nullptr, &count, nullptr) != VK_SUCCESS ||
+        count == 0) {
+        return;
+    }
+    std::vector<VkExtensionProperties> extensions(count);
+    if (vkEnumerateDeviceExtensionProperties(device, nullptr, &count, extensions.data()) !=
+        VK_SUCCESS) {
+        return;
+    }
+
+    std::set<std::string> names;
+    for (const VkExtensionProperties& e : extensions) {
+        names.emplace(static_cast<const char*>(e.extensionName));
+    }
+    // The mapping itself is a pure function so it can be tested without a GPU,
+    // which is the whole reason the empty sets went unnoticed before.
+    caps = withVideoCodecsFromExtensions(std::move(caps), names);
+}
+
 } // namespace
 
 std::vector<GpuDeviceInfo> GpuContext::enumerateVulkanDevices() {
@@ -116,6 +199,9 @@ std::vector<GpuDeviceInfo> GpuContext::enumerateVulkanDevices() {
         caps.vendor = std::string{vendorName(info.vendor)};
         caps.vramBytes = deviceLocalMemoryBytes(devices[i]);
         probeQueueCapabilities(devices[i], caps);
+        // Must follow the queue probe: it narrows the codec sets using the
+        // hwDecode/hwEncode flags that probe establishes.
+        probeVideoCodecs(devices[i], caps);
         info.caps = std::move(caps);
 
         result.push_back(std::move(info));

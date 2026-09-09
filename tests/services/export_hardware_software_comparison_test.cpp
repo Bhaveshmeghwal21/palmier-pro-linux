@@ -369,7 +369,24 @@ struct DecodedOutput {
 class ExportHardwareSoftwareComparisonTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        context_ = std::make_unique<gpu::GpuContext>(gpu::GpuContext::softwareFallback());
+        // Export through the device this test GATES on.
+        //
+        // This used to be an unconditional GpuContext::softwareFallback(), which made
+        // the hardware half of the comparison impossible to reach: the skip above asks
+        // the LIVE device (via GpuContext::create(automatic()) in HardwareSkip.hpp)
+        // whether it can encode H.264, so on a host that can, the test proceeded — and
+        // then measured an export through a context whose vendor was "software".
+        // EncoderSelector correctly refused a hardware encoder for that vendor, and the
+        // assertion that hardware was used could never hold. Nothing noticed while no
+        // runner had a GPU, because the skip always fired first.
+        //
+        // create(automatic()) is the same call the skip decision and the production
+        // composition root both make, and it degrades to software on a host with no
+        // usable device, so this stays correct where there is no GPU.
+        Result<gpu::GpuContext> created =
+            gpu::GpuContext::create(gpu::GpuSelectionPolicy::automatic());
+        context_ = std::make_unique<gpu::GpuContext>(
+            created.isOk() ? std::move(created.value()) : gpu::GpuContext::softwareFallback());
         ASSERT_TRUE(session_
                         .createProject("export-hw-sw-comparison", fixtureFrameRate(),
                                        kFixtureResolution, defaultColorSpace())
