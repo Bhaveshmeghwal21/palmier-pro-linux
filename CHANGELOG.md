@@ -100,6 +100,19 @@ file shrank from 2767 lines to 160, and the diagnostic surface went from twelve
 
 ### Fixed
 
+- **Hardware encode could not be selected on any GPU.** `GpuCaps::encodeCodecs` and
+  `decodeCodecs` were declared and read in four places that gate hardware selection —
+  `EncoderSelector` requires `hwEncode && encodeCodecs` contains the codec — but nothing
+  ever populated them, so they were empty on every device and the export silently used
+  libx264 no matter what the hardware supported. They are now filled from the Vulkan
+  video extensions the device advertises (`VK_KHR_video_encode_h264` and friends), gated
+  by the encode/decode queue bits. The mapping is a pure function so it can be tested
+  without a GPU, which is precisely what nothing did before.
+- **The hardware/software comparison test could not have passed either.** Its fixture
+  hard-coded `GpuContext::softwareFallback()` while the skip above it gated on the live
+  device, so on a host with a hardware encoder the test proceeded and then measured a
+  software export. It now creates the context the same way the skip decision and the
+  production composition root do.
 - **A `PALMIER_BUILD_UI=OFF` build did not compile.** `tests/ui/shell_unit_test.cpp` and
   `tests/ui/shell_layout_property_test.cpp` each keep a no-Qt fallback branch that
   registers one recorded skip, but `#include <gtest/gtest.h>` sat inside the Qt branch,

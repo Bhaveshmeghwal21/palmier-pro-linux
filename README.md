@@ -187,11 +187,23 @@ export, audio playback and metering, timeline waveforms, scrub audio, a full pri
 grade with tone curves, video scopes, 3D LUTs, project save/load, the MCP server and
 agent chat, localization, and Debian/Flatpak/AppImage packaging.
 
-**Compiled and type-checked but not executed in CI:** the VAAPI, NVENC and Quick Sync
-paths, and the Vulkan compositor. No hosted runner has a GPU or an encode device, so
-CI proves these *build* and that the software fallback is what actually runs. Hardware
-encode is verified separately by the `l4-validation` job, which requires a self-hosted
-NVIDIA L4 runner — see [`docs/HARDWARE_ENCODE.md`](docs/HARDWARE_ENCODE.md).
+**Verified on real NVIDIA hardware:** H.264 hardware encode. The `l4-validation` job runs
+on a self-hosted NVIDIA L4 runner and exports a 300-frame 1920x1080/30 fps fixture,
+recording what actually happened:
+
+```
+PALMIER_L4_ENCODER_NAME=h264_nvenc      PALMIER_L4_USED_HARDWARE_ENCODE=true
+PALMIER_L4_FRAMES_ENCODED=300           PALMIER_L4_SOFTWARE_FALLBACK=false
+PALMIER_L4_ELAPSED_MS=11863             PALMIER_L4_OUTPUT_BYTES=622870
+```
+
+The same job asserts the hardware and software exports of that fixture agree on frame
+count and duration, so "NVENC works" is a measurement rather than a claim. See
+[`docs/HARDWARE_ENCODE.md`](docs/HARDWARE_ENCODE.md).
+
+**Compiled and type-checked but not executed:** the VAAPI and Quick Sync paths, and the
+Vulkan compositor. No hosted runner has an AMD or Intel encode device, so CI proves these
+*build* and that the software fallback is what actually runs when no device is present.
 
 **Not yet at parity with the upstream product.** The gaps are enumerated and prioritised
 in [`docs/UPSTREAM_PARITY.md`](docs/UPSTREAM_PARITY.md) rather than left implicit; the
