@@ -102,13 +102,13 @@ make test-verbose      # per-test output, JUnit XML, and a generated summary
 make coverage          # instrumented build, then a gcovr line-coverage report
 ```
 
-The suite is **1699 GoogleTest and RapidCheck cases across 93 test executables**, and
+The suite is **1706 GoogleTest and RapidCheck cases across 93 test executables**, and
 CI runs all of them on every push to every branch. It is not only unit tests: there are
 property tests over generated timelines, round-trip tests over the project format,
 agent/UI edit-equivalence tests, and documentation-consistency tests that fail the build
 when a CMake option or an agent tool is added without documenting it.
 
-**Line coverage is 80.1%** (15570 of 19443 lines), measured by a dedicated CI job that
+**Line coverage is 80.3%** (15799 of 19685 lines), measured by a dedicated CI job that
 fails the build below a floor of 78% and publishes Cobertura XML, an lcov
 `coverage.info` and drill-down HTML as an artifact. Branch coverage is 45.5% and is
 deliberately not gated: most of the unhit branches are the vendor hardware-codec and

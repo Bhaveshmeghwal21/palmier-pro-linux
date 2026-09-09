@@ -688,6 +688,76 @@ jobs:
   # (--fail-under-line), and still emits an lcov-format coverage.info for anything that
   # expects one.
   #
+  # ---------------------------------------------------------------------------
+  # Can this push's coverage run be skipped?
+  #
+  # The coverage job builds the whole tree instrumented and runs the full suite:
+  # roughly forty minutes, and a 2.2 GB build directory. A commit that edits only
+  # prose cannot move a line-coverage figure, so paying that for a README fix is
+  # pure waste, and it delays the jobs that do say something.
+  #
+  # Deliberately written as an ALLOW-LIST of paths that cannot affect coverage,
+  # never as a deny-list of paths that can. Anything unrecognised runs coverage.
+  # The asymmetry is the point: being wrong in the safe direction costs forty
+  # minutes, being wrong in the unsafe direction lets an uncovered change through,
+  # so "I do not recognise this path" must mean "run it".
+  #
+  # A dispatch or a tag always runs it, because both are deliberate acts —
+  # someone asking for a full check, or cutting a release.
+  # ---------------------------------------------------------------------------
+  coverage-needed:
+    name: Decide whether coverage can be skipped
+    runs-on: ubuntu-24.04
+    outputs:
+      needed: ${{ steps.decide.outputs.needed }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide
+        id: decide
+        run: |
+          decide() { echo "needed=$1" >> "$GITHUB_OUTPUT"; echo "coverage needed: $1 — $2"; }
+
+          if [ "${{ github.event_name }}" != "push" ]; then
+            decide true "the event is ${{ github.event_name }}, not an ordinary push"
+            exit 0
+          fi
+          if [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "true" ]; then
+            decide true "this is a tag, so the release must be measured"
+            exit 0
+          fi
+
+          base="${{ github.event.before }}"
+          if [ -z "${base}" ] || [ "${base}" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            decide true "no usable base commit to diff against, so nothing can be ruled out"
+            exit 0
+          fi
+
+          files="$(git diff --name-only --diff-filter=ACMRD "${base}" HEAD)"
+          if [ -z "${files}" ]; then
+            decide true "the diff is empty, which is unexpected enough to warrant running"
+            exit 0
+          fi
+          echo "changed files:"
+          printf '  %s\n' ${files}
+
+          # Paths that cannot change C++ line coverage.
+          cannot='(^|/)[^/]+\.md$|^docs/|^LICENSE$|^NOTICE$|^\.gitignore$|^\.dockerignore$|^\.env\.example$|^\.github/dependabot\.yml$'
+          rest="$(printf '%s\n' ${files} | grep -Ev "${cannot}" || true)"
+          if [ -z "${rest}" ]; then
+            decide false "every changed path is documentation or repository metadata"
+          else
+            echo "paths that could affect coverage:"
+            printf '  %s\n' ${rest}
+            decide true "$(printf '%s\n' ${rest} | wc -l) changed path(s) could affect coverage"
+          fi
+
+  # ---------------------------------------------------------------------------
   # WHAT IS EXCLUDED, and why each is not coverage of this project's behaviour:
   #   * tests/          — measuring the tests against themselves inflates the number
   #   * build*/         — generated moc_/qrc_/ui_ translation units, not authored code
@@ -704,6 +774,8 @@ jobs:
     name: Coverage (line coverage over the full suite)
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    needs: coverage-needed
+    if: needs.coverage-needed.outputs.needed == 'true'
 
     env:
       COVERAGE_MIN_LINE: 78
