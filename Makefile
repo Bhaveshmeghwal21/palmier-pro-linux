@@ -124,11 +124,18 @@ coverage-test: ## Run the suite against the instrumented tree, producing .gcda f
 
 coverage-report: ## Turn the .gcda files into a report and enforce the floor
 	@mkdir -p coverage-html
+	@# --merge-mode-functions is load-bearing, not decoration. src/media/MediaProbe.cpp
+	@# defines isFfmpegAvailable() twice — once under #ifdef PALMIER_HAVE_FFMPEG and
+	@# once in the #else — so the same symbol legitimately has two line numbers. gcovr's
+	@# default function-merge mode is `strict`, which treats that as an AssertionError
+	@# and aborts the whole report. merge-use-line-min accepts it and takes the lower
+	@# line. This affects only function-level aggregation; line coverage is unchanged.
 	gcovr --root . \
 		--filter 'src/' \
 		--exclude '.*/tests/.*' \
 		--gcov-ignore-parse-errors \
 		--exclude-unreachable-branches \
+		--merge-mode-functions=merge-use-line-min \
 		--print-summary \
 		--xml coverage.xml \
 		--html-details coverage-html/index.html \
@@ -137,7 +144,8 @@ coverage-report: ## Turn the .gcda files into a report and enforce the floor
 	@# lcov-format output for anything that expects coverage.info. Non-fatal because
 	@# --lcov arrived in gcovr 7.0 and the report above is the actual gate.
 	@gcovr --root . --filter 'src/' --exclude '.*/tests/.*' \
-		--gcov-ignore-parse-errors --lcov coverage.info $(COVERAGE_DIR) \
+		--gcov-ignore-parse-errors --merge-mode-functions=merge-use-line-min \
+		--lcov coverage.info $(COVERAGE_DIR) \
 		|| printf 'note: this gcovr has no --lcov; coverage.xml and the HTML remain\n'
 
 lint: format-check py-lint check-consistency ## Every check the CI lint job runs
