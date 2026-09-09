@@ -11,6 +11,16 @@ task's completion commit, its CI run and the suite size at that point.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-09
+
+Engineering-quality release. No change to what the editor does; substantial change to how
+much of it is proven, reproducible and observable.
+
+At a glance: the suite grew from 1652 to 1699 cases, line coverage is measured for the
+first time (80.3%) and gated at 78%, CI grew from four jobs to six, the largest source
+file shrank from 2767 lines to 160, and the diagnostic surface went from twelve
+`std::cerr` writes to a structured logger.
+
 ### Added
 
 - **Structured, levelled logging** (`core/Logging.hpp`). Six severities plus `off`, a
@@ -90,6 +100,17 @@ task's completion commit, its CI run and the suite size at that point.
 
 ### Fixed
 
+- **A `PALMIER_BUILD_UI=OFF` build did not compile.** `tests/ui/shell_unit_test.cpp` and
+  `tests/ui/shell_layout_property_test.cpp` each keep a no-Qt fallback branch that
+  registers one recorded skip, but `#include <gtest/gtest.h>` sat inside the Qt branch,
+  so `TEST` was undefined in the fallback. No CI lane built with the UI off, so nothing
+  had ever compiled that path. Found by running the `l4-validation` job's own sequence
+  on real NVIDIA L4 hardware.
+- **The `l4-validation` job's CTest filter matched no test.** It filtered on the target
+  name, but `palmier_register_test` registers through `gtest_discover_tests`, so test
+  names are GoogleTest's. The target name existed as a test name only via the
+  `…_NOT_BUILT` sentinel CMake adds when an executable is missing — so the filter matched
+  a test only when the build was broken, and nothing when it was healthy.
 - A race in the export coordinator's cancellation test, where a hook documented as
   parking a worker only signalled it.
 
