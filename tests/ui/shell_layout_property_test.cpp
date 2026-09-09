@@ -26,12 +26,18 @@
 
 #include "ui/MainWindow.hpp"
 
+// Unconditional, because BOTH branches below need it: the Qt branch for its property
+// tests, and the `#else` branch for the single recorded skip. It used to live inside
+// the Qt branch, which meant a PALMIER_BUILD_UI=OFF build did not skip this file — it
+// failed to COMPILE it, with `TEST` undefined at the skip. Nothing noticed because no
+// CI lane configured tests with the UI off; the l4-validation job does exactly that.
+#include <gtest/gtest.h>
+
 #ifdef PALMIER_HAVE_QT
 
 #include <QApplication>
 #include <QDockWidget>
 
-#include <gtest/gtest.h>
 #include <rapidcheck.h>
 #include <rapidcheck/gtest.h>
 

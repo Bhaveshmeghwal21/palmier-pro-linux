@@ -558,6 +558,9 @@ jobs:
             echo "${files}"
             echo 'PALMIER_EOF'
           } >> "$GITHUB_OUTPUT"
+          # The gate needs the same base to work out which LINES changed, not just
+          # which files, so publish it rather than resolving it twice.
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
 
       - name: Check the formatting of the changed files (gate)
         run: |
@@ -566,9 +569,47 @@ jobs:
             echo "no C++ files changed; nothing to check"
             exit 0
           fi
-          # shellcheck disable=SC2086
-          clang-format --dry-run --Werror ${files}
-          echo "OK: every changed C++ file matches .clang-format"
+
+          # Gate the CHANGED LINES, not whole files.
+          #
+          # 341 of 357 files predate .clang-format. Gating whole files would mean a
+          # one-line bug fix in a 1841-line legacy file could only be landed by
+          # reformatting all 1841 lines — unrelated churn in the same commit as the fix,
+          # which is worse for review and worse for `git blame` than the misformatting
+          # it removes. clang-format's own --lines flag is the tool for this: it
+          # formats only the ranges given, so new and edited code is held to the style
+          # while untouched code is left alone. A newly added file has every line in its
+          # diff, so it is still checked in full.
+          base='${{ steps.changed.outputs.base }}'
+          status=0
+          for f in ${files}; do
+            # Turn each hunk header's "+start,count" into clang-format --lines flags.
+            # Kept to POSIX sed + awk so it behaves the same whether the runner image
+            # ships mawk or gawk — gawk's 3-argument match() would be neater but is not
+            # portable. A heredoc-fed `while read` loop would also work but puts `args`
+            # in a subshell, where the assignment is lost.
+            args="$(git diff -U0 --diff-filter=ACMR "${base}" HEAD -- "$f" \
+                    | sed -n 's/^@@ -[0-9,]* +\([0-9][0-9]*\),\{0,1\}\([0-9]*\) @@.*/\1 \2/p' \
+                    | awk '{ c = ($2 == "" ? 1 : $2); if (c > 0) printf " --lines=%d:%d", $1, $1 + c - 1 }')"
+            if [ -z "${args}" ]; then
+              echo "  ---- ${f}: no added or modified lines to check"
+              continue
+            fi
+            # shellcheck disable=SC2086
+            if clang-format ${args} "$f" | diff -q - "$f" >/dev/null 2>&1; then
+              echo "  OK   ${f}"
+            else
+              status=1
+              echo "  FAIL ${f} — the lines this push changed are not formatted:"
+              # shellcheck disable=SC2086
+              clang-format ${args} "$f" | diff -u "$f" - | sed 's/^/    /' | head -40
+            fi
+          done
+          if [ "${status}" -ne 0 ]; then
+            echo "::error::run 'make format' (or clang-format -i) on the lines you changed"
+            exit 1
+          fi
+          echo "OK: every line this push changed matches .clang-format"
 
       # Reported, not gated. Publishing the number keeps the incremental-adoption
       # claim honest and makes progress visible instead of asserted.
@@ -1224,7 +1265,16 @@ jobs:
         run: |
           set -o pipefail
           status=0
-          ctest --test-dir build-l4 -R palmier_services_export_hw_sw_comparison_tests -V \
+          # -R matches CTest test NAMES, and palmier_register_test registers through
+          # gtest_discover_tests, so the names are GoogleTest's
+          # (ExportHardwareSoftwareComparisonTest.…), not the target's. Filtering on the
+          # TARGET name matched nothing in a healthy build: the only test it ever matched
+          # was the `…_NOT_BUILT` sentinel CMake registers when the executable is
+          # missing, so a BROKEN build looked like a found test while a WORKING build
+          # looked like an empty run. Confirmed on real L4 hardware — the discovered
+          # names are ExportHardwareSoftwareComparisonTest.HardwareAndSoftwareExports…
+          # and ExportHardwareSoftwareComparisonGuard.DistinguishesMissing….
+          ctest --test-dir build-l4 -R ExportHardwareSoftwareComparison -V \
             2>&1 | tee ctest-l4.log || status=$?
           echo "ctest-status=${status}" >> "$GITHUB_OUTPUT"
           echo "ctest exited with status ${status}"
