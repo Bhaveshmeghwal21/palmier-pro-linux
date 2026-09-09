@@ -65,6 +65,20 @@ task's completion commit, its CI run and the suite size at that point.
 
 ### Changed
 
+- **The editor tool surface is one translation unit per subject.**
+  `services/ToolRegistry.cpp` held the registry container, every shared helper and all
+  42 tool factories in a single anonymous namespace across 2767 lines; it is now 160
+  lines holding just the container and the registration order, alongside ten files of
+  which the largest is 417 lines. Symbols were promoted out of the anonymous namespace
+  only where more than one of the new files uses them, so internal linkage is kept
+  wherever it is still correct. The published surface is unchanged — the same 42 tools
+  in the same order with the same schemas and handlers — so `tools/list` output and
+  `docs/TOOLS.md` are untouched.
+- **The tool surface's source list is named once.** Twenty-two standalone test targets
+  compile these sources directly rather than linking `Palmier::services`, deliberately,
+  to avoid its Qt/FFmpeg/libsecret/lcms2 dependencies. They now share
+  `PALMIER_TOOL_SURFACE_SOURCES`, so adding a translation unit is a one-line change
+  instead of twenty-three edits that can silently disagree.
 - Project schema `1.4` → `1.5`, adding `Effect::resourcePath` for the LUT file. The key
   is omitted entirely when empty, so a project with no LUT is byte-identical to the
   previous format apart from the version string.

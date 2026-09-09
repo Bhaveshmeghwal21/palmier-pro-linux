@@ -940,7 +940,7 @@ add_executable(palmier_services_generative_atomicity_property_tests
     "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -1082,7 +1082,7 @@ palmier_register_test(palmier_services_mcp_server_tests)
 add_executable(palmier_services_mcp_executor_tests
     services/mcp_tool_executor_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -1143,7 +1143,7 @@ add_executable(palmier_services_agent_orchestrator_tests
     services/agent_orchestrator_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -1197,7 +1197,7 @@ add_executable(palmier_services_mcp_http_integration_tests
     "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -1237,7 +1237,7 @@ add_executable(palmier_services_edit_equivalence_property_tests
     services/edit_equivalence_property_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -1285,7 +1285,7 @@ add_executable(palmier_services_mention_resolver_tests
     "${PROJECT_SOURCE_DIR}/src/services/OfflineIntentInterpreter.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -1353,7 +1353,7 @@ add_executable(palmier_services_mention_auth_gating_tests
     "${PROJECT_SOURCE_DIR}/src/services/MentionResolver.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -1489,7 +1489,7 @@ add_executable(palmier_ui_agent_chat_viewmodel_tests
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/MentionResolver.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -1582,7 +1582,7 @@ add_executable(palmier_app_composition_tests
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerationModelCatalog.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"
@@ -1725,7 +1725,7 @@ palmier_register_test(palmier_services_tool_schema_tests)
 # ---------------------------------------------------------------------------
 add_executable(palmier_services_tool_registry_schema_tests
     services/tool_registry_schema_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -1762,7 +1762,7 @@ palmier_register_test(palmier_services_tool_registry_schema_tests)
 # ---------------------------------------------------------------------------
 add_executable(palmier_services_tool_schema_conformance_tests
     services/tool_schema_conformance_property_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -1933,7 +1933,7 @@ palmier_register_test(palmier_services_media_import_tests)
 add_executable(palmier_services_session_tools_tests
     services/session_media_track_tools_test.cpp
     services/timeline_track_tools_property_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/MediaImportService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
@@ -1988,7 +1988,7 @@ palmier_register_test(palmier_services_session_tools_tests)
 # ---------------------------------------------------------------------------
 add_executable(palmier_services_project_tools_tests
     services/project_tools_property_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -2081,7 +2081,7 @@ add_executable(palmier_services_mcp_session_tests
     "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -2139,7 +2139,7 @@ add_executable(palmier_services_mcp_protocol_tests
     "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -2220,7 +2220,7 @@ add_executable(palmier_services_remote_access_tests
     "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -2633,7 +2633,7 @@ add_executable(palmier_services_agent_offline_tests
     "${PROJECT_SOURCE_DIR}/src/services/OfflineIntentInterpreter.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AgentInterpreterRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -2737,7 +2737,7 @@ add_executable(palmier_services_generative_lifecycle_tests
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -2925,7 +2925,7 @@ add_executable(palmier_services_agent_equivalence_tests
     "${PROJECT_SOURCE_DIR}/src/services/OfflineIntentInterpreter.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -3031,7 +3031,7 @@ target_sources(palmier_docs_tests PRIVATE
     support/DocumentationChecker.cpp
     "${PROJECT_SOURCE_DIR}/src/services/GenerationModelCatalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -3250,7 +3250,7 @@ add_executable(palmier_services_offline_mode_tests
     "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
@@ -3371,7 +3371,7 @@ add_executable(palmier_e2e_tests
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeMediaCoordinator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerationModelCatalog.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpServer.cpp"

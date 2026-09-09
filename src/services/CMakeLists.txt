@@ -55,9 +55,13 @@ target_link_libraries(palmier_services PUBLIC
 # tool input schemas and carry tool call arguments/results, so this surface
 # stays transport-agnostic and depends only on Palmier::core. Appended here so
 # the existing source list above is preserved verbatim.
+#
+# The surface itself is one translation unit per subject rather than one large
+# file; PALMIER_TOOL_SURFACE_SOURCES (root CMakeLists.txt) is the single list, so
+# this target and the standalone test targets cannot compile different sets.
 target_sources(palmier_services PRIVATE
     Json.cpp
-    ToolRegistry.cpp)
+    ${PALMIER_TOOL_SURFACE_SOURCES})
 
 
 

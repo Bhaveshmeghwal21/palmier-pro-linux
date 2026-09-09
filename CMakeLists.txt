@@ -60,6 +60,39 @@ if(PALMIER_BUILD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
+# The editor tool surface's translation units.
+#
+# services/ToolRegistry.cpp used to be a single 2767-line file holding the
+# registry container, every shared helper and all 42 tool factories in one
+# anonymous namespace. It is now one translation unit per subject, so the surface
+# is no longer a single file name a target can spell out.
+#
+# That matters here because the surface is compiled in two different ways. The
+# palmier_services library compiles it as part of the library, and twenty-two
+# standalone test targets compile the same sources DIRECTLY into the test binary
+# instead of linking Palmier::services — deliberately, so those tests avoid the
+# Qt/FFmpeg/libsecret/lcms2 dependencies the full library pulls in.
+#
+# Naming the list once, here, before the subdirectories that consume it, means
+# adding a translation unit to the surface is a one-line change rather than
+# twenty-three separate edits that can silently disagree with each other. A
+# missing entry in any one of them is a link error, not a quiet omission.
+# ---------------------------------------------------------------------------
+set(PALMIER_TOOL_SURFACE_SOURCES
+    "${PROJECT_SOURCE_DIR}/src/services/ToolRegistry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolVocabulary.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolSerialization.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ToolArguments.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/TimelineClipTools.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/TimelineEffectTools.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/TimelineTextTools.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectTools.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/MediaTools.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/TrackTools.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/GenerationExportTools.cpp")
+
+
+# ---------------------------------------------------------------------------
 # Module subdirectory layout.
 #
 #   src/core     — UI-agnostic domain core (types, project model, timeline engine)
