@@ -141,7 +141,7 @@ public:
 
     /// Server identity defaults reported by `initialize` (Requirement 9.2).
     static constexpr std::string_view kDefaultServerName    = "palmier-pro-linux";
-    static constexpr std::string_view kDefaultServerVersion = "0.1.0";
+    static constexpr std::string_view kDefaultServerVersion = "0.2.0";
 
     struct Options {
         std::string               serverName{kDefaultServerName};

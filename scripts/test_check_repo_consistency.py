@@ -170,6 +170,71 @@ class MakefileTargets(unittest.TestCase):
         self.assertEqual(checker.check_makefile_targets(self.root), [])
 
 
+class ReleaseVersionAgreement(unittest.TestCase):
+    """A clean result only means something if a drift is detected, so test both."""
+
+    CMAKE = 'project(PalmierProLinux\n    VERSION 0.2.0\n    LANGUAGES CXX)\n'
+    CPACK = 'set(CPACK_PACKAGE_VERSION "0.2.0")\n'
+    HEADER = ('class McpProtocolHandler {\n'
+              '    static constexpr std::string_view kDefaultServerVersion = "0.2.0";\n};\n')
+    CHANGELOG = '# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-09-09\n\n## [0.1.0] - 2026-08-31\n'
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        self._write_all()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _write_all(self, cmake=None, cpack=None, header=None, changelog=None) -> None:
+        write(self.root, "CMakeLists.txt", cmake if cmake is not None else self.CMAKE)
+        write(self.root, "packaging/CPackConfig.cmake", cpack if cpack is not None else self.CPACK)
+        write(self.root, "src/services/McpProtocolHandler.hpp",
+              header if header is not None else self.HEADER)
+        write(self.root, "CHANGELOG.md",
+              changelog if changelog is not None else self.CHANGELOG)
+
+    def test_all_four_agreeing_is_clean(self):
+        self.assertEqual(checker.check_version_agreement(self.root), [])
+
+    def test_the_packaging_config_lagging_behind_is_a_failure(self):
+        # Exactly the real drift: the tag and CMake moved, the standalone cpack
+        # config did not, so the .deb would be stamped with the old version.
+        self._write_all(cpack='set(CPACK_PACKAGE_VERSION "0.1.0")\n')
+        failures = checker.check_version_agreement(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("disagrees", failures[0])
+        self.assertIn("0.1.0", failures[0])
+        self.assertIn("CPackConfig.cmake", failures[0])
+
+    def test_the_mcp_server_version_lagging_behind_is_a_failure(self):
+        self._write_all(header=self.HEADER.replace("0.2.0", "0.1.0"))
+        failures = checker.check_version_agreement(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("McpProtocolHandler.hpp", failures[0])
+
+    def test_a_changelog_without_the_released_version_is_a_failure(self):
+        self._write_all(changelog="# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-08-31\n")
+        failures = checker.check_version_agreement(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("CHANGELOG", failures[0])
+
+    def test_the_unreleased_heading_is_not_mistaken_for_a_version(self):
+        # [Unreleased] carries no version, so the newest RELEASED heading is the
+        # one that must agree. A checker that read the first heading blindly would
+        # find no version at all and pass vacuously.
+        self.assertEqual(checker.check_version_agreement(self.root), [])
+        self._write_all(changelog="# Changelog\n\n## [Unreleased]\n\n## [0.3.0] - 2026-10-01\n")
+        self.assertNotEqual(checker.check_version_agreement(self.root), [])
+
+    def test_a_missing_version_line_is_reported_rather_than_ignored(self):
+        self._write_all(cpack="# no version here at all\n")
+        failures = checker.check_version_agreement(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("no version matching", failures[0])
+
+
 class TheRealRepository(unittest.TestCase):
     """What makes a passing run evidence about this tree and not only about fixtures."""
 
@@ -181,7 +246,18 @@ class TheRealRepository(unittest.TestCase):
         # Guards against the checks silently passing because the root was wrong.
         self.assertTrue(os.path.isfile(os.path.join(REPO_ROOT, ".env.example")))
         self.assertTrue(os.path.isfile(os.path.join(REPO_ROOT, "Makefile")))
-        self.assertEqual(len(checker.CHECKS), 3)
+        # Named rather than only counted: a bare count tells a future reader that
+        # something changed but not what, and it was the count alone that failed
+        # when the version check was added.
+        self.assertEqual(
+            [name for name, _check in checker.CHECKS],
+            [
+                "environment example",
+                "relative links",
+                "Makefile targets",
+                "release version agreement",
+            ],
+        )
 
     def test_main_reports_success_on_this_repository(self):
         self.assertEqual(checker.main(["--root", REPO_ROOT]), 0)

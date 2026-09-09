@@ -113,6 +113,54 @@ def check_relative_links(root: str) -> List[str]:
     return failures
 
 
+VERSION_SOURCES = (
+    # (path, regex with one capturing group, what the value feeds)
+    ("CMakeLists.txt", r"^\s*VERSION\s+(\d+\.\d+\.\d+)\s*$", "PROJECT_VERSION, and so the .deb"),
+    ("packaging/CPackConfig.cmake", r'CPACK_PACKAGE_VERSION\s+"(\d+\.\d+\.\d+)"',
+     "the standalone cpack config"),
+    ("src/services/McpProtocolHandler.hpp",
+     r'kDefaultServerVersion\s*=\s*"(\d+\.\d+\.\d+)"', "the version MCP clients are told"),
+)
+
+
+def check_version_agreement(root: str) -> List[str]:
+    """Every independent copy of the release version says the same thing.
+
+    Three files carry the version with no build-time relationship between them, and the
+    newest CHANGELOG heading is a fourth. Nothing had ever compared them, and they DID
+    drift: the v0.2.0 tag produced a package stamped 0.1.0, because the tag does not feed
+    PROJECT_VERSION. This turns that into a gate.
+    """
+    failures: List[str] = []
+    found = {}
+    for relative, pattern, purpose in VERSION_SOURCES:
+        if not os.path.isfile(os.path.join(root, relative)):
+            failures.append(f"{relative} is missing, so the release version cannot be checked")
+            continue
+        match = re.search(pattern, _read(root, relative), flags=re.M)
+        if match is None:
+            failures.append(f"no version matching {pattern!r} found in {relative} ({purpose})")
+            continue
+        found[relative] = match.group(1)
+
+    changelog = os.path.join(root, "CHANGELOG.md")
+    if os.path.isfile(changelog):
+        headings = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", _read(root, "CHANGELOG.md"), flags=re.M)
+        if headings:
+            found["CHANGELOG.md (newest release heading)"] = headings[0]
+        else:
+            failures.append("CHANGELOG.md declares no released version heading")
+
+    distinct = set(found.values())
+    if len(distinct) > 1:
+        failures.append(
+            "the release version disagrees across files: "
+            + ", ".join(f"{path} says {value}" for path, value in sorted(found.items()))
+            + " — they have no build-time relationship, so they must be changed together"
+        )
+    return failures
+
+
 def check_makefile_targets(root: str) -> List[str]:
     """Documented Makefile targets and .PHONY entries are the same set."""
     makefile = os.path.join(root, "Makefile")
@@ -144,6 +192,7 @@ CHECKS = (
     ("environment example", check_environment_example),
     ("relative links", check_relative_links),
     ("Makefile targets", check_makefile_targets),
+    ("release version agreement", check_version_agreement),
 )
 
 
