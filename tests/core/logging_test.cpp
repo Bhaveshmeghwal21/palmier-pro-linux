@@ -54,9 +54,18 @@ using palmier::core::sharedLogger;
 
 /// A fixed instant, so a rendered timestamp can be compared to a literal.
 /// 2026-09-09T07:20:00.123Z.
+///
+/// The seconds value is computed, not hand-derived: an earlier version of this file had
+/// 1789197600 here, which is 2026-09-12 — three days out — and ten assertions in this
+/// file inherited the error from this one constant. Verify with:
+///
+///     python3 -c "import datetime as d; \
+///       print(int(d.datetime(2026,9,9,7,20,tzinfo=d.timezone.utc).timestamp()))"
+///
+/// RendersAKnownInstantExactly below is the guard that makes a wrong value fail loudly
+/// here rather than quietly shifting every other expectation in the file.
 std::chrono::system_clock::time_point fixedInstant() {
-    // Seconds since the Unix epoch for 2026-09-09T07:20:00Z, plus 123 ms.
-    return std::chrono::system_clock::time_point{std::chrono::seconds{1789197600} +
+    return std::chrono::system_clock::time_point{std::chrono::seconds{1788938400} +
                                                  std::chrono::milliseconds{123}};
 }
 
