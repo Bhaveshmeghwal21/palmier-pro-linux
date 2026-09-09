@@ -116,10 +116,16 @@ def check_relative_links(root: str) -> List[str]:
 VERSION_SOURCES = (
     # (path, regex with one capturing group, what the value feeds)
     ("CMakeLists.txt", r"^\s*VERSION\s+(\d+\.\d+\.\d+)\s*$", "PROJECT_VERSION, and so the .deb"),
-    ("packaging/CPackConfig.cmake", r'CPACK_PACKAGE_VERSION\s+"(\d+\.\d+\.\d+)"',
-     "the standalone cpack config"),
-    ("src/services/McpProtocolHandler.hpp",
-     r'kDefaultServerVersion\s*=\s*"(\d+\.\d+\.\d+)"', "the version MCP clients are told"),
+    (
+        "packaging/CPackConfig.cmake",
+        r'CPACK_PACKAGE_VERSION\s+"(\d+\.\d+\.\d+)"',
+        "the standalone cpack config",
+    ),
+    (
+        "src/services/McpProtocolHandler.hpp",
+        r'kDefaultServerVersion\s*=\s*"(\d+\.\d+\.\d+)"',
+        "the version MCP clients are told",
+    ),
 )
 
 

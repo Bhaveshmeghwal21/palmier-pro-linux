@@ -173,11 +173,15 @@ class MakefileTargets(unittest.TestCase):
 class ReleaseVersionAgreement(unittest.TestCase):
     """A clean result only means something if a drift is detected, so test both."""
 
-    CMAKE = 'project(PalmierProLinux\n    VERSION 0.2.0\n    LANGUAGES CXX)\n'
+    CMAKE = "project(PalmierProLinux\n    VERSION 0.2.0\n    LANGUAGES CXX)\n"
     CPACK = 'set(CPACK_PACKAGE_VERSION "0.2.0")\n'
-    HEADER = ('class McpProtocolHandler {\n'
-              '    static constexpr std::string_view kDefaultServerVersion = "0.2.0";\n};\n')
-    CHANGELOG = '# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-09-09\n\n## [0.1.0] - 2026-08-31\n'
+    HEADER = (
+        "class McpProtocolHandler {\n"
+        '    static constexpr std::string_view kDefaultServerVersion = "0.2.0";\n};\n'
+    )
+    CHANGELOG = (
+        "# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-09-09\n\n## [0.1.0] - 2026-08-31\n"
+    )
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -190,10 +194,12 @@ class ReleaseVersionAgreement(unittest.TestCase):
     def _write_all(self, cmake=None, cpack=None, header=None, changelog=None) -> None:
         write(self.root, "CMakeLists.txt", cmake if cmake is not None else self.CMAKE)
         write(self.root, "packaging/CPackConfig.cmake", cpack if cpack is not None else self.CPACK)
-        write(self.root, "src/services/McpProtocolHandler.hpp",
-              header if header is not None else self.HEADER)
-        write(self.root, "CHANGELOG.md",
-              changelog if changelog is not None else self.CHANGELOG)
+        write(
+            self.root,
+            "src/services/McpProtocolHandler.hpp",
+            header if header is not None else self.HEADER,
+        )
+        write(self.root, "CHANGELOG.md", changelog if changelog is not None else self.CHANGELOG)
 
     def test_all_four_agreeing_is_clean(self):
         self.assertEqual(checker.check_version_agreement(self.root), [])
