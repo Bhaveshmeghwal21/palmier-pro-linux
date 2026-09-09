@@ -103,7 +103,8 @@ make coverage          # instrumented build, then a gcovr line-coverage report
 ```
 
 The suite is **1706 GoogleTest and RapidCheck cases across 93 test executables**, and
-CI runs all of them on every push to every branch. It is not only unit tests: there are
+CI runs all of them on every push to `main` and on every pull request. It is not only
+unit tests: there are
 property tests over generated timelines, round-trip tests over the project format,
 agent/UI edit-equivalence tests, and documentation-consistency tests that fail the build
 when a CMake option or an agent tool is added without documenting it.

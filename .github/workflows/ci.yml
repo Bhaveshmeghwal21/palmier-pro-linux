@@ -61,17 +61,29 @@
 name: CI
 
 on:
+  # `push` is deliberately restricted to main and release tags, NOT '**'.
+  #
+  # With push on every branch AND pull_request on main, any branch that has an open
+  # pull request produced TWO identical pipelines for one commit — a push run and a
+  # pull_request run, seconds apart, each doing the whole build, the whole suite and
+  # a forty-minute coverage job. Every Dependabot pull request cost double for no
+  # extra information.
+  #
+  # Branch work is still covered, by the pull_request trigger below: that is the
+  # event whose result gates a merge. What is no longer covered is a branch with no
+  # pull request open, which is a branch nobody is proposing to merge yet.
   push:
     branches:
-      - '**'
+      - main
     tags:
       - 'v*'
   pull_request:
     branches:
       - main
   # Manual dispatch exists for the `l4-validation` job at the bottom of this file,
-  # which needs an NVIDIA L4 no hosted runner has. Dispatching without ticking the
-  # box just re-runs the ordinary jobs.
+  # which needs an NVIDIA L4 no hosted runner has. Ticking the box runs ONLY that
+  # job: the ordinary jobs already ran on the same commit when it was pushed, so
+  # repeating them would be duplicate work for a lane that is about hardware.
   workflow_dispatch:
     inputs:
       run_l4_validation:
@@ -92,6 +104,11 @@ concurrency:
 jobs:
   build-and-test:
     name: Build & Test (ubuntu-24.04)
+    # Skipped when this dispatch is specifically the L4 hardware lane: those jobs
+    # already ran on this commit when it was pushed, and re-running them tells
+    # nobody anything new while occupying runners the L4 job is waiting behind.
+    if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.run_l4_validation)
     runs-on: ubuntu-24.04
 
     env:
@@ -501,6 +518,11 @@ jobs:
   # ---------------------------------------------------------------------------
   lint:
     name: Lint (format, static analysis, repository hygiene)
+    # Skipped when this dispatch is specifically the L4 hardware lane: those jobs
+    # already ran on this commit when it was pushed, and re-running them tells
+    # nobody anything new while occupying runners the L4 job is waiting behind.
+    if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.run_l4_validation)
     runs-on: ubuntu-24.04
 
     steps:
@@ -707,6 +729,11 @@ jobs:
   # ---------------------------------------------------------------------------
   coverage-needed:
     name: Decide whether coverage can be skipped
+    # Skipped when this dispatch is specifically the L4 hardware lane: those jobs
+    # already ran on this commit when it was pushed, and re-running them tells
+    # nobody anything new while occupying runners the L4 job is waiting behind.
+    if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.run_l4_validation)
     runs-on: ubuntu-24.04
     outputs:
       needed: ${{ steps.decide.outputs.needed }}
@@ -855,6 +882,11 @@ jobs:
   # ---------------------------------------------------------------------------
   configure-without-vendor-sdks:
     name: Configure without vendor SDKs (ubuntu-24.04)
+    # Skipped when this dispatch is specifically the L4 hardware lane: those jobs
+    # already ran on this commit when it was pushed, and re-running them tells
+    # nobody anything new while occupying runners the L4 job is waiting behind.
+    if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.run_l4_validation)
     runs-on: ubuntu-24.04
 
     steps:
