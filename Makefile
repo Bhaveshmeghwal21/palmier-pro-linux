@@ -19,6 +19,11 @@
 #
 # Run `make` or `make help` for the full list.
 
+# bash, not the default /bin/sh. On Ubuntu /bin/sh is dash, which has no
+# `set -o pipefail`, and the test target depends on it: without pipefail a failing
+# ctest piped into tee would report tee's exit status and a red suite would look green.
+SHELL := /bin/bash
+
 BUILD_DIR   ?= build
 BUILD_TYPE  ?= RelWithDebInfo
 GENERATOR   ?= Ninja
@@ -31,7 +36,18 @@ DOCKER_IMAGE ?= palmier-pro:local
 # entry and the documentation checker fails until docs/BUILD.md documents each one, so
 # a coverage option would couple "measure coverage" to an option-table edit for no gain.
 COVERAGE_DIR   ?= build-coverage
-COVERAGE_FLAGS ?= --coverage -fprofile-update=atomic -O0 -g
+# No -g. gcov maps counters to lines through the .gcno files the compiler writes beside
+# each object, not through DWARF, so debug info adds nothing to a coverage run except
+# size — and with 92 test executables linked unoptimised, size is the constraint that
+# actually bites on a CI runner. -fprofile-update=atomic because the suite runs tests
+# in parallel and non-atomic counters lose increments.
+COVERAGE_FLAGS ?= --coverage -fprofile-update=atomic -O0 -g0
+
+# Minimum line coverage `coverage-report` will accept. Provisional: it is deliberately
+# below any plausible real figure until the CI coverage job has reported one, because a
+# floor guessed high fails runs that found nothing wrong. Raise it to just under the
+# measured value once measured. CI passes its own value from the job's env.
+COVERAGE_MIN_LINE ?= 40
 
 # The vendor hardware paths are configured ON deliberately, matching CI: it is what
 # makes the VAAPI/NVENC/QSV code compile and type-check. Hardware *execution* still
@@ -53,9 +69,10 @@ CHANGED_CXX := $(shell git diff --name-only --diff-filter=ACMR origin/main...HEA
 	| grep -E '^(src|tests)/.*\.(cpp|hpp)$$' || true)
 
 .DEFAULT_GOAL := help
-.PHONY: help deps configure build test test-verbose coverage coverage-report lint format \
-        format-check tidy py-lint py-test run package clean distclean ci docker-build \
-        docker-test docker-run print-changed
+.PHONY: help deps configure build test test-summary test-verbose coverage coverage-build \
+        coverage-test coverage-report lint format format-check tidy py-lint py-test run \
+        package clean distclean ci docker-build docker-test docker-run print-changed \
+        check-consistency
 
 help: ## Show this help
 	@printf 'Palmier Pro for Linux — available targets\n\n'
@@ -76,36 +93,57 @@ configure: ## Configure the build tree with CMake
 build: configure ## Configure and compile everything
 	cmake --build $(BUILD_DIR) --parallel $(JOBS)
 
-test: ## Run the full test suite headlessly (needs a built tree)
-	xvfb-run -a ctest --test-dir $(BUILD_DIR) --output-on-failure
-
-test-verbose: ## Run the suite with per-test output and a JUnit report
+test: ## Run the full test suite headlessly, with a JUnit report (needs a built tree)
 	set -o pipefail; xvfb-run -a ctest --test-dir $(BUILD_DIR) \
-		--output-on-failure --output-junit ctest-results.xml 2>&1 | tee $(BUILD_DIR)/ctest.log
-	python3 scripts/ctest_summary.py --junit $(BUILD_DIR)/ctest-results.xml || true
+		--output-on-failure \
+		--output-junit ctest-results.xml 2>&1 | tee $(BUILD_DIR)/ctest.log
 
-coverage: ## Build instrumented, run the suite, and report line coverage
+test-summary: ## Render the Markdown summary from the JUnit report `make test` wrote
+	python3 scripts/ctest_summary.py $(BUILD_DIR)/ctest-results.xml \
+		--title "CTest summary" --allow-missing
+
+test-verbose: test test-summary ## Run the suite and render the summary
+
+coverage: coverage-build coverage-test coverage-report ## Instrumented build, suite run, and a line-coverage report
+
+coverage-build: ## Configure and compile an instrumented build tree
 	cmake -S . -B $(COVERAGE_DIR) -G $(GENERATOR) \
 		-DCMAKE_BUILD_TYPE=Debug \
 		-DPALMIER_BUILD_TESTS=ON \
 		-DPALMIER_BUILD_UI=ON \
 		-DCMAKE_CXX_FLAGS="$(COVERAGE_FLAGS)" \
+		-DCMAKE_CXX_FLAGS_DEBUG="-g0" \
 		-DCMAKE_EXE_LINKER_FLAGS="$(COVERAGE_FLAGS)" \
 		-DCMAKE_SHARED_LINKER_FLAGS="$(COVERAGE_FLAGS)"
 	cmake --build $(COVERAGE_DIR) --parallel $(JOBS)
-	xvfb-run -a ctest --test-dir $(COVERAGE_DIR) --output-on-failure
-	$(MAKE) coverage-report
+	@printf '\ninstrumented tree size: '; du -sh $(COVERAGE_DIR) 2>/dev/null || true
 
-coverage-report: ## Turn the .gcda files already produced into coverage.info and a summary
-	lcov --directory $(COVERAGE_DIR) --capture --output-file coverage.info \
-		--rc branch_coverage=1 --ignore-errors mismatch,negative,source,gcov
-	lcov --remove coverage.info \
-		'/usr/*' '*/build*/*' '*/tests/*' '*/_deps/*' '*/moc_*' '*/qrc_*' '*/ui_*' \
-		--output-file coverage.info --ignore-errors unused
-	lcov --list coverage.info
-	lcov --summary coverage.info
+coverage-test: ## Run the suite against the instrumented tree, producing .gcda files
+	set -o pipefail; xvfb-run -a ctest --test-dir $(COVERAGE_DIR) \
+		--output-on-failure 2>&1 | tee $(COVERAGE_DIR)/ctest.log
 
-lint: format-check py-lint ## Run every non-blocking-free check the CI lint job runs
+coverage-report: ## Turn the .gcda files into a report and enforce the floor
+	@mkdir -p coverage-html
+	gcovr --root . \
+		--filter 'src/' \
+		--exclude '.*/tests/.*' \
+		--gcov-ignore-parse-errors \
+		--exclude-unreachable-branches \
+		--print-summary \
+		--xml coverage.xml \
+		--html-details coverage-html/index.html \
+		--fail-under-line $(COVERAGE_MIN_LINE) \
+		$(COVERAGE_DIR)
+	@# lcov-format output for anything that expects coverage.info. Non-fatal because
+	@# --lcov arrived in gcovr 7.0 and the report above is the actual gate.
+	@gcovr --root . --filter 'src/' --exclude '.*/tests/.*' \
+		--gcov-ignore-parse-errors --lcov coverage.info $(COVERAGE_DIR) \
+		|| printf 'note: this gcovr has no --lcov; coverage.xml and the HTML remain\n'
+
+lint: format-check py-lint check-consistency ## Every check the CI lint job runs
+
+check-consistency: ## Check the repository's cross-file claims agree with the code
+	python3 scripts/check_repo_consistency.py
 
 format: ## Reformat this repository's C++ sources in place
 	@printf 'formatting %s files\n' '$(words $(CXX_SOURCES))'

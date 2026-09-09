@@ -116,42 +116,21 @@ jobs:
           # their versions, only forces a clean re-fetch of the index.
           sudo rm -rf /var/lib/apt/lists/*
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            cmake \
-            ninja-build \
-            pkg-config \
-            ccache \
-            xvfb \
-            qt6-base-dev \
-            qt6-base-dev-tools \
-            qt6-declarative-dev \
-            qt6-tools-dev \
-            qt6-tools-dev-tools \
-            qml6-module-qtquick \
-            qml6-module-qtquick-controls \
-            qml6-module-qtquick-window \
-            qml6-module-qtqml-workerscript \
-            libgl1-mesa-dev \
-            libavcodec-dev \
-            libavformat-dev \
-            libavutil-dev \
-            libavfilter-dev \
-            libswscale-dev \
-            libswresample-dev \
-            libavdevice-dev \
-            libvulkan-dev \
-            vulkan-validationlayers \
-            glslang-tools \
-            spirv-tools \
-            libshaderc-dev \
-            libva-dev \
-            libvpl-dev \
-            liblcms2-dev \
-            libsecret-1-dev \
-            libssl-dev \
-            libpipewire-0.3-dev \
-            libasound2-dev
+          # The package list is READ from packaging/apt-packages.txt rather than
+          # duplicated here. That file is the project's native dependency manifest and
+          # is the same one `make deps` and the Dockerfile install from, so this
+          # workflow, the container and a contributor's machine cannot install
+          # different sets. Previously this list was a third copy of the same names.
+          #
+          # `sed` strips comments; the shell splits the rest on whitespace. Print the
+          # resolved list first, so a run's log records exactly what it installed.
+          packages="$(sed -e 's/#.*//' packaging/apt-packages.txt)"
+          echo "installing $(echo "${packages}" | wc -w) packages from packaging/apt-packages.txt:"
+          echo "${packages}" | tr -s '[:space:]' ' '
+          echo
+          # Unquoted on purpose: word-splitting is how the list becomes arguments.
+          # shellcheck disable=SC2086
+          sudo apt-get install -y --no-install-recommends ${packages}
 
       # The nv-codec-headers apt package is intermittently unresolvable on the
       # GitHub-hosted ubuntu-24.04 runner image ("Unable to locate package"),
@@ -186,6 +165,7 @@ jobs:
         run: |
           python3 scripts/test_ctest_summary.py
           python3 scripts/test_l4_validation_report.py
+          python3 scripts/test_check_repo_consistency.py
 
       - name: Cache ccache
         uses: actions/cache@v4
@@ -278,11 +258,7 @@ jobs:
       # --test-dir rather than the working directory (checked against ctest 3.22),
       # so the results land at build/ctest-results.xml.
       - name: Test (CTest, headless via xvfb)
-        run: |
-          set -o pipefail
-          xvfb-run -a ctest --test-dir build \
-            --output-on-failure \
-            --output-junit ctest-results.xml 2>&1 | tee build/ctest.log
+        run: make test
 
       # Requirement 15.7's summary half: every test's name and its outcome of
       # passed, failed or skipped together with its RECORDED skip reason.
@@ -507,7 +483,252 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
+  # Static analysis and repository hygiene, deliberately a SEPARATE job from
+  # build-and-test.
+  #
+  # Separate because the two answer different questions and have wildly different
+  # costs: this job needs no Qt, no FFmpeg and no Vulkan, so it finishes in about a
+  # minute and tells you your commit is misformatted long before a 10-minute compile
+  # would. Bundling it into build-and-test would hide a one-second answer behind a
+  # ten-minute one.
+  #
+  # WHAT GATES AND WHAT REPORTS. The format check gates, but only over the files a
+  # commit actually touched. The whole-tree number is reported and not gated, because
+  # the tree predates .clang-format: 341 of 357 files would be rewritten, 21346 lines.
+  # Gating that would mean either a reformatting commit that buries every real change
+  # and risks the four tests that scrape src/ text, or a permanently red lint job.
+  # Enforcing on changed files is what actually stops drift, which is the point.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint (format, static analysis, repository hygiene)
+    runs-on: ubuntu-24.04
+
+    steps:
+      # Full history: the format gate diffs this commit against what came before, and
+      # a depth-1 clone has no "before" to diff against.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install the lint toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-format clang-tidy
+          python3 -m pip install --user --break-system-packages -r requirements-dev.txt
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Report the tool versions
+        run: |
+          clang-format --version
+          clang-tidy --version | head -2
+          "$HOME/.local/bin/ruff" --version
+          python3 --version
+
+      # Which files this push or pull request touched. Three cases, because
+      # `origin/main...HEAD` is empty for a push to main itself:
+      #   * pull request -> the merge base with the target branch
+      #   * ordinary push -> the commit the branch pointed at before
+      #   * first push of a new branch, or a missing "before" -> HEAD^
+      - name: Determine the C++ files this change touches
+        id: changed
+        run: |
+          if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "${base}" ] || [ "${base}" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base="$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)"
+            echo "no usable base from the event; falling back to ${base}"
+          fi
+          echo "comparing against ${base}"
+          files="$(git diff --name-only --diff-filter=ACMR "${base}" HEAD \
+                   | grep -E '^(src|tests)/.*\.(cpp|hpp)$' || true)"
+          if [ -z "${files}" ]; then
+            echo "no C++ files changed"
+          else
+            echo "changed C++ files:"
+            printf '  %s\n' ${files}
+          fi
+          # Newline-separated through the step output, so the next step can quote it.
+          {
+            echo 'files<<PALMIER_EOF'
+            echo "${files}"
+            echo 'PALMIER_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check the formatting of the changed files (gate)
+        run: |
+          files="$(echo '${{ steps.changed.outputs.files }}' | tr '\n' ' ')"
+          if [ -z "$(echo "${files}" | tr -d '[:space:]')" ]; then
+            echo "no C++ files changed; nothing to check"
+            exit 0
+          fi
+          # shellcheck disable=SC2086
+          clang-format --dry-run --Werror ${files}
+          echo "OK: every changed C++ file matches .clang-format"
+
+      # Reported, not gated. Publishing the number keeps the incremental-adoption
+      # claim honest and makes progress visible instead of asserted.
+      - name: Report whole-tree formatting conformance (informational)
+        run: |
+          total=0
+          clean=0
+          while IFS= read -r f; do
+            total=$((total + 1))
+            if clang-format --dry-run --Werror "$f" >/dev/null 2>&1; then
+              clean=$((clean + 1))
+            fi
+          done < <(find src tests -type f \( -name '*.cpp' -o -name '*.hpp' \) | sort)
+          echo "clang-format conformance: ${clean}/${total} files"
+          {
+            echo "### Formatting conformance"
+            echo
+            echo "\`${clean}\` of \`${total}\` C++ files already match \`.clang-format\`."
+            echo
+            echo "Enforced on changed files; the tree is being converted incrementally."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Lint and type-check the Python CI tooling (gate)
+        run: |
+          ruff check scripts
+          ruff format --check scripts
+          echo "OK: ruff clean"
+          python3 -m mypy scripts || echo "mypy reported findings (advisory, not a gate)"
+
+      - name: Run the Python tooling's own tests (gate)
+        run: |
+          python3 scripts/test_ctest_summary.py
+          python3 scripts/test_l4_validation_report.py
+          python3 scripts/test_check_repo_consistency.py
+
+      - name: Check the repository's cross-file claims (gate)
+        run: python3 scripts/check_repo_consistency.py
+
+      # Requirement-free but worth having: the Python tooling has no runtime
+      # dependencies, so this audits the pinned development tools. The native C++
+      # dependencies are distribution packages and are audited by the distribution's
+      # security process; packaging/apt-packages.txt records the reasoning.
+      - name: Audit the pinned Python dependencies
+        run: |
+          python3 -m pip install --user --break-system-packages pip-audit
+          "$HOME/.local/bin/pip-audit" --requirement requirements-dev.txt --strict \
+            || echo "::warning::pip-audit reported findings; see the log above"
+
+      - name: Report the installed versions of the native dependencies
+        run: |
+          echo "Resolved versions of every package in packaging/apt-packages.txt:"
+          {
+            echo "### Native dependency versions"
+            echo
+            echo '| Package | Candidate version |'
+            echo '| --- | --- |'
+          } >> "$GITHUB_STEP_SUMMARY"
+          for pkg in $(sed -e 's/#.*//' packaging/apt-packages.txt); do
+            version="$(apt-cache policy "${pkg}" 2>/dev/null \
+                       | awk '/Candidate:/ {print $2}')"
+            printf '  %-32s %s\n' "${pkg}" "${version:-unknown}"
+            echo "| \`${pkg}\` | ${version:-unknown} |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+  # ---------------------------------------------------------------------------
+  # Line coverage over the same suite build-and-test runs.
+  #
+  # Separate job because it needs its own instrumented, unoptimised build tree:
+  # --coverage plus -O0 so the arc counters map to source lines, which makes both the
+  # compile and the suite markedly slower than the RelWithDebInfo build next door.
+  # Running it in parallel keeps it off the critical path.
+  #
+  # gcovr rather than lcov: lcov 2.x on noble treats a great many benign conditions as
+  # hard errors and needs a growing --ignore-errors list to get through a Qt build at
+  # all. gcovr reads the same .gcda files, has the threshold gate built in
+  # (--fail-under-line), and still emits an lcov-format coverage.info for anything that
+  # expects one.
+  #
+  # WHAT IS EXCLUDED, and why each is not coverage of this project's behaviour:
+  #   * tests/          — measuring the tests against themselves inflates the number
+  #   * build*/         — generated moc_/qrc_/ui_ translation units, not authored code
+  #   * /usr/           — Qt, FFmpeg and standard library headers
+  #
+  # THE FLOOR IS PROVISIONAL. Nothing has measured this tree yet, so it is set low
+  # enough not to fail a first run and will be raised to just under the measured value
+  # once this job has reported one. A floor that was guessed high would fail a run that
+  # found nothing wrong, and a floor of zero would be a gate in name only.
+  # ---------------------------------------------------------------------------
+  coverage:
+    name: Coverage (line coverage over the full suite)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    env:
+      COVERAGE_MIN_LINE: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 92 test executables linked unoptimised is a lot of bytes, and the hosted image
+      # ships several toolchains this project never uses. Removing them buys roughly
+      # 20 GB, which is the difference between this job finishing and dying with
+      # "No space left on device" after a long compile.
+      - name: Reclaim runner disk space
+        run: |
+          echo "before:"; df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/share/swift || true
+          sudo apt-get clean
+          echo "after:"; df -h / | tail -1
+
+      - name: Install native build dependencies
+        run: |
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo apt-get update
+          packages="$(sed -e 's/#.*//' packaging/apt-packages.txt)"
+          # shellcheck disable=SC2086
+          sudo apt-get install -y --no-install-recommends ${packages} gcovr
+
+      - name: Install ffnvcodec (nv-codec-headers) from upstream source
+        run: |
+          git clone --depth 1 --branch n13.0.19.0 \
+            https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers
+          sudo make -C /tmp/nv-codec-headers install
+          rm -rf /tmp/nv-codec-headers
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-coverage-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ccache-coverage-${{ runner.os }}-
+
+      - name: Configure and build instrumented
+        env:
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: make coverage-build
+
+      - name: Run the suite against the instrumented build
+        run: make coverage-test
+
+      - name: Report line coverage and enforce the floor
+        run: make coverage-report COVERAGE_MIN_LINE="${COVERAGE_MIN_LINE}"
+
+      - name: Publish the coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.info
+            coverage.xml
+            coverage-html/
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
   # Requirement 8.9: a vendor path may be enabled at configure time while its
+
   # SDK/driver development package is absent. Configuration must still succeed,
   # the PALMIER_HAVE_* definition must stay undefined, and the configuration
   # summary must list that path as disabled.
