@@ -49,6 +49,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "core/ChangeSet.hpp"
@@ -687,7 +688,21 @@ TEST(ProjectSessionSave, DeliversCompletionsOnlyWhenPumped) {
     // The worker has finished but has NOT applied anything: the dirty flag is only
     // cleared on the owning thread, inside the pump.
     EXPECT_TRUE(session.modified());
-    EXPECT_GE(notifications.load(), 1);
+
+    // The completion notifier is deliberately OUTSIDE what waitForPendingSaves()
+    // promises. The worker queues the completion and decrements the in-flight count
+    // under the lock - which is what releases the wait - and calls the notifier only
+    // afterwards, so the wait can never block inside arbitrary caller code. Asserting
+    // the count immediately after the wait therefore races: measured at 108 failures in
+    // 400 runs on a machine under load, and 0 in 300 on an idle one, which is exactly
+    // why CI saw this and a developer box did not.
+    //
+    // What the test means to check is that the wake happens at all, so wait for it.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (notifications.load() < 1 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_GE(notifications.load(), 1) << "the save completion never woke the owner";
 
     EXPECT_EQ(session.pumpSaveCompletions(), 1u);
     EXPECT_FALSE(session.modified());
