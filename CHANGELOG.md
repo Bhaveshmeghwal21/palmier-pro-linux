@@ -11,6 +11,29 @@ task's completion commit, its CI run and the suite size at that point.
 
 ## [Unreleased]
 
+### Changed
+
+- **No production translation unit exceeds 1000 lines any more.** The last two did:
+  `services/ProjectStore.cpp` (1082) and `services/ExportCoordinator.cpp` (1080). Each is
+  now one unit per subject, none over 500 lines:
+  - the project store splits into the JSON machinery
+    ([`ProjectStoreJson.hpp`](src/services/ProjectStoreJson.hpp)), the format vocabulary,
+    the writers, the readers, and the public save/load surface that remains
+    `ProjectStore.cpp`;
+  - export coordination splits into the worker, request validation, progress reporting and
+    the agent tool surface.
+
+  The JSON parser and writer are deliberately kept in a header of their own: nothing in
+  them knows about projects, clips or tracks.
+
+### Fixed
+
+- Two faults in the tooling used to perform these splits, both caught before they reached
+  the tree. Naive brace counting placed the anonymous namespace 700 lines early in
+  `ProjectStore.cpp`, because a JSON parser contains `case '{':` — which would have made
+  every linkage decision wrong; and a definition's extent was measured from the first
+  brace at signature depth, which truncated any constructor with a member-initialiser list.
+
 ## [0.3.0] — 2026-09-10
 
 Hardware encode works. That is the headline, and it was not a driver, SDK or build-flag

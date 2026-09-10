@@ -249,7 +249,7 @@ palmier_register_test(palmier_media_tests)
 # ---------------------------------------------------------------------------
 add_executable(palmier_services_project_store_tests
     services/project_store_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp")
+    ${PALMIER_PROJECT_STORE_SOURCES})
 target_include_directories(palmier_services_project_store_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(palmier_services_project_store_tests PRIVATE
@@ -552,7 +552,7 @@ palmier_register_test(palmier_services_generative_tests)
 add_executable(palmier_services_project_save_tests
     services/project_save_service_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp")
+    ${PALMIER_PROJECT_STORE_SOURCES})
 target_include_directories(palmier_services_project_save_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(palmier_services_project_save_tests PRIVATE
@@ -665,7 +665,7 @@ palmier_register_test(palmier_core_media_manager_version_retention_tests)
 # ---------------------------------------------------------------------------
 add_executable(palmier_services_project_store_property_tests
     services/project_store_property_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp")
+    ${PALMIER_PROJECT_STORE_SOURCES})
 target_include_directories(palmier_services_project_store_property_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(palmier_services_project_store_property_tests PRIVATE
@@ -944,7 +944,7 @@ add_executable(palmier_services_generative_atomicity_property_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_generative_atomicity_property_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -1086,7 +1086,7 @@ add_executable(palmier_services_mcp_executor_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_mcp_executor_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -1147,7 +1147,7 @@ add_executable(palmier_services_agent_orchestrator_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
@@ -1201,7 +1201,7 @@ add_executable(palmier_services_mcp_http_integration_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_mcp_http_integration_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -1241,7 +1241,7 @@ add_executable(palmier_services_edit_equivalence_property_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
@@ -1289,7 +1289,7 @@ add_executable(palmier_services_mention_resolver_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
@@ -1357,7 +1357,7 @@ add_executable(palmier_services_mention_auth_gating_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
@@ -1493,7 +1493,7 @@ add_executable(palmier_ui_agent_chat_viewmodel_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
@@ -1576,7 +1576,7 @@ add_executable(palmier_app_composition_tests
     "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
@@ -1614,7 +1614,7 @@ add_executable(palmier_app_composition_tests
     # `timeline.export` / `media.import` hooks to them, so both sources join the
     # compiled-in list. `makeExportToolHandler` lives in ExportCoordinator.cpp.
     # The decode/encode sides they call are already supplied by Palmier::media.
-    "${PROJECT_SOURCE_DIR}/src/services/ExportCoordinator.cpp"
+    ${PALMIER_EXPORT_COORDINATOR_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/MediaImportService.cpp"
     # Usable-editor task 13: ApplicationComposition.cpp now constructs one
     # services::TranscriptionService unconditionally (Requirement 10.4), and
@@ -1729,7 +1729,7 @@ add_executable(palmier_services_tool_registry_schema_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_tool_registry_schema_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -1766,7 +1766,7 @@ add_executable(palmier_services_tool_schema_conformance_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_tool_schema_conformance_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -1820,7 +1820,7 @@ add_executable(palmier_services_project_session_tests
     services/project_save_failure_property_test.cpp
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp")
+    ${PALMIER_PROJECT_STORE_SOURCES})
 target_include_directories(palmier_services_project_session_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(palmier_services_project_session_tests PRIVATE
@@ -1871,7 +1871,7 @@ add_executable(palmier_services_media_import_tests
     "${PROJECT_SOURCE_DIR}/src/services/MediaImportService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/media/MediaProbe.cpp"
     "${PROJECT_SOURCE_DIR}/src/media/ImportValidation.cpp")
 target_include_directories(palmier_services_media_import_tests PRIVATE
@@ -1938,7 +1938,7 @@ add_executable(palmier_services_session_tools_tests
     "${PROJECT_SOURCE_DIR}/src/services/MediaImportService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/media/MediaProbe.cpp"
     "${PROJECT_SOURCE_DIR}/src/media/ImportValidation.cpp")
@@ -1992,7 +1992,7 @@ add_executable(palmier_services_project_tools_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_project_tools_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -2085,7 +2085,7 @@ add_executable(palmier_services_mcp_session_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_mcp_session_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -2143,7 +2143,7 @@ add_executable(palmier_services_mcp_protocol_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_mcp_protocol_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -2224,7 +2224,7 @@ add_executable(palmier_services_remote_access_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_remote_access_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -2637,7 +2637,7 @@ add_executable(palmier_services_agent_offline_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_agent_offline_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -2741,7 +2741,7 @@ add_executable(palmier_services_generative_lifecycle_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
 target_include_directories(palmier_services_generative_lifecycle_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -2929,7 +2929,7 @@ add_executable(palmier_services_agent_equivalence_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp")
@@ -3035,7 +3035,7 @@ target_sources(palmier_docs_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/AppSettings.cpp")
 target_include_directories(palmier_docs_tests PRIVATE
@@ -3231,7 +3231,7 @@ palmier_register_test(palmier_services_export_hw_sw_comparison_tests)
 # ---------------------------------------------------------------------------
 add_executable(palmier_services_offline_mode_tests
     services/offline_mode_availability_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/services/ExportCoordinator.cpp"
+    ${PALMIER_EXPORT_COORDINATOR_SOURCES}
     # Usable-editor task 13: ExportCoordinator.cpp now calls
     # services::projectHasCaptions/renderSrt unconditionally (Requirement
     # 10.3's sidecar mode), so CaptionExport.cpp joins the compiled-in list
@@ -3254,7 +3254,7 @@ add_executable(palmier_services_offline_mode_tests
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/Json.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp")
 target_include_directories(palmier_services_offline_mode_tests PRIVATE
@@ -3332,7 +3332,7 @@ set(PALMIER_E2E_FIXTURE_DOCUMENT "${PALMIER_E2E_FIXTURE_DIR}/e2e_reference.palmi
 add_executable(palmier_e2e_fixture_generator
     e2e/fixture_generator_main.cpp
     support/SyntheticMedia.cpp
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp")
+    ${PALMIER_PROJECT_STORE_SOURCES})
 target_include_directories(palmier_e2e_fixture_generator PRIVATE
     "${PROJECT_SOURCE_DIR}/src"
     "${PROJECT_SOURCE_DIR}/tests")
@@ -3365,7 +3365,7 @@ add_executable(palmier_e2e_tests
     "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSaveService.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    ${PALMIER_PROJECT_STORE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/AuthenticationService.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokCredentialManager.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerativeClient.cpp"
@@ -3390,7 +3390,7 @@ add_executable(palmier_e2e_tests
     "${PROJECT_SOURCE_DIR}/src/services/OpenSslGenerativeHttpTransport.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/HostedGenerativeBackend.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ByokGenerativeBackend.cpp"
-    "${PROJECT_SOURCE_DIR}/src/services/ExportCoordinator.cpp"
+    ${PALMIER_EXPORT_COORDINATOR_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/MediaImportService.cpp"
     # Usable-editor task 13 — see the identical comment on
     # palmier_app_composition_tests above: ApplicationComposition.cpp constructs

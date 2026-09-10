@@ -14,7 +14,7 @@
 // tracks, edits, and imported media references such that reopening the project
 // restores the prior editing state, including clip positions, track order, and
 // the selected version of each clip"). The serializer/deserializer under test is
-// implemented in services/ProjectStore.cpp; this file adds the dedicated
+// implemented across the services/ProjectStore* units; this file adds the dedicated
 // RapidCheck property that exercises it across arbitrary valid projects.
 //
 // Strategy: an imperative RapidCheck generator (using the `*gen` draw operator)

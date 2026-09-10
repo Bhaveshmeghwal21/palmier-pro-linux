@@ -92,6 +92,37 @@ set(PALMIER_TOOL_SURFACE_SOURCES
     "${PROJECT_SOURCE_DIR}/src/services/GenerationExportTools.cpp")
 
 
+# --------------------------------------------------------------------------
+# The project store, split the same way and for the same reason.
+# 
+# services/ProjectStore.cpp was 1082 lines carrying the JSON parser, the JSON
+# writer, the format vocabulary and every per-entity reader and writer. It is now
+# one unit per subject sharing services/ProjectStoreInternal.hpp.
+# 
+# Twenty-six standalone test targets compile these sources directly rather than
+# linking Palmier::services, so the list is named once here. Adding a unit is a
+# one-line change instead of twenty-seven edits that can disagree.
+# --------------------------------------------------------------------------
+set(PALMIER_PROJECT_STORE_SOURCES
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStore.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStoreVocabulary.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStoreWrite.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ProjectStoreRead.cpp")
+
+
+# --------------------------------------------------------------------------
+# Export coordination, likewise: services/ExportCoordinator.cpp was 1080 lines
+# holding the worker, the request validation, progress reporting and the agent
+# tool surface. The shared internal contract is
+# services/ExportCoordinatorInternal.hpp.
+# --------------------------------------------------------------------------
+set(PALMIER_EXPORT_COORDINATOR_SOURCES
+    "${PROJECT_SOURCE_DIR}/src/services/ExportCoordinator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ExportValidation.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ExportProgress.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/ExportToolSurface.cpp")
+
+
 # ---------------------------------------------------------------------------
 # Module subdirectory layout.
 #

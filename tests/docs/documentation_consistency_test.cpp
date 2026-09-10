@@ -710,7 +710,8 @@ const CheckRun& checkRun() {
         // The two hook-owned payloads, against the field names their real rendering
         // function sets.
         const std::vector<std::pair<std::string, std::pair<std::string, std::string>>> hookOwned{
-            {"timeline.export", {"src/services/ExportCoordinator.cpp", "Json exportOutcomeToJson("}},
+            {"timeline.export",
+             {"src/services/ExportToolSurface.cpp", "Json exportOutcomeToJson("}},
             {"generation.generate", {"src/app/ApplicationComposition.cpp", "makeGenerateHook("}}};
         for (const auto& [toolName, where] : hookOwned) {
             const testsupport::FunctionFieldScan scan =

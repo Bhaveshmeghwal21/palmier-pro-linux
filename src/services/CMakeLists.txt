@@ -19,7 +19,7 @@ add_library(palmier_services
     KeyMomentMarkers.cpp
     LocalizationManager.cpp
     ProjectSaveService.cpp
-    ProjectStore.cpp
+    ${PALMIER_PROJECT_STORE_SOURCES}
     SecretStore.cpp
     StillFrameCapture.cpp
     TranscriptionService.cpp)
@@ -378,7 +378,7 @@ target_sources(palmier_services PRIVATE
 # already linked by this target, so no new dependency enters here. Appended so the
 # existing source list above is preserved verbatim.
 target_sources(palmier_services PRIVATE
-    ExportCoordinator.cpp)
+    ${PALMIER_EXPORT_COORDINATOR_SOURCES})
 
 
 
