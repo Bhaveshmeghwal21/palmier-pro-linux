@@ -72,22 +72,23 @@
 
 #include "core/Result.hpp"
 #include "gpu/GpuTypes.hpp"
-#include "media/MediaProbe.hpp"                   // MediaProbeBackend (task 9.7 seam)
-#include "services/AgentInterpreterRegistry.hpp"  // agent interpreter ids (task 10.1)
-#include "services/AgentOrchestrator.hpp"       // IntentInterpreter, IAgentAuthGate
-#include "services/AuthenticationService.hpp"    // AuthBackend
-#include "services/ByokCredentials.hpp"          // ByokProviderValidator
-#include "services/ExportCoordinator.hpp"        // ExportCoordinatorOptions, ExportToolOptions
-#include "services/GenerativeBackendRegistry.hpp" // generative backend ids (task 10.5)
-#include "services/GenerativeClient.hpp"         // IGenerativeBackend
-#include "services/GenerativeHttpTransport.hpp"   // GenerativeEndpoint, transport seam
-#include "services/LocalizationManager.hpp"      // Catalog, SystemLanguageProvider
-#include "services/McpProtocolHandler.hpp"        // MainThreadInvoker (design.md D5)
-#include "services/McpServer.hpp"                // kDefaultHost/kDefaultPort
-#include "services/HealthMonitor.hpp"            // HealthMonitor, LogTally
-#include "services/RemoteAccessGate.hpp"         // RemoteAccessConfig (task 6.1)
-#include "services/SecretStore.hpp"              // SecretStore
-#include "services/StillFrameCapture.hpp"        // ImageEncoder (tasks.md task 14)
+#include "media/MediaProbe.hpp"                    // MediaProbeBackend (task 9.7 seam)
+#include "services/AgentInterpreterRegistry.hpp"   // agent interpreter ids (task 10.1)
+#include "services/AgentOrchestrator.hpp"          // IntentInterpreter, IAgentAuthGate
+#include "services/AuthenticationService.hpp"      // AuthBackend
+#include "services/ByokCredentials.hpp"            // ByokProviderValidator
+#include "services/ExportCoordinator.hpp"          // ExportCoordinatorOptions, ExportToolOptions
+#include "services/GenerativeBackendRegistry.hpp"  // generative backend ids (task 10.5)
+#include "services/GenerativeClient.hpp"           // IGenerativeBackend
+#include "services/GenerativeHttpTransport.hpp"    // GenerativeEndpoint, transport seam
+#include "services/LocalizationManager.hpp"        // Catalog, SystemLanguageProvider
+#include "services/McpProtocolHandler.hpp"         // MainThreadInvoker (design.md D5)
+#include "services/McpSessionRegistry.hpp"         // the protocol layer's sessions
+#include "services/McpServer.hpp"                  // kDefaultHost/kDefaultPort
+#include "services/HealthMonitor.hpp"              // HealthMonitor, LogTally
+#include "services/RemoteAccessGate.hpp"           // RemoteAccessConfig (task 6.1)
+#include "services/SecretStore.hpp"                // SecretStore
+#include "services/StillFrameCapture.hpp"          // ImageEncoder (tasks.md task 14)
 
 // Forward declarations for the concrete components the composition root owns by
 // unique_ptr (their headers are pulled in only by the .cpp, keeping this header
@@ -152,13 +153,13 @@ struct AppConfig {
     /// (127.0.0.1:19789) matching the original (Requirement 7.1). Tests set
     /// `mcpPort = 0` to bind an ephemeral port and exercise the lifecycle without
     /// contending for the well-known port.
-    std::string   mcpHost = std::string(services::McpServer::kDefaultHost);
+    std::string mcpHost = std::string(services::McpServer::kDefaultHost);
     std::uint16_t mcpPort = services::McpServer::kDefaultPort;
 
     /// Network-facing backends. When null, a safe offline default is installed
     /// (feature reports "unconfigured"; no network is touched — Requirement 13.3).
-    services::AuthBackend*          authBackend = nullptr;
-    services::IGenerativeBackend*   generativeBackend = nullptr;
+    services::AuthBackend* authBackend = nullptr;
+    services::IGenerativeBackend* generativeBackend = nullptr;
     services::ByokProviderValidator* byokValidator = nullptr;
 
     /// Platform secret store for BYOK credentials. When null the composition uses
@@ -169,8 +170,8 @@ struct AppConfig {
     /// Localization catalog + seams (all optional). Empty catalog + null store =>
     /// English/default policy with no persistence.
     services::LocalizationManager::Catalog translations;
-    services::LanguagePreferenceStore*     languageStore = nullptr;
-    services::SystemLanguageProvider       systemLanguage;
+    services::LanguagePreferenceStore* languageStore = nullptr;
+    services::SystemLanguageProvider systemLanguage;
 
     /// The in-app agent's natural-language -> tool-call interpreter, injected
     /// directly. When empty the interpreter named by `agentInterpreterId` is built
@@ -329,21 +330,21 @@ public:
 
     // --- Component accessors (for the Qt UI shell and headless drivers) ----
 
-    [[nodiscard]] gpu::GpuContext&               gpuContext() noexcept { return *gpu_; }
+    [[nodiscard]] gpu::GpuContext& gpuContext() noexcept { return *gpu_; }
 
     /// The one Project_Session of the application (Requirement 1.1): the current
     /// project, its engine, its media library, its document path and its dirty
     /// flag. The reference is stable for the application's lifetime, including
     /// across a project create/open (design.md decision D1).
-    [[nodiscard]] services::ProjectSession&      projectSession() noexcept;
+    [[nodiscard]] services::ProjectSession& projectSession() noexcept;
 
     /// The session's timeline engine — the same object for the whole application
     /// lifetime. Defined out of line because the session's definition lives in the
     /// .cpp (this header stays free of the core/service headers it would need).
-    [[nodiscard]] TimelineEngine&                timeline() noexcept;
+    [[nodiscard]] TimelineEngine& timeline() noexcept;
 
     /// The current project's media library, owned by the same session.
-    [[nodiscard]] MediaManager&                  mediaLibrary() noexcept;
+    [[nodiscard]] MediaManager& mediaLibrary() noexcept;
 
     // --- Playback_Engine (task 7.5; Requirement 1.1) -----------------------
     //
@@ -465,17 +466,19 @@ public:
     /// (Requirement 5.6). Distinct from `gpuUnavailableNotice()`, which reports
     /// that no compatible device was found at startup (Requirement 1.6).
     [[nodiscard]] const std::string& softwareCompositingNotice() const noexcept;
-    [[nodiscard]] services::ProjectSaveService&  projectSaveService() noexcept { return *saveService_; }
+    [[nodiscard]] services::ProjectSaveService& projectSaveService() noexcept {
+        return *saveService_;
+    }
     [[nodiscard]] services::AuthenticationService& auth() noexcept { return *auth_; }
     [[nodiscard]] services::ByokCredentialManager& byokManager() noexcept { return *byokManager_; }
-    [[nodiscard]] services::GenerativeClient&    generativeClient() noexcept { return *genClient_; }
+    [[nodiscard]] services::GenerativeClient& generativeClient() noexcept { return *genClient_; }
     [[nodiscard]] services::GenerativeMediaCoordinator& generativeCoordinator() noexcept {
         return *genCoordinator_;
     }
-    [[nodiscard]] services::ToolRegistry&        toolRegistry() noexcept { return *toolRegistry_; }
-    [[nodiscard]] services::McpToolExecutor&     executor() noexcept { return *executor_; }
-    [[nodiscard]] services::McpServer&           mcpServer() noexcept { return *mcpServer_; }
-    [[nodiscard]] services::AgentOrchestrator&   agent() noexcept { return *agent_; }
+    [[nodiscard]] services::ToolRegistry& toolRegistry() noexcept { return *toolRegistry_; }
+    [[nodiscard]] services::McpToolExecutor& executor() noexcept { return *executor_; }
+    [[nodiscard]] services::McpServer& mcpServer() noexcept { return *mcpServer_; }
+    [[nodiscard]] services::AgentOrchestrator& agent() noexcept { return *agent_; }
     [[nodiscard]] services::LocalizationManager& localization() noexcept { return *localization_; }
 
     /// The one Remote_Access_Gate of the application (task 6.3): the bind-time
@@ -581,6 +584,15 @@ public:
     ///
     /// Distinct from the fatal path: a failure to construct a component named in
     /// Requirement 1.1 is not reported here, it prevents construction.
+    /// The MCP session registry and the JSON-RPC protocol handler wired into the
+    /// endpoint. Exposed so a test can assert the protocol layer exists at all: its
+    /// absence is what made the shipped binary answer `initialize` with a tool-executor
+    /// error while docs/MCP_CLIENTS.md documented a full handshake.
+    [[nodiscard]] services::McpSessionRegistry& mcpSessions() noexcept { return *mcpSessions_; }
+
+    /// The protocol handler serving JSON-RPC 2.0 on the endpoint.
+    [[nodiscard]] services::McpProtocolHandler& mcpProtocol() noexcept { return *mcpProtocol_; }
+
     /// The health monitor, which answers `GET /health` on the MCP endpoint and is the
     /// only place that rolls component readiness and log counters into one document.
     [[nodiscard]] services::HealthMonitor& healthMonitor() noexcept { return *healthMonitor_; }
@@ -591,50 +603,50 @@ public:
 
 private:
     // Endpoint (captured from the config for start()).
-    std::string   mcpHost_;
+    std::string mcpHost_;
     std::uint16_t mcpPort_;
 
     // --- GPU + the one project session (engine + media library) ------------
-    std::unique_ptr<gpu::GpuContext>            gpu_;
-    std::unique_ptr<services::ProjectSession>   session_;
+    std::unique_ptr<gpu::GpuContext> gpu_;
+    std::unique_ptr<services::ProjectSession> session_;
 
     // --- Playback_Engine: compositor -> provider -> transport (task 7.5) ---
-    std::unique_ptr<gpu::Compositor>                    compositor_;
-    std::unique_ptr<media::DecoderTeardownQueue>        decoderTeardown_;
-    std::unique_ptr<media::DecoderClipFrameProvider>    clipFrameProvider_;
-    std::unique_ptr<ui::PreviewController>              playbackEngine_;
+    std::unique_ptr<gpu::Compositor> compositor_;
+    std::unique_ptr<media::DecoderTeardownQueue> decoderTeardown_;
+    std::unique_ptr<media::DecoderClipFrameProvider> clipFrameProvider_;
+    std::unique_ptr<ui::PreviewController> playbackEngine_;
     /// Timeline audio waveforms (monitoring-and-grading Requirement 2). Declared
     /// after the members above and before the audio engine so its worker is joined
     /// on destruction in the reverse order it was started.
-    std::unique_ptr<media::PeakEnvelopeService>         peakEnvelopes_;
+    std::unique_ptr<media::PeakEnvelopeService> peakEnvelopes_;
 
     // --- Audio_Engine: selected sink -> engine -> master clock (task 8.7) --
     // `audioProject_` is the storage behind the engine's ProjectProvider: the
     // provider refreshes it from the session's engine snapshot and returns a
     // borrow, which is how the engine sees the current project without
     // `Palmier::media` having to depend on `Palmier::services`.
-    std::unique_ptr<Project>                            audioProject_;
-    std::unique_ptr<media::AudioEngine>                 audioEngine_;
-    std::string                                         audioSinkName_;
-    bool                                                audioOutputAvailable_ = false;
-    std::string                                         audioUnavailableNotice_;
+    std::unique_ptr<Project> audioProject_;
+    std::unique_ptr<media::AudioEngine> audioEngine_;
+    std::string audioSinkName_;
+    bool audioOutputAvailable_ = false;
+    std::string audioUnavailableNotice_;
 
     // --- Project I/O -------------------------------------------------------
     std::unique_ptr<services::ProjectSaveService> saveService_;
 
     // --- Export_Coordinator + Media_Import_Service (task 9.7) --------------
-    std::unique_ptr<services::ExportCoordinator>  exportCoordinator_;
+    std::unique_ptr<services::ExportCoordinator> exportCoordinator_;
     std::unique_ptr<services::MediaImportService> mediaImportService_;
 
     // --- Auth stack (secret store -> byok -> auth) -------------------------
-    std::unique_ptr<services::SecretStore>            ownedSecretStore_;
-    services::SecretStore*                            secretStore_ = nullptr;
-    std::unique_ptr<services::ByokProviderValidator>  ownedByokValidator_;
-    services::ByokProviderValidator*                  byokValidator_ = nullptr;
-    std::unique_ptr<services::ByokCredentialManager>  byokManager_;
-    std::unique_ptr<services::AuthBackend>            ownedAuthBackend_;
-    services::AuthBackend*                            authBackend_ = nullptr;
-    std::unique_ptr<services::AuthenticationService>  auth_;
+    std::unique_ptr<services::SecretStore> ownedSecretStore_;
+    services::SecretStore* secretStore_ = nullptr;
+    std::unique_ptr<services::ByokProviderValidator> ownedByokValidator_;
+    services::ByokProviderValidator* byokValidator_ = nullptr;
+    std::unique_ptr<services::ByokCredentialManager> byokManager_;
+    std::unique_ptr<services::AuthBackend> ownedAuthBackend_;
+    services::AuthBackend* authBackend_ = nullptr;
+    std::unique_ptr<services::AuthenticationService> auth_;
 
     // --- Generative pipeline ----------------------------------------------
     //
@@ -644,16 +656,16 @@ private:
     // raw `IGenerativeBackend` of its own. The `generation.generate` hook consults
     // it before anything downstream runs, which is what makes the Requirement 12.4
     // rejection immediate and side-effect-free.
-    std::unique_ptr<services::IGenerativeBackend>          ownedGenerativeBackend_;
-    services::IGenerativeBackend*                          generativeBackend_ = nullptr;
-    services::GenerativeBackend*                           selectedGenerativeBackend_ = nullptr;
-    std::unique_ptr<services::GenerativeHttpTransport>     ownedGenerativeTransport_;
-    std::unique_ptr<services::GenerativeClient>            genClient_;
-    std::unique_ptr<services::IGenerationGate>             genGate_;
-    std::unique_ptr<services::IGenerationRunner>           genRunner_;
-    std::unique_ptr<services::ITimelinePlacement>          placer_;
-    std::unique_ptr<services::GenerationModelCatalog>      genCatalog_;
-    std::unique_ptr<services::GenerativeMediaCoordinator>  genCoordinator_;
+    std::unique_ptr<services::IGenerativeBackend> ownedGenerativeBackend_;
+    services::IGenerativeBackend* generativeBackend_ = nullptr;
+    services::GenerativeBackend* selectedGenerativeBackend_ = nullptr;
+    std::unique_ptr<services::GenerativeHttpTransport> ownedGenerativeTransport_;
+    std::unique_ptr<services::GenerativeClient> genClient_;
+    std::unique_ptr<services::IGenerationGate> genGate_;
+    std::unique_ptr<services::IGenerationRunner> genRunner_;
+    std::unique_ptr<services::ITimelinePlacement> placer_;
+    std::unique_ptr<services::GenerationModelCatalog> genCatalog_;
+    std::unique_ptr<services::GenerativeMediaCoordinator> genCoordinator_;
 
     // --- Captions and transcription (usable-editor task 13; Requirement 10) -
     // No real recognizer backend is bundled in this build, so
@@ -662,22 +674,29 @@ private:
     // Requirement 10.4 literally even without one (see
     // UnavailableTranscriptionBackend's own doc comment).
     std::unique_ptr<services::ITranscriptionBackend> transcriptionBackend_;
-    std::unique_ptr<services::TranscriptionService>  transcriptionService_;
+    std::unique_ptr<services::TranscriptionService> transcriptionService_;
 
     // --- Shared tool surface + MCP + agent --------------------------------
-    std::unique_ptr<services::ToolRegistry>     toolRegistry_;
-    std::unique_ptr<services::McpToolExecutor>  executor_;
-    std::unique_ptr<services::RejectionLog>     rejectionLog_;
+    std::unique_ptr<services::ToolRegistry> toolRegistry_;
+    std::unique_ptr<services::McpToolExecutor> executor_;
+    std::unique_ptr<services::RejectionLog> rejectionLog_;
     std::unique_ptr<services::RemoteAccessGate> remoteAccessGate_;
-    std::string                                 remoteAccessStartupError_;
-    std::string                                 remoteAccessWarning_;
-    std::unique_ptr<services::McpServer>        mcpServer_;
+    std::string remoteAccessStartupError_;
+    std::string remoteAccessWarning_;
+    // Declared BEFORE mcpServer_ on purpose. Members are destroyed in reverse
+    // declaration order, and the server holds a delegate that borrows the protocol
+    // handler, which in turn borrows the session registry, the executor and the tool
+    // registry. Declaring these after the server would tear the handler down while
+    // the server could still be serving a request through it.
     std::unique_ptr<services::HealthMonitor> healthMonitor_;
-    std::unique_ptr<services::IAgentAuthGate>   agentGate_;
+    std::unique_ptr<services::McpSessionRegistry> mcpSessions_;
+    std::unique_ptr<services::McpProtocolHandler> mcpProtocol_;
+    std::unique_ptr<services::McpServer> mcpServer_;
+    std::unique_ptr<services::IAgentAuthGate> agentGate_;
     std::unique_ptr<services::AgentOrchestrator> agent_;
-    std::string                                 agentInterpreterId_;
-    std::string                                 generativeBackendId_;
-    std::vector<std::string>                    startupErrors_;
+    std::string agentInterpreterId_;
+    std::string generativeBackendId_;
+    std::vector<std::string> startupErrors_;
 
     // --- Localization ------------------------------------------------------
     std::unique_ptr<services::LocalizationManager> localization_;

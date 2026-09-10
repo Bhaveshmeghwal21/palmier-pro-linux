@@ -154,8 +154,7 @@ public:
 // that case the injected backend answers for itself and the coordinator runs as
 // before.
 [[nodiscard]] services::Tool::Handler makeGenerateHook(
-    services::GenerativeMediaCoordinator& coordinator,
-    const services::GenerativeBackend* backend) {
+    services::GenerativeMediaCoordinator& coordinator, const services::GenerativeBackend* backend) {
     return [&coordinator, backend](const services::Json& input) -> Result<services::Json> {
         using namespace palmier::services;
 
@@ -178,9 +177,8 @@ public:
             request.mediaType = GenerationMediaType::Video;
         }
         request.mode = generationModeFromStringView(input.stringOr("mode", "generate"))
-                          .value_or(GenerationMode::Generate);
-        if (const std::optional<Uuid> sourceAssetId =
-                Uuid::parse(input.stringOr("sourceAssetId"));
+                           .value_or(GenerationMode::Generate);
+        if (const std::optional<Uuid> sourceAssetId = Uuid::parse(input.stringOr("sourceAssetId"));
             sourceAssetId.has_value()) {
             request.sourceAssetId = *sourceAssetId;
         }
@@ -201,16 +199,15 @@ public:
         GenerationPlacement placement;
         const std::optional<Uuid> trackId = Uuid::parse(input.stringOr("trackId"));
         if (!trackId.has_value()) {
-            return err<Json>(invalidArgument(
-                "generation.generate: 'trackId' must be a valid UUID"));
+            return err<Json>(
+                invalidArgument("generation.generate: 'trackId' must be a valid UUID"));
         }
         placement.trackId = *trackId;
         placement.framePosition = input.intOr("framePosition", 0);
         placement.sourceIn = Duration::fromNanoseconds(input.intOr("sourceInTicks", 0));
         placement.sourceOut = Duration::fromNanoseconds(input.intOr("sourceOutTicks", 0));
 
-        Result<GeneratedMediaPlacement> placed =
-            coordinator.generateAndPlace(request, placement);
+        Result<GeneratedMediaPlacement> placed = coordinator.generateAndPlace(request, placement);
         if (placed.isError()) {
             return err<Json>(placed.error());
         }
@@ -220,8 +217,7 @@ public:
         out.set("assetId", result.asset.assetId.toString());
         out.set("sourcePath", result.asset.sourcePath);
         out.set("clipId", result.clipId.toString());
-        out.set("timelineStartTicks",
-                static_cast<std::int64_t>(result.timelineStart.ticks()));
+        out.set("timelineStartTicks", static_cast<std::int64_t>(result.timelineStart.ticks()));
         return out;
     };
 }
@@ -249,15 +245,13 @@ public:
             entry.set("servesUpscale", model.servesUpscale);
             if (model.audioDurationRange.has_value()) {
                 const auto& [minDuration, maxDuration] = *model.audioDurationRange;
-                entry.set("minDurationTicks",
-                         static_cast<std::int64_t>(minDuration.ticks()));
-                entry.set("maxDurationTicks",
-                         static_cast<std::int64_t>(maxDuration.ticks()));
+                entry.set("minDurationTicks", static_cast<std::int64_t>(minDuration.ticks()));
+                entry.set("maxDurationTicks", static_cast<std::int64_t>(maxDuration.ticks()));
             }
 
             const auto existing =
                 std::find_if(byProvider.begin(), byProvider.end(),
-                            [&model](const auto& p) { return p.first == model.provider; });
+                             [&model](const auto& p) { return p.first == model.provider; });
             if (existing != byProvider.end()) {
                 existing->second.push_back(std::move(entry));
             } else {
@@ -346,8 +340,8 @@ public:
             cue.sourceIn = Duration::zero();
             cue.sourceOut = Duration::fromMilliseconds(segment.durationMs());
             cue.captionText = segment.text;
-            const CommandResult placed = engine.apply(
-                std::make_unique<AddClipCommand>(*captionTrackId, std::move(cue)));
+            const CommandResult placed =
+                engine.apply(std::make_unique<AddClipCommand>(*captionTrackId, std::move(cue)));
             if (placed.isError()) {
                 return err<Json>(placed.error());
             }
@@ -368,8 +362,8 @@ public:
 [[nodiscard]] services::Tool::Handler makeCaptureFrameHook(gpu::Compositor& compositor,
                                                            services::ProjectSession& session,
                                                            services::ImageEncoder encoder) {
-    return [&compositor, &session, encoder = std::move(encoder)](
-               const services::Json& in) -> Result<services::Json> {
+    return [&compositor, &session,
+            encoder = std::move(encoder)](const services::Json& in) -> Result<services::Json> {
         using namespace palmier::services;
 
         const Json* outputPathArg = in.find("outputPath");
@@ -436,8 +430,7 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
         *decoderTeardown_, media::ffmpegDecodeBackendFactory());
     compositor_->setFrameProvider(clipFrameProvider_->asProvider());
     playbackEngine_ = std::make_unique<ui::PreviewController>(
-        *compositor_, *gpu_,
-        [session = session_.get()]() { return session->engine().snapshot(); });
+        *compositor_, *gpu_, [session = session_.get()]() { return session->engine().snapshot(); });
 
     // --- Timeline audio waveforms (monitoring-and-grading Requirement 2) ----
     // Built with the same ffmpegDecodeBackendFactory() the playback decode path
@@ -513,8 +506,8 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     // only a default — a caller that supplied its own renderer keeps it.
     services::ExportCoordinatorOptions exportOptions = std::move(config.exportOptions);
     if (!exportOptions.audioRenderer) {
-        exportOptions.audioRenderer = [engine = audioEngine_.get()](
-                                          const Project& project, Duration from, Duration to) {
+        exportOptions.audioRenderer = [engine = audioEngine_.get()](const Project& project,
+                                                                    Duration from, Duration to) {
             return engine->renderRange(project, from, to);
         };
     }
@@ -586,16 +579,14 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     // client rather than the fallback — supplies instead.
     std::function<bool(std::string_view)> credentialProbe = config.featureCredentials;
     if (!credentialProbe) {
-        credentialProbe = [this, providers = config.byokProviders](
-                              std::string_view id) -> bool {
+        credentialProbe = [this, providers = config.byokProviders](std::string_view id) -> bool {
             if (id == services::kGenerativeBackendHosted ||
                 id == services::kAgentInterpreterHosted) {
                 const std::optional<services::Session>& current = auth_->currentSession();
                 return current.has_value() &&
                        current->entitlement == services::EntitlementStatus::Active;
             }
-            if (id == services::kGenerativeBackendByok ||
-                id == services::kAgentInterpreterByok) {
+            if (id == services::kGenerativeBackendByok || id == services::kAgentInterpreterByok) {
                 for (const std::string& provider : providers) {
                     if (auth_->isByokAuthorized(provider)) return true;
                 }
@@ -661,8 +652,7 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     genClient_ = std::make_unique<services::GenerativeClient>(*generativeBackend_);
     genGate_ = std::make_unique<services::AuthServiceGenerationGate>(*auth_);
     genRunner_ = std::make_unique<services::GenerativeClientRunner>(*genClient_);
-    auto concretePlacer =
-        std::make_unique<services::TimelineEnginePlacer>(session_->engine());
+    auto concretePlacer = std::make_unique<services::TimelineEnginePlacer>(session_->engine());
     concretePlacer->setMediaLibrary(session_->mediaLibrary());
     placer_ = std::move(concretePlacer);
     genCatalog_ = std::make_unique<services::GenerationModelCatalog>();
@@ -693,11 +683,10 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     services::ToolRegistryHooks hooks;
     hooks.generate = makeGenerateHook(*genCoordinator_, selectedGenerativeBackend_);
     hooks.listModels = makeListModelsHook(*genCatalog_);
-    hooks.transcribeToCaptions =
-        makeTranscribeToCaptionsHook(*transcriptionService_, *session_);
+    hooks.transcribeToCaptions = makeTranscribeToCaptionsHook(*transcriptionService_, *session_);
     hooks.captureFrame = makeCaptureFrameHook(*compositor_, *session_, config.imageEncoder);
-    hooks.exportTimeline = services::makeExportToolHandler(*exportCoordinator_, *session_,
-                                                           config.exportToolOptions);
+    hooks.exportTimeline =
+        services::makeExportToolHandler(*exportCoordinator_, *session_, config.exportToolOptions);
     hooks.importMedia = [service = mediaImportService_.get()](const std::filesystem::path& path) {
         return service->import(path);
     };
@@ -724,8 +713,7 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     // neither Authorization nor Origin is served, and no 401 or 403 can be produced
     // (Requirements 10.1, 10.10).
     rejectionLog_ = std::make_unique<services::StreamRejectionLog>(std::clog);
-    remoteAccessGate_ =
-        std::make_unique<services::RemoteAccessGate>(config.remote, *rejectionLog_);
+    remoteAccessGate_ = std::make_unique<services::RemoteAccessGate>(config.remote, *rejectionLog_);
     mcpServer_->setRemoteAccessGate(remoteAccessGate_.get());
 
     // --- Health and error tracking ----------------------------------------
@@ -767,6 +755,34 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
             "startup", services::HealthState::Degraded,
             std::to_string(errors.size()) + " startup diagnostic(s) recorded"};
     });
+
+    // --- The JSON-RPC protocol layer (task 5.2; Requirements 9.1-9.15) ----
+    //
+    // Without this the endpoint had no protocol layer at all: McpServer::dispatch handed
+    // the body straight to the tool executor, so `initialize` and `tools/list` did not
+    // exist and answered "request is missing the tool 'name'". docs/MCP_CLIENTS.md
+    // documents the full handshake and tells the reader to point Claude Code, Codex or
+    // Cursor at the endpoint - and every one of them would have failed on its first call.
+    //
+    // Everything needed was already here: McpProtocolHandler and McpSessionRegistry are
+    // implemented and tested, AppConfig even carries the `mainThreadInvoker` this consumes.
+    // Only the three lines that connect them were missing.
+    services::McpSessionRegistry::Options sessionOptions;
+    sessionOptions.maxSessions = config.remote.maxSessions <= 0
+                                     ? services::McpSessionRegistry::kDefaultMaxSessions
+                                     : static_cast<std::size_t>(config.remote.maxSessions);
+    sessionOptions.idleTimeout = config.remote.idleTimeout;
+    mcpSessions_ = std::make_unique<services::McpSessionRegistry>(sessionOptions);
+
+    // The budget is the executor's, not a second one: a tool that overruns is the
+    // executor's business, and giving the protocol layer a tighter deadline would report
+    // a timeout for work that was still going to be rolled back correctly.
+    services::McpProtocolHandler::Options protocolOptions;
+    protocolOptions.serverVersion =
+        std::string(services::McpProtocolHandler::kDefaultServerVersion);
+    mcpProtocol_ = std::make_unique<services::McpProtocolHandler>(
+        *toolRegistry_, *executor_, *mcpSessions_, config.mainThreadInvoker, protocolOptions);
+    mcpServer_->setProtocolDelegate(services::protocolDelegateFor(*mcpProtocol_));
 
     services::HealthMonitor* monitor = healthMonitor_.get();
     mcpServer_->setHealthReporter([monitor] {
@@ -828,9 +844,8 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     services::LocalizationManager::Config locConfig;
     locConfig.translations = std::move(config.translations);
     locConfig.store = config.languageStore;
-    locConfig.systemLanguage = config.systemLanguage
-                                   ? config.systemLanguage
-                                   : services::makeEnvSystemLanguageProvider();
+    locConfig.systemLanguage =
+        config.systemLanguage ? config.systemLanguage : services::makeEnvSystemLanguageProvider();
     localization_ = std::make_unique<services::LocalizationManager>(std::move(locConfig));
 }
 
@@ -882,9 +897,9 @@ Result<void> ApplicationComposition::start() {
     if (decision.tlsEnabled) {
         // The gate has already established that the material loads and matches, so a
         // failure here would mean the two disagreed — refuse rather than downgrade.
-        if (Result<void> material = mcpServer_->setTlsMaterial(
-                *remoteAccessGate_->config().tlsCertificate,
-                *remoteAccessGate_->config().tlsPrivateKey);
+        if (Result<void> material =
+                mcpServer_->setTlsMaterial(*remoteAccessGate_->config().tlsCertificate,
+                                           *remoteAccessGate_->config().tlsPrivateKey);
             material.isError()) {
             return material;
         }
@@ -911,17 +926,11 @@ std::uint16_t ApplicationComposition::mcpBoundPort() const noexcept {
 // needs no ProjectSession definition).
 // ---------------------------------------------------------------------------
 
-services::ProjectSession& ApplicationComposition::projectSession() noexcept {
-    return *session_;
-}
+services::ProjectSession& ApplicationComposition::projectSession() noexcept { return *session_; }
 
-TimelineEngine& ApplicationComposition::timeline() noexcept {
-    return session_->engine();
-}
+TimelineEngine& ApplicationComposition::timeline() noexcept { return session_->engine(); }
 
-MediaManager& ApplicationComposition::mediaLibrary() noexcept {
-    return session_->mediaLibrary();
-}
+MediaManager& ApplicationComposition::mediaLibrary() noexcept { return session_->mediaLibrary(); }
 
 const std::string& ApplicationComposition::softwareCompositingNotice() const noexcept {
     static const std::string kEmpty;
@@ -949,17 +958,15 @@ const std::string& ApplicationComposition::softwareCompositingNotice() const noe
 // export state — true by construction rather than by care: this function is const,
 // mentions neither the coordinator nor the selector, and allocates only its answer.
 
-std::vector<ApplicationComposition::CodecBackendStatus>
-ApplicationComposition::codecBackendReport() const {
+std::vector<ApplicationComposition::CodecBackendStatus> ApplicationComposition::codecBackendReport()
+    const {
     const gpu::BridgeAvailability availability = gpu::BridgeAvailability::fromBuildConfig();
-    const gpu::GpuCaps            caps =
-        gpu_ ? gpu_->capabilities() : gpu::GpuCaps::software();
+    const gpu::GpuCaps caps = gpu_ ? gpu_->capabilities() : gpu::GpuCaps::software();
 
     // One shared explanation, so all three vendor entries answer the same question
     // the same way: compiled in? then is this device that vendor, and does it report
     // hardware encode?
-    const auto vendorStatus = [&caps](std::string name, bool compiledIn,
-                                      const char* sdkName,
+    const auto vendorStatus = [&caps](std::string name, bool compiledIn, const char* sdkName,
                                       std::initializer_list<gpu::GpuVendor> vendors) {
         CodecBackendStatus status;
         status.name = std::move(name);
@@ -996,8 +1003,8 @@ ApplicationComposition::codecBackendReport() const {
                                   {gpu::GpuVendor::AMD, gpu::GpuVendor::Intel}));
     report.push_back(vendorStatus("nvenc-nvdec", availability.nvenc && availability.nvdec,
                                   "nv-codec-headers", {gpu::GpuVendor::NVIDIA}));
-    report.push_back(vendorStatus("qsv", availability.quickSync, "oneVPL/libmfx",
-                                  {gpu::GpuVendor::Intel}));
+    report.push_back(
+        vendorStatus("qsv", availability.quickSync, "oneVPL/libmfx", {gpu::GpuVendor::Intel}));
 
     CodecBackendStatus software;
     software.name = "ffmpeg-software";

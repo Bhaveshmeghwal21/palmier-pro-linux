@@ -256,8 +256,7 @@ TEST(ApplicationComposition, McpServerServesToolCallsAgainstTheComposedTimeline)
     request.target = std::string(palmier::services::McpServer::kPath);
     request.body = call.dump();
 
-    const palmier::services::HttpResponse response =
-        composition.mcpServer().dispatch(request);
+    const palmier::services::HttpResponse response = composition.mcpServer().dispatch(request);
     EXPECT_EQ(response.status, 200);
 
     const palmier::Result<Json> parsed = Json::parse(response.body);
@@ -268,8 +267,143 @@ TEST(ApplicationComposition, McpServerServesToolCallsAgainstTheComposedTimeline)
     // really did reach the one current project (Requirements 1.1, 9.4).
     const Json* result = parsed.value().find("result");
     ASSERT_NE(result, nullptr);
-    EXPECT_EQ(result->stringOr("id"),
-              composition.projectSession().status().projectId.toString());
+    EXPECT_EQ(result->stringOr("id"), composition.projectSession().status().projectId.toString());
+
+    composition.stop();
+}
+
+TEST(ApplicationComposition, TheEndpointServesTheDocumentedMcpHandshake) {
+    // The composed endpoint had NO protocol layer. McpServer::dispatchWithContext - which
+    // is what the socket transport calls - fell through to the tool executor, so
+    // `initialize` answered "request is missing the tool 'name'" while
+    // docs/MCP_CLIENTS.md documented the full handshake and told the reader to point
+    // Claude Code, Codex or Cursor at the endpoint. Every one of them would have failed
+    // on its first call.
+    //
+    // The test that was missing is this one: the previous MCP test used `dispatch()`,
+    // which keeps the executor envelope, so it could not see the gap.
+    ApplicationComposition composition{ephemeralConfig()};
+    ASSERT_TRUE(composition.start().isOk());
+
+    const auto post = [](std::string body) {
+        palmier::services::HttpRequest r;
+        r.method = "POST";
+        r.target = std::string(palmier::services::McpServer::kPath);
+        r.body = std::move(body);
+        return r;
+    };
+    const auto headerOf = [](const palmier::services::HttpResponse& response,
+                             std::string_view name) -> std::string {
+        for (const auto& [key, value] : response.headers) {
+            if (key == name) {
+                return value;
+            }
+        }
+        return {};
+    };
+
+    palmier::services::McpRequestContext context;
+    context.sourceAddress = "127.0.0.1";
+
+    // 1. initialize -> the negotiated version, the server identity, and a session id.
+    const palmier::services::HttpResponse initialize = composition.mcpServer().dispatchWithContext(
+        post(R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":)"
+             R"({"protocolVersion":"2025-06-18","capabilities":{},)"
+             R"("clientInfo":{"name":"composition-test","version":"1"}}})"),
+        context);
+    ASSERT_EQ(initialize.status, 200) << initialize.body;
+    const palmier::Result<Json> initialized = Json::parse(initialize.body);
+    ASSERT_TRUE(initialized.isOk()) << initialize.body;
+    const Json* result = initialized.value().find("result");
+    ASSERT_NE(result, nullptr) << initialize.body;
+    EXPECT_EQ(result->stringOr("protocolVersion"), "2025-06-18");
+    const Json* serverInfo = result->find("serverInfo");
+    ASSERT_NE(serverInfo, nullptr);
+    EXPECT_EQ(serverInfo->stringOr("name"),
+              std::string(palmier::services::McpProtocolHandler::kDefaultServerName));
+
+    const std::string sessionId = headerOf(initialize, "Mcp-Session-Id");
+    ASSERT_FALSE(sessionId.empty()) << "initialize minted no session identifier";
+    EXPECT_GE(sessionId.size(), 32u) << "Requirement 9.11's floor on identifier width";
+    context.sessionId = sessionId;
+
+    // 2. notifications/initialized -> a zero-byte 202, which is the answer clients that
+    //    stall after initialize are usually failing to accept.
+    const palmier::services::HttpResponse acked = composition.mcpServer().dispatchWithContext(
+        post(R"({"jsonrpc":"2.0","method":"notifications/initialized"})"), context);
+    EXPECT_EQ(acked.status, 202);
+    EXPECT_TRUE(acked.body.empty());
+
+    // 3. tools/list -> the whole published surface, with schemas.
+    const palmier::services::HttpResponse listed = composition.mcpServer().dispatchWithContext(
+        post(R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})"), context);
+    ASSERT_EQ(listed.status, 200) << listed.body;
+    const palmier::Result<Json> tools = Json::parse(listed.body);
+    ASSERT_TRUE(tools.isOk()) << listed.body;
+    const Json* listResult = tools.value().find("result");
+    ASSERT_NE(listResult, nullptr) << listed.body;
+    const Json* toolArray = listResult->find("tools");
+    ASSERT_NE(toolArray, nullptr);
+    ASSERT_TRUE(toolArray->isArray());
+    EXPECT_FALSE(toolArray->asArray().empty());
+
+    bool sawRead = false;
+    for (const Json& tool : toolArray->asArray()) {
+        if (tool.stringOr("name") == "timeline.read") {
+            sawRead = true;
+            EXPECT_NE(tool.find("inputSchema"), nullptr) << "a tool without a schema";
+        }
+    }
+    EXPECT_TRUE(sawRead) << "tools/list did not publish timeline.read";
+
+    // 4. tools/call over the same session reaches the composed project.
+    const palmier::services::HttpResponse called = composition.mcpServer().dispatchWithContext(
+        post(R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":)"
+             R"({"name":"timeline.read","arguments":{}}})"),
+        context);
+    ASSERT_EQ(called.status, 200) << called.body;
+    EXPECT_NE(called.body.find(composition.projectSession().status().projectId.toString()),
+              std::string::npos)
+        << "the tool call did not reach the composed session's project";
+
+    composition.stop();
+}
+
+TEST(ApplicationComposition, ToolsListBeforeTheInitializedNotificationIsRefused) {
+    // Requirement 9.14: a session that has not completed the handshake cannot call tools.
+    // Asserted here because it is the property that proves the SESSION registry is wired,
+    // not merely that some protocol object exists.
+    ApplicationComposition composition{ephemeralConfig()};
+    ASSERT_TRUE(composition.start().isOk());
+
+    palmier::services::HttpRequest request;
+    request.method = "POST";
+    request.target = std::string(palmier::services::McpServer::kPath);
+    request.body = R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":)"
+                   R"({"protocolVersion":"2025-06-18","capabilities":{},)"
+                   R"("clientInfo":{"name":"composition-test","version":"1"}}})";
+    palmier::services::McpRequestContext context;
+    context.sourceAddress = "127.0.0.1";
+    const palmier::services::HttpResponse initialize =
+        composition.mcpServer().dispatchWithContext(request, context);
+    ASSERT_EQ(initialize.status, 200) << initialize.body;
+    for (const auto& [key, value] : initialize.headers) {
+        if (key == "Mcp-Session-Id") {
+            context.sessionId = value;
+        }
+    }
+    ASSERT_TRUE(context.sessionId.has_value());
+
+    // No notifications/initialized was sent.
+    request.body = R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})";
+    const palmier::services::HttpResponse listed =
+        composition.mcpServer().dispatchWithContext(request, context);
+    const palmier::Result<Json> parsed = Json::parse(listed.body);
+    ASSERT_TRUE(parsed.isOk()) << listed.body;
+    const Json* error = parsed.value().find("error");
+    ASSERT_NE(error, nullptr) << "tools/list was served without a completed handshake";
+    EXPECT_EQ(error->intOr("code"),
+              palmier::services::McpProtocolHandler::kErrorSessionNotInitialized);
 
     composition.stop();
 }
@@ -358,8 +492,7 @@ TEST(ApplicationComposition, AnInjectedInterpreterOverridesTheRegistry) {
     config.agentInterpreterId = "hosted";
     config.agentInterpreter =
         [](std::string_view) -> palmier::Result<palmier::services::AgentIntent> {
-        return palmier::services::AgentIntent{"timeline.read",
-                                              palmier::services::Json::object()};
+        return palmier::services::AgentIntent{"timeline.read", palmier::services::Json::object()};
     };
 
     ApplicationComposition composition{config};
@@ -577,8 +710,9 @@ TEST(ApplicationComposition, ASelectedHostedBackendIsInstalledWhenCredentialsAre
     // construction nobody has signed in, so the auth-stack probe necessarily
     // answers "no credentials".
     palmier::services::InMemorySecretStore store;
-    ASSERT_TRUE(store.store(palmier::services::HostedGenerativeBackend::credentialKey("default"),
-                            "stored-hosted-account-token-placeholder")
+    ASSERT_TRUE(store
+                    .store(palmier::services::HostedGenerativeBackend::credentialKey("default"),
+                           "stored-hosted-account-token-placeholder")
                     .isOk());
 
     AppConfig config = ephemeralConfig();
@@ -617,8 +751,8 @@ TEST(ApplicationComposition, LocalizationDefaultsToASupportedLanguage) {
     ApplicationComposition composition{ephemeralConfig()};
     // On first launch with no persisted selection the manager picks the system
     // language when supported, else English — always a supported language.
-    EXPECT_TRUE(palmier::services::isSupportedLanguage(
-        composition.localization().currentLanguage()));
+    EXPECT_TRUE(
+        palmier::services::isSupportedLanguage(composition.localization().currentLanguage()));
 }
 
 // ---------------------------------------------------------------------------
@@ -682,7 +816,7 @@ AppSettings::Options isolatedOptions(const ScratchConfig& config) {
 TEST(ApplicationStartupWiring, ConfigFileAndCommandLineOverridesReachTheComposedConfig) {
     const ScratchConfig config("reaches",
                                "mcp.host = 127.0.0.1\n"
-                               "mcp.port = 0\n"          // ephemeral: never contends for 19789
+                               "mcp.port = 0\n"  // ephemeral: never contends for 19789
                                "remote.max_sessions = 12\n"
                                "agent.interpreter = hosted\n"
                                "generative.backend = hosted\n");
@@ -748,11 +882,10 @@ TEST(ApplicationStartupWiring, RemoteSettingsReachTheGateAndReportTheirUnmetPrer
     // missing, so the gate refuses the non-loopback bind, names what is missing and
     // binds loopback instead (Requirements 10.3, 10.12) — no external address is
     // ever bound by this test.
-    const ScratchConfig config("remote",
-                               "mcp.port = 0\n"
-                               "remote.enabled = true\n"
-                               "remote.bind_address = 203.0.113.7\n"
-                               "remote.idle_timeout_seconds = 45\n");
+    const ScratchConfig config("remote", "mcp.port = 0\n"
+                                         "remote.enabled = true\n"
+                                         "remote.bind_address = 203.0.113.7\n"
+                                         "remote.idle_timeout_seconds = 45\n");
 
     const AppSettings settings = AppSettings::load({}, isolatedOptions(config));
     ASSERT_TRUE(settings.config().remote.enabled);

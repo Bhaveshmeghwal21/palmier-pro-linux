@@ -1597,6 +1597,8 @@ add_executable(palmier_app_composition_tests
     app/application_composition_test.cpp
     "${PROJECT_SOURCE_DIR}/src/app/ApplicationComposition.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/HealthMonitor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/AppSettings.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
@@ -3387,6 +3389,8 @@ add_executable(palmier_e2e_tests
     support/SyntheticMedia.cpp
     "${PROJECT_SOURCE_DIR}/src/app/ApplicationComposition.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/HealthMonitor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/AppSettings.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"

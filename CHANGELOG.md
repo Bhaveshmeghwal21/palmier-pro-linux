@@ -13,6 +13,27 @@ task's completion commit, its CI run and the suite size at that point.
 
 ### Fixed
 
+- **The MCP endpoint served no protocol layer, so no external agent could connect.** This
+  is the repository's headline claim, and it was broken in the shipped binary:
+  `ApplicationComposition` never called `setProtocolDelegate`, so
+  `McpServer::dispatchWithContext` - the path the socket transport uses - fell through to
+  the tool executor. `initialize` answered `request is missing the tool 'name'` and
+  `tools/list` did not exist, while [`docs/MCP_CLIENTS.md`](docs/MCP_CLIENTS.md) documented
+  the full handshake and instructed the reader to point Claude Code, Codex or Cursor at the
+  endpoint. All three would have failed on their first call.
+
+  Everything needed was already implemented and tested - `McpProtocolHandler`,
+  `McpSessionRegistry`, `protocolDelegateFor`, and an `AppConfig::mainThreadInvoker` field
+  whose documentation already said `McpProtocolHandler` consumed it. Only the lines
+  connecting them were missing, and the session limits configurable through
+  `--remote-max-sessions` and `--remote-idle-timeout-seconds` now reach the registry that
+  enforces them.
+
+  Two tests were added over the composed application, because the absence of exactly this
+  test is what let the gap survive: the previous MCP composition test used `dispatch()`,
+  which keeps the executor envelope and cannot see the difference.
+
+
 - **Two export containers the tool surface advertises could never work.** Both were found
   by exporting real footage through the MCP surface rather than by a test, and both failed
   after the encoder had already opened, so the whole export was lost:
