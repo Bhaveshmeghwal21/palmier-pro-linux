@@ -88,19 +88,19 @@ namespace {
 /// added afterwards — and then owned by the backend.
 struct FfmpegAudioStream {
     AVCodecContext* ctx{nullptr};
-    AVStream*       stream{nullptr};
-    SwrContext*     swr{nullptr};
-    AVFrame*        frame{nullptr};
+    AVStream* stream{nullptr};
+    SwrContext* swr{nullptr};
+    AVFrame* frame{nullptr};
     /// Samples per encoded frame. Fixed-frame-size codecs (AAC: 1024) require
     /// exactly this count for every frame but the last.
-    int             frameSize{0};
-    int             channels{0};
-    int             sampleRate{0};
+    int frameSize{0};
+    int channels{0};
+    int sampleRate{0};
     /// Interleaved-float samples received but not yet encoded, so a caller may
     /// submit blocks of any length while the encoder still sees whole frames.
     std::vector<float> fifo{};
     /// Next frame's pts in samples (the audio stream's time base is 1/rate).
-    std::int64_t    nextPts{0};
+    std::int64_t nextPts{0};
 
     [[nodiscard]] bool isOpen() const noexcept { return ctx != nullptr; }
 };
@@ -147,8 +147,7 @@ public:
             // A pure-GPU surface with no host mapping needs the vendor zero-copy
             // path (compiled in with PALMIER_HAVE_VAAPI/NVENC/QSV); without it we
             // cannot read the pixels.
-            return failedPrecondition(
-                "hardware frame has no host mapping for software submission");
+            return failedPrecondition("hardware frame has no host mapping for software submission");
         }
 
         if (av_frame_make_writable(frame_) < 0) {
@@ -163,8 +162,8 @@ public:
             return makeError(ErrorCode::Internal, "could not create pixel converter");
         }
 
-        const std::uint8_t* srcData[4] = {
-            reinterpret_cast<const std::uint8_t*>(frame.hostData), nullptr, nullptr, nullptr};
+        const std::uint8_t* srcData[4] = {reinterpret_cast<const std::uint8_t*>(frame.hostData),
+                                          nullptr, nullptr, nullptr};
         const int srcStride[4] = {w * 4, 0, 0, 0};
         sws_scale(sws_, srcData, srcStride, 0, h, frame_->data, frame_->linesize);
 
@@ -304,12 +303,12 @@ private:
         return ok();
     }
 
-    AVFormatContext*  fmt_{nullptr};
-    AVCodecContext*   codec_{nullptr};
-    AVStream*         stream_{nullptr};
-    AVPacket*         packet_{nullptr};
-    AVFrame*          frame_{nullptr};
-    SwsContext*       sws_{nullptr};
+    AVFormatContext* fmt_{nullptr};
+    AVCodecContext* codec_{nullptr};
+    AVStream* stream_{nullptr};
+    AVPacket* packet_{nullptr};
+    AVFrame* frame_{nullptr};
+    SwsContext* sws_{nullptr};
     FfmpegAudioStream audio_{};
 };
 
@@ -334,8 +333,8 @@ void freeFfmpegAudioStream(FfmpegAudioStream& audio) noexcept {
 
     const AVCodec* encoder = avcodec_find_encoder_by_name(spec.codecName.c_str());
     if (encoder == nullptr) {
-        return err<FfmpegAudioStream>(makeError(
-            ErrorCode::Unsupported, "audio encoder not found: " + spec.codecName));
+        return err<FfmpegAudioStream>(
+            makeError(ErrorCode::Unsupported, "audio encoder not found: " + spec.codecName));
     }
 
     AVStream* stream = avformat_new_stream(fmt, nullptr);
@@ -351,8 +350,8 @@ void freeFfmpegAudioStream(FfmpegAudioStream& audio) noexcept {
 
     // The encoder's sample format is whatever the codec prefers; the graph always
     // hands us interleaved float, so libswresample bridges the two.
-    ctx->sample_fmt = encoder->sample_fmts != nullptr ? encoder->sample_fmts[0]
-                                                      : AV_SAMPLE_FMT_FLTP;
+    ctx->sample_fmt =
+        encoder->sample_fmts != nullptr ? encoder->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
     ctx->sample_rate = spec.sampleRate;
     ctx->time_base = AVRational{1, spec.sampleRate};
     if (spec.bitrateBitsPerSecond > 0) {
@@ -362,8 +361,7 @@ void freeFfmpegAudioStream(FfmpegAudioStream& audio) noexcept {
     av_channel_layout_default(&ctx->ch_layout, spec.channels);
 #else
     ctx->channels = spec.channels;
-    ctx->channel_layout = static_cast<std::uint64_t>(
-        av_get_default_channel_layout(spec.channels));
+    ctx->channel_layout = static_cast<std::uint64_t>(av_get_default_channel_layout(spec.channels));
 #endif
     if ((fmt->oformat->flags & AVFMT_GLOBALHEADER) != 0) {
         ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
@@ -394,11 +392,10 @@ void freeFfmpegAudioStream(FfmpegAudioStream& audio) noexcept {
         swr = nullptr;
     }
 #else
-    swr = swr_alloc_set_opts(nullptr,
-                             static_cast<std::int64_t>(ctx->channel_layout), ctx->sample_fmt,
-                             ctx->sample_rate,
-                             av_get_default_channel_layout(spec.channels), AV_SAMPLE_FMT_FLT,
-                             spec.sampleRate, 0, nullptr);
+    swr =
+        swr_alloc_set_opts(nullptr, static_cast<std::int64_t>(ctx->channel_layout), ctx->sample_fmt,
+                           ctx->sample_rate, av_get_default_channel_layout(spec.channels),
+                           AV_SAMPLE_FMT_FLT, spec.sampleRate, 0, nullptr);
 #endif
     if (swr == nullptr || swr_init(swr) < 0) {
         if (swr != nullptr) swr_free(&swr);
@@ -438,6 +435,44 @@ void freeFfmpegAudioStream(FfmpegAudioStream& audio) noexcept {
     return audio;
 }
 
+/// ASCII-only lower casing. Deliberately not locale-aware: these are FFmpeg muxer and
+/// codec identifiers, and a Turkish locale must not turn "I" into a dotless one here.
+[[nodiscard]] std::string toLowerAscii(std::string text) {
+    for (char& c : text) {
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+    }
+    return text;
+}
+
+}  // namespace
+
+std::string ffmpegMuxerName(std::string_view container) {
+    std::string name = toLowerAscii(std::string(container));
+    // The only accepted container whose FFmpeg muxer has a different name.
+    if (name == "mkv") {
+        return "matroska";
+    }
+    return name;
+}
+
+std::string audioCodecForContainer(std::string_view container, std::string_view requested) {
+    const std::string c = toLowerAscii(std::string(container));
+    const std::string want = toLowerAscii(std::string(requested));
+    if (c == "webm") {
+        // WebM permits Opus and Vorbis only. Anything else - including the `aac`
+        // default - makes the muxer refuse the file at header-write time.
+        if (want == "libopus" || want == "opus" || want == "libvorbis" || want == "vorbis") {
+            return want;
+        }
+        return "libopus";
+    }
+    return want.empty() ? std::string("aac") : want;
+}
+
+namespace {
+
 [[nodiscard]] Result<std::unique_ptr<IEncodeBackend>> openFfmpegEncoder(
     const EncodeSpec& spec, const gpu::CodecRoute& route) {
     if (spec.outputPath.empty()) {
@@ -446,10 +481,9 @@ void freeFfmpegAudioStream(FfmpegAudioStream& audio) noexcept {
     }
 
     const std::string container =
-        spec.containerFormat.empty() ? std::string{} : spec.containerFormat;
+        spec.containerFormat.empty() ? std::string{} : ffmpegMuxerName(spec.containerFormat);
     AVFormatContext* fmt = nullptr;
-    avformat_alloc_output_context2(&fmt, nullptr,
-                                   container.empty() ? nullptr : container.c_str(),
+    avformat_alloc_output_context2(&fmt, nullptr, container.empty() ? nullptr : container.c_str(),
                                    spec.outputPath.c_str());
     if (fmt == nullptr) {
         return err<std::unique_ptr<IEncodeBackend>>(
@@ -512,7 +546,11 @@ void freeFfmpegAudioStream(FfmpegAudioStream& audio) noexcept {
     // written — a muxer accepts no new stream afterwards (Requirement 6.5).
     FfmpegAudioStream audio;
     if (spec.audio.has_value()) {
-        Result<FfmpegAudioStream> opened = openFfmpegAudioStream(fmt, *spec.audio);
+        // The container has the final say on the audio codec: a WebM output cannot carry
+        // AAC, and discovering that when the header is written loses the whole export.
+        AudioEncodeSpec audioSpec = *spec.audio;
+        audioSpec.codecName = audioCodecForContainer(spec.containerFormat, audioSpec.codecName);
+        Result<FfmpegAudioStream> opened = openFfmpegAudioStream(fmt, audioSpec);
         if (opened.isError()) {
             avcodec_free_context(&codec);
             avformat_free_context(fmt);
@@ -545,7 +583,7 @@ void freeFfmpegAudioStream(FfmpegAudioStream& audio) noexcept {
         std::make_unique<FfmpegEncodeBackend>(fmt, codec, stream, std::move(audio)));
 }
 
-} // namespace
+}  // namespace
 
 bool isFfmpegEncodeAvailable() noexcept { return true; }
 
@@ -555,20 +593,20 @@ EncodeBackendFactory ffmpegEncodeBackendFactory() {
     };
 }
 
-#else // !PALMIER_HAVE_FFMPEG
+#else  // !PALMIER_HAVE_FFMPEG
 
 bool isFfmpegEncodeAvailable() noexcept { return false; }
 
 EncodeBackendFactory ffmpegEncodeBackendFactory() {
-    return [](const EncodeSpec&, const gpu::CodecRoute&)
-               -> Result<std::unique_ptr<IEncodeBackend>> {
-        return err<std::unique_ptr<IEncodeBackend>>(makeError(
-            ErrorCode::FailedPrecondition,
-            "media encoding requires FFmpeg, which was not compiled into this build"));
-    };
+    return
+        [](const EncodeSpec&, const gpu::CodecRoute&) -> Result<std::unique_ptr<IEncodeBackend>> {
+            return err<std::unique_ptr<IEncodeBackend>>(makeError(
+                ErrorCode::FailedPrecondition,
+                "media encoding requires FFmpeg, which was not compiled into this build"));
+        };
 }
 
-#endif // PALMIER_HAVE_FFMPEG
+#endif  // PALMIER_HAVE_FFMPEG
 
 // ---------------------------------------------------------------------------
 // MediaEncoder — backend-agnostic routing + validation.
@@ -603,23 +641,22 @@ Result<MediaEncoder> MediaEncoder::create(const EncodeSpec& spec,
     if (spec.audio.has_value()) {
         const AudioEncodeSpec& audio = *spec.audio;
         if (audio.sampleRate <= 0) {
-            return err<MediaEncoder>(
-                invalidArgument("audio encode sample rate must be positive"));
+            return err<MediaEncoder>(invalidArgument("audio encode sample rate must be positive"));
         }
         if (audio.channels <= 0) {
             return err<MediaEncoder>(
                 invalidArgument("audio encode channel count must be positive"));
         }
         if (audio.bitrateBitsPerSecond < 0) {
-            return err<MediaEncoder>(
-                invalidArgument("audio encode bit rate must not be negative"));
+            return err<MediaEncoder>(invalidArgument("audio encode bit rate must not be negative"));
         }
         if (audio.codecName.empty()) {
             return err<MediaEncoder>(invalidArgument("audio encode requires a codec name"));
         }
     }
     if (!factory) {
-        return err<MediaEncoder>(makeError(ErrorCode::Internal, "no encode backend factory provided"));
+        return err<MediaEncoder>(
+            makeError(ErrorCode::Internal, "no encode backend factory provided"));
     }
 
     // Route against the requested device (or the software profile when hardware
@@ -647,12 +684,11 @@ Result<MediaEncoder> MediaEncoder::create(const EncodeSpec& spec,
         return err<MediaEncoder>(std::move(exec.result).error());
     }
     if (!backend) {
-        return err<MediaEncoder>(
-            makeError(ErrorCode::Internal, "encoder init reported success but produced no backend"));
+        return err<MediaEncoder>(makeError(
+            ErrorCode::Internal, "encoder init reported success but produced no backend"));
     }
 
-    return MediaEncoder(spec, std::move(backend), std::move(bridge), exec.route,
-                        exec.retriedOnCpu);
+    return MediaEncoder(spec, std::move(backend), std::move(bridge), exec.route, exec.retriedOnCpu);
 }
 
 Result<MediaEncoder> MediaEncoder::create(const EncodeSpec& spec) {
@@ -682,7 +718,8 @@ Result<void> MediaEncoder::submit(const gpu::RenderedFrame& frame) {
     // state, leaving the stream uncorrupted.
     const Duration pts = frame.presentationTime();
     if (hasSubmitted_ && pts < lastPresentation_) {
-        return invalidArgument("submitted frame presentation time regresses below the previous frame");
+        return invalidArgument(
+            "submitted frame presentation time regresses below the previous frame");
     }
 
     EncoderInputFrame input;
@@ -725,8 +762,7 @@ Result<void> MediaEncoder::submitAudio(const AudioBuffer& buffer, Duration prese
     // resampling here would put a second, hidden mixer in the pipeline; the
     // caller mixes through AudioGraph, which already produces this format.
     if (buffer.sampleRate() != audioSpec.sampleRate) {
-        return invalidArgument(
-            "submitted audio sample rate does not match the encoder audio spec");
+        return invalidArgument("submitted audio sample rate does not match the encoder audio spec");
     }
     if (buffer.channels() != audioSpec.channels) {
         return invalidArgument(
@@ -772,4 +808,4 @@ Result<void> MediaEncoder::finish() {
     return backend_->finish();
 }
 
-} // namespace palmier::media
+}  // namespace palmier::media

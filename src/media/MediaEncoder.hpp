@@ -54,6 +54,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <optional>
@@ -86,10 +87,32 @@ namespace palmier::media {
 ///   * codecName — the FFmpeg audio encoder short name ("aac" by default).
 ///   * bitrateBitsPerSecond — target average bit rate; 0 means "let the backend
 ///     choose"; a negative value is rejected.
+/// The FFmpeg muxer short name for a container the export surface accepts.
+///
+/// `timeline.export` documents, validates and advertises `mkv`, but FFmpeg has no muxer
+/// by that name - it is called `matroska`. Passing the container through unchanged made
+/// `avformat_alloc_output_context2` fail with *"Requested output format 'mkv' is not
+/// known"*, surfacing to the user as the far less helpful "could not allocate an output
+/// context". Every other accepted container happens to match its muxer name exactly,
+/// which is why this survived: mp4, mov and webm all work by coincidence.
+[[nodiscard]] std::string ffmpegMuxerName(std::string_view container);
+
+/// The audio encoder to use for `container`, given what the caller asked for.
+///
+/// WebM carries only Opus or Vorbis audio. The `aac` default therefore made the WebM
+/// muxer reject the WHOLE file when the header was written - *"Only VP8 or VP9 or AV1
+/// video and Vorbis or Opus audio and WebVTT subtitles are supported for WebM"* - so a
+/// vp9/webm export failed even though the video encoder had opened successfully.
+///
+/// Returns `requested` unless the container cannot carry it, in which case the
+/// container's own default. Pure, so the mapping is testable without FFmpeg.
+[[nodiscard]] std::string audioCodecForContainer(std::string_view container,
+                                                 std::string_view requested);
+
 struct AudioEncodeSpec {
-    int          sampleRate{48'000};
-    int          channels{2};
-    std::string  codecName{"aac"};
+    int sampleRate{48'000};
+    int channels{2};
+    std::string codecName{"aac"};
     std::int64_t bitrateBitsPerSecond{192'000};
 
     /// The interleaved-float working format this stream is submitted in.
@@ -126,15 +149,15 @@ struct AudioEncodeSpec {
 ///     and submitAudio() is accepted; when unset the output is video-only and
 ///     submitAudio() reports FailedPrecondition (Requirement 6.5).
 struct EncodeSpec {
-    gpu::CodecId                   codec{gpu::CodecId::H264};
-    std::int64_t                   bitrateBitsPerSecond{0};
-    Resolution                     resolution{};
-    FrameRate                      frameRate{FrameRate::fps30()};
-    bool                           preferHardware{true};
-    gpu::GpuCaps                   caps{gpu::GpuCaps::software()};
-    gpu::BridgeAvailability        availability{gpu::BridgeAvailability::fromBuildConfig()};
-    std::filesystem::path          outputPath{};
-    std::string                    containerFormat{};
+    gpu::CodecId codec{gpu::CodecId::H264};
+    std::int64_t bitrateBitsPerSecond{0};
+    Resolution resolution{};
+    FrameRate frameRate{FrameRate::fps30()};
+    bool preferHardware{true};
+    gpu::GpuCaps caps{gpu::GpuCaps::software()};
+    gpu::BridgeAvailability availability{gpu::BridgeAvailability::fromBuildConfig()};
+    std::filesystem::path outputPath{};
+    std::string containerFormat{};
     std::optional<AudioEncodeSpec> audio{};
 };
 
@@ -147,11 +170,11 @@ struct EncodeSpec {
 /// binding handle (for the zero-copy hardware path) and a host-memory pointer
 /// (for the software path); `gpuResident` says which the frame primarily is.
 struct EncoderInputFrame {
-    Duration          presentation{Duration::zero()};
-    gpu::FrameDesc    desc{};
-    bool              gpuResident{false};   ///< image is a zero-copy GPU import.
-    gpu::ImageHandle  image{};              ///< binding handle (hardware path).
-    const void*       hostData{nullptr};    ///< host-memory RGBA pixels (software path; may be null).
+    Duration presentation{Duration::zero()};
+    gpu::FrameDesc desc{};
+    bool gpuResident{false};        ///< image is a zero-copy GPU import.
+    gpu::ImageHandle image{};       ///< binding handle (hardware path).
+    const void* hostData{nullptr};  ///< host-memory RGBA pixels (software path; may be null).
 };
 
 // ---------------------------------------------------------------------------
@@ -163,7 +186,7 @@ struct EncoderInputFrame {
 /// copy. `presentation` is the block's timeline position, non-decreasing across
 /// consecutive submissions (the same ordering rule the video stream follows).
 struct EncoderInputAudio {
-    Duration           presentation{Duration::zero()};
+    Duration presentation{Duration::zero()};
     const AudioBuffer* buffer{nullptr};
 };
 
@@ -213,9 +236,8 @@ public:
 /// Mirrors MediaDecoder's injectable backend seam so create() is testable
 /// without FFmpeg. Returning an Error for a hardware route lets create() retry
 /// once on the software route (Requirement 10.5).
-using EncodeBackendFactory =
-    std::function<Result<std::unique_ptr<IEncodeBackend>>(const EncodeSpec&,
-                                                          const gpu::CodecRoute&)>;
+using EncodeBackendFactory = std::function<Result<std::unique_ptr<IEncodeBackend>>(
+    const EncodeSpec&, const gpu::CodecRoute&)>;
 
 /// True iff this build was compiled with FFmpeg encode support
 /// (PALMIER_HAVE_FFMPEG). When false the default factory reports
@@ -342,24 +364,24 @@ public:
     [[nodiscard]] const gpu::CodecBridge& bridge() const noexcept { return bridge_; }
 
 private:
-    MediaEncoder(EncodeSpec spec, std::unique_ptr<IEncodeBackend> backend,
-                 gpu::CodecBridge bridge, gpu::CodecRoute route, bool usedSoftwareFallback);
+    MediaEncoder(EncodeSpec spec, std::unique_ptr<IEncodeBackend> backend, gpu::CodecBridge bridge,
+                 gpu::CodecRoute route, bool usedSoftwareFallback);
 
-    EncodeSpec                      spec_{};
+    EncodeSpec spec_{};
     std::unique_ptr<IEncodeBackend> backend_{};
-    gpu::CodecBridge                bridge_;
-    gpu::CodecRoute                 route_{};
-    bool                            usedSoftwareFallback_{false};
-    bool                            finished_{false};
-    bool                            hasSubmitted_{false};
-    Duration                        lastPresentation_{Duration::zero()};
-    std::size_t                     submittedFrames_{0};
-    bool                            hasSubmittedAudio_{false};
-    Duration                        lastAudioPresentation_{Duration::zero()};
-    std::size_t                     submittedAudioBlocks_{0};
-    std::uint64_t                   submittedAudioFrames_{0};
+    gpu::CodecBridge bridge_;
+    gpu::CodecRoute route_{};
+    bool usedSoftwareFallback_{false};
+    bool finished_{false};
+    bool hasSubmitted_{false};
+    Duration lastPresentation_{Duration::zero()};
+    std::size_t submittedFrames_{0};
+    bool hasSubmittedAudio_{false};
+    Duration lastAudioPresentation_{Duration::zero()};
+    std::size_t submittedAudioBlocks_{0};
+    std::uint64_t submittedAudioFrames_{0};
 };
 
-} // namespace palmier::media
+}  // namespace palmier::media
 
-#endif // PALMIER_MEDIA_MEDIAENCODER_HPP
+#endif  // PALMIER_MEDIA_MEDIAENCODER_HPP

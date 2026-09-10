@@ -34,10 +34,10 @@ namespace {
 // --- Scriptable encode backend ---------------------------------------------
 
 struct MockEncodeConfig {
-    bool failHardwareInit{false}; ///< factory errors when route.hardware (forces SW retry).
-    bool failAllInit{false};      ///< factory always errors.
-    bool failEncode{false};       ///< encode() returns an Error.
-    bool failFinish{false};       ///< finish() returns an Error.
+    bool failHardwareInit{false};  ///< factory errors when route.hardware (forces SW retry).
+    bool failAllInit{false};       ///< factory always errors.
+    bool failEncode{false};        ///< encode() returns an Error.
+    bool failFinish{false};        ///< finish() returns an Error.
 };
 
 class MockEncodeBackend final : public IEncodeBackend {
@@ -61,11 +61,11 @@ public:
         return ok();
     }
 
-    int                    encodeCalls{0};
-    int                    finishCalls{0};
-    std::vector<Duration>  presentations{};
-    std::vector<bool>      gpuResident{};
-    std::vector<bool>      hadHostData{};
+    int encodeCalls{0};
+    int finishCalls{0};
+    std::vector<Duration> presentations{};
+    std::vector<bool> gpuResident{};
+    std::vector<bool> hadHostData{};
 
 private:
     MockEncodeConfig cfg_;
@@ -73,13 +73,13 @@ private:
 
 // Shared, test-owned view of how the factory was driven and the backend it built.
 struct MockEncodeState {
-    std::vector<gpu::CodecRoute> initRoutes{}; ///< routes the factory was invoked with.
-    MockEncodeBackend*           backend{nullptr};
+    std::vector<gpu::CodecRoute> initRoutes{};  ///< routes the factory was invoked with.
+    MockEncodeBackend* backend{nullptr};
 };
 
 EncodeBackendFactory mockFactory(MockEncodeConfig cfg, MockEncodeState* state) {
-    return [cfg, state](const EncodeSpec&, const gpu::CodecRoute& route)
-               -> Result<std::unique_ptr<IEncodeBackend>> {
+    return [cfg, state](const EncodeSpec&,
+                        const gpu::CodecRoute& route) -> Result<std::unique_ptr<IEncodeBackend>> {
         if (state != nullptr) state->initRoutes.push_back(route);
         if (cfg.failAllInit) {
             return err<std::unique_ptr<IEncodeBackend>>(
@@ -186,7 +186,7 @@ TEST(MediaEncoderCreate, DefaultFactoryReportsWhenFfmpegAbsent) {
 TEST(MediaEncoderCreate, InitFailurePropagatesAfterFallbackExhausted) {
     MockEncodeState state;
     EncodeSpec spec = baseSpec();
-    spec.preferHardware = false; // software route; no HW retry to fall back to.
+    spec.preferHardware = false;  // software route; no HW retry to fall back to.
     auto enc = MediaEncoder::create(spec, mockFactory({.failAllInit = true}, &state));
     ASSERT_TRUE(enc.isError());
     EXPECT_EQ(enc.error().code(), ErrorCode::Internal);
@@ -237,7 +237,7 @@ TEST(MediaEncoderCreate, HardwareInitFailureRetriesOnSoftwareEncoder) {
 TEST(MediaEncoderCreate, PreferHardwareFalseForcesSoftware) {
     MockEncodeState state;
     EncodeSpec spec = baseSpec();
-    spec.preferHardware = false; // opt out of hardware entirely.
+    spec.preferHardware = false;  // opt out of hardware entirely.
     spec.caps = nvidiaCaps();
     spec.availability = gpu::BridgeAvailability::all();
 
@@ -322,7 +322,7 @@ TEST(MediaEncoderSubmit, RejectsOutOfOrderPresentation) {
     auto f0 = makeCpuFrame(pool, kRes, Duration::fromMilliseconds(50));
     ASSERT_TRUE(enc.submit(f0).isOk());
 
-    auto f1 = makeCpuFrame(pool, kRes, Duration::fromMilliseconds(10)); // regresses.
+    auto f1 = makeCpuFrame(pool, kRes, Duration::fromMilliseconds(10));  // regresses.
     auto res = enc.submit(f1);
     ASSERT_TRUE(res.isError());
     EXPECT_EQ(res.error().code(), ErrorCode::InvalidArgument);
@@ -334,7 +334,7 @@ TEST(MediaEncoderSubmit, RejectsInvalidFrame) {
     MockEncodeState state;
     auto enc = MediaEncoder::create(baseSpec(), mockFactory({}, &state)).value();
 
-    gpu::RenderedFrame empty; // default-constructed: no backing.
+    gpu::RenderedFrame empty;  // default-constructed: no backing.
     auto res = enc.submit(empty);
     ASSERT_TRUE(res.isError());
     EXPECT_EQ(res.error().code(), ErrorCode::InvalidArgument);
@@ -386,5 +386,59 @@ TEST(MediaEncoderSubmit, RejectedAfterFinish) {
     EXPECT_EQ(res.error().code(), ErrorCode::FailedPrecondition);
 }
 
-} // namespace
-} // namespace palmier::media
+// ---------------------------------------------------------------------------
+// Container -> muxer and container -> audio codec
+//
+// Both of these were found by exporting real footage through the tool surface rather
+// than by a test: `timeline.export` advertises and validates `mkv` and `webm`, and both
+// failed. The mapping is pure so the fix is asserted here without FFmpeg.
+// ---------------------------------------------------------------------------
+
+TEST(FfmpegMuxerName, MkvMapsToMatroskaBecauseFfmpegHasNoMuxerCalledMkv) {
+    // The actual failure was "Requested output format 'mkv' is not known", surfacing as
+    // the far less helpful "could not allocate an output context".
+    EXPECT_EQ(ffmpegMuxerName("mkv"), "matroska");
+    EXPECT_EQ(ffmpegMuxerName("MKV"), "matroska");
+}
+
+TEST(FfmpegMuxerName, TheOtherAcceptedContainersAlreadyMatchTheirMuxer) {
+    EXPECT_EQ(ffmpegMuxerName("mp4"), "mp4");
+    EXPECT_EQ(ffmpegMuxerName("mov"), "mov");
+    EXPECT_EQ(ffmpegMuxerName("webm"), "webm");
+}
+
+TEST(FfmpegMuxerName, IsCaseInsensitiveAndPassesAnUnknownNameThrough) {
+    EXPECT_EQ(ffmpegMuxerName("MP4"), "mp4");
+    // Not this function's job to validate: isSupportedExportContainer already refused
+    // anything outside the four, and inventing a substitute here would hide that.
+    EXPECT_EQ(ffmpegMuxerName("ogg"), "ogg");
+}
+
+TEST(AudioCodecForContainer, WebmGetsOpusBecauseItCannotCarryAac) {
+    // The whole export failed at header-write time with "Only VP8 or VP9 or AV1 video and
+    // Vorbis or Opus audio ... are supported for WebM", even though the video encoder had
+    // already opened successfully.
+    EXPECT_EQ(audioCodecForContainer("webm", "aac"), "libopus");
+    EXPECT_EQ(audioCodecForContainer("WEBM", "aac"), "libopus");
+}
+
+TEST(AudioCodecForContainer, WebmKeepsACodecItCanActuallyCarry) {
+    EXPECT_EQ(audioCodecForContainer("webm", "libopus"), "libopus");
+    EXPECT_EQ(audioCodecForContainer("webm", "libvorbis"), "libvorbis");
+    EXPECT_EQ(audioCodecForContainer("webm", "opus"), "opus");
+    EXPECT_EQ(audioCodecForContainer("webm", "vorbis"), "vorbis");
+}
+
+TEST(AudioCodecForContainer, EveryOtherContainerKeepsWhatTheCallerAskedFor) {
+    EXPECT_EQ(audioCodecForContainer("mp4", "aac"), "aac");
+    EXPECT_EQ(audioCodecForContainer("mov", "aac"), "aac");
+    EXPECT_EQ(audioCodecForContainer("mkv", "libopus"), "libopus");
+}
+
+TEST(AudioCodecForContainer, AnEmptyRequestFallsBackToAacOutsideWebm) {
+    EXPECT_EQ(audioCodecForContainer("mp4", ""), "aac");
+    EXPECT_EQ(audioCodecForContainer("webm", ""), "libopus");
+}
+
+}  // namespace
+}  // namespace palmier::media

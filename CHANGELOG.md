@@ -11,6 +11,25 @@ task's completion commit, its CI run and the suite size at that point.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two export containers the tool surface advertises could never work.** Both were found
+  by exporting real footage through the MCP surface rather than by a test, and both failed
+  after the encoder had already opened, so the whole export was lost:
+  - `mkv` was passed to FFmpeg unchanged, but FFmpeg's muxer is named `matroska`, not
+    `mkv` (`Requested output format 'mkv' is not known`), which surfaced as the far less
+    helpful *"could not allocate an output context"*. The other three accepted containers
+    happen to match their muxer names, which is why this survived. `ffmpegMuxerName` now
+    performs the mapping.
+  - `webm` always got an AAC audio track, and WebM carries only Opus or Vorbis, so the
+    muxer refused the file when the header was written even though libvpx-vp9 had opened
+    successfully. `audioCodecForContainer` now picks a codec the container can carry.
+
+  Both are pure functions with tests, so the mapping is asserted without FFmpeg. Verified
+  by re-exporting on the L4 box: `mkv` now produces H.264 through `h264_nvenc` and through
+  `libx264`, and `webm` produces VP9 with an honest software-fallback reason (that GPU has
+  no VP9 encoder).
+
 ### Added
 
 - **A health and error-tracking surface.** `GET /health` on the MCP endpoint answers with
