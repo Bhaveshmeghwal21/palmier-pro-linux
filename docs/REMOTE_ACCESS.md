@@ -56,6 +56,7 @@ positional path. Lists are comma-separated, trimmed, with blank entries dropped.
 | `agent.interpreter` | `PALMIER_AGENT_INTERPRETER` | `--agent-interpreter` | `offline` | `offline`, `hosted` or `byok`. An unrecognised id falls back to `offline` and reports a startup error naming what was rejected, rather than failing to start |
 | `generative.backend` | `PALMIER_GENERATIVE_BACKEND` | `--generative-backend` | `offline` | `offline`, `hosted` or `byok`, with the same unrecognised-id fallback |
 | `generative.endpoint` | `PALMIER_GENERATIVE_ENDPOINT` | `--generative-endpoint` | *(unset)* | an `https://` base URL; a non-`https://` value is rejected and the setting is left unset |
+| `export.tool_budget_seconds` | `PALMIER_EXPORT_TOOL_BUDGET_SECONDS` | `--export-tool-budget-seconds` | `55` | 5..3600 seconds. How long `timeline.export` may run before it cancels itself and removes the partial output. The default suits a short single-layer timeline; a multi-track edit renders at only a few frames per second on a modest host, so raise this to export a real project |
 
 The table is the whole configuration surface, not just the remote-access part of it: it is the key
 table in `src/app/AppSettings.cpp`, one row per key, and the task 12.7 consistency checker compares

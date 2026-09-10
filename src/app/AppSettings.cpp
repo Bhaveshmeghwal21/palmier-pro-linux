@@ -23,9 +23,7 @@ namespace {
 // ---------------------------------------------------------------------------
 
 [[nodiscard]] std::string_view trim(std::string_view text) {
-    const auto isSpace = [](char c) {
-        return std::isspace(static_cast<unsigned char>(c)) != 0;
-    };
+    const auto isSpace = [](char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; };
     while (!text.empty() && isSpace(text.front())) {
         text.remove_prefix(1);
     }
@@ -112,9 +110,8 @@ namespace {
     std::size_t start = 0;
     while (start <= value.size()) {
         const std::size_t comma = value.find(',', start);
-        const std::string_view piece =
-            trim(value.substr(start, comma == std::string_view::npos ? std::string_view::npos
-                                                                    : comma - start));
+        const std::string_view piece = trim(value.substr(
+            start, comma == std::string_view::npos ? std::string_view::npos : comma - start));
         if (!piece.empty()) {
             entries.emplace_back(piece);
         }
@@ -138,8 +135,8 @@ struct KeySpec {
     std::string_view key;
     std::string_view envVar;
     std::string_view flag;
-    bool             valueOptional;  // bare `--flag` means true
-    Applier          apply;
+    bool valueOptional;  // bare `--flag` means true
+    Applier apply;
 };
 
 constexpr KeySpec kKeys[] = {
@@ -244,6 +241,27 @@ constexpr KeySpec kKeys[] = {
              return false;
          }
          config.remote.idleTimeout = std::chrono::seconds{seconds};
+         return true;
+     }},
+    // How long `timeline.export` may take before it cancels itself.
+    //
+    // The tool surface awaits its own export under a bounded budget so a long render
+    // reports a clean timeout and removes the partial file rather than being killed by
+    // the executor. The 55-second default is sized for a short single-layer timeline; a
+    // real multi-track edit renders at only a few frames per second on a modest host, so
+    // without a way to raise this an operator cannot export their own project at all.
+    //
+    // Kept below the executor's own 60-second per-invocation limit is NOT enforced here:
+    // a longer budget is legitimate, and the executor's limit is itself configurable by
+    // an embedder. Bounded at an hour so a typo cannot hang the endpoint indefinitely.
+    {"export.tool_budget_seconds", "PALMIER_EXPORT_TOOL_BUDGET_SECONDS",
+     "--export-tool-budget-seconds", false,
+     [](std::string_view value, AppConfig& config, std::string& error) {
+         long long seconds = 0;
+         if (!parseInteger(value, 5, 3600, seconds, error)) {
+             return false;
+         }
+         config.exportToolOptions.budget = std::chrono::seconds{seconds};
          return true;
      }},
     // Task 10.1 / Requirement 11.1: which Agent_Interpreter to install
@@ -445,8 +463,8 @@ AppSettings AppSettings::load(const std::vector<std::string>& commandLine, Optio
             return;
         }
         // Note the KEY and the reason only — never the rejected value.
-        settings.diagnostics_.push_back(std::string(origin) + ": " + std::string(spec.key) +
-                                       ": " + error + " (ignored)");
+        settings.diagnostics_.push_back(std::string(origin) + ": " + std::string(spec.key) + ": " +
+                                        error + " (ignored)");
     };
 
     // --- Which file? --config beats PALMIER_CONFIG_FILE beats the XDG derivation,
@@ -509,8 +527,8 @@ AppSettings AppSettings::load(const std::vector<std::string>& commandLine, Optio
                 const std::string key = toLower(trim(content.substr(0, separator)));
                 const std::string_view value = trim(content.substr(separator + 1));
                 if (key.empty()) {
-                    settings.diagnostics_.push_back(
-                        where() + ": malformed line, empty key (ignored)");
+                    settings.diagnostics_.push_back(where() +
+                                                    ": malformed line, empty key (ignored)");
                     continue;
                 }
                 const KeySpec* spec = findKey(key);
@@ -562,7 +580,7 @@ AppSettings AppSettings::load(const std::vector<std::string>& commandLine, Optio
         const KeySpec* spec = findFlag(name);
         if (spec == nullptr) {
             settings.diagnostics_.push_back("command line: unknown option '" + name +
-                                           "' (ignored)");
+                                            "' (ignored)");
             continue;
         }
         if (inlineValue) {
@@ -584,7 +602,7 @@ AppSettings AppSettings::load(const std::vector<std::string>& commandLine, Optio
             continue;
         }
         settings.diagnostics_.push_back("command line: option '" + name +
-                                       "' requires a value (ignored)");
+                                        "' requires a value (ignored)");
     }
 
     return settings;

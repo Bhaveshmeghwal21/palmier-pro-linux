@@ -11,6 +11,23 @@ task's completion commit, its CI run and the suite size at that point.
 
 ## [Unreleased]
 
+### Added
+
+- **`export.tool_budget_seconds`, because a real edit could not be exported at all.** The
+  tool surface awaits its own export under a bounded budget so an overrun reports a clean
+  timeout and removes the partial file. That budget was fixed at 55 seconds and reachable
+  only by an embedder, and a multi-track timeline renders at only a few frames per second
+  on a modest host - measured here at **6.7 fps** for a single 1080p layer and **7.6 fps**
+  at a 720p canvas, so decode dominates and shrinking the canvas buys almost nothing. A
+  ten-second five-track edit therefore could not be exported by any operator of the
+  shipped binary, on any hardware, with no way to raise the limit.
+
+  One knob moves everything that has to move: the executor's per-invocation limit and the
+  protocol layer's budget are derived from it with headroom, so the export still reports
+  its own timeout rather than being killed first. Never shorter than the previous
+  defaults, so raising nothing changes nothing. Found by editing real footage end to end
+  rather than by a test.
+
 ### Fixed
 
 - **The MCP endpoint served no protocol layer, so no external agent could connect.** This

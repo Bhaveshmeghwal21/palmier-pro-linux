@@ -696,7 +696,17 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     // --- MCP execution policy + HTTP transport -----------------------------
     // The executor is pointed at the SAME session the registry's handlers resolve
     // their engine from, so both always act on the current project (design.md D1).
-    executor_ = std::make_unique<services::McpToolExecutor>(*toolRegistry_, session_.get());
+    // The executor's per-invocation limit has to leave room for the export's OWN budget,
+    // or a long render is killed by the executor before it can report the clean timeout
+    // that removes the partial file. So one operator knob - export.tool_budget_seconds -
+    // moves both, and this derives the executor's limit from it with headroom. Never
+    // shorter than the 60-second default, so raising nothing changes nothing.
+    services::McpToolExecutor::Options executorOptions;
+    executorOptions.timeBudget = std::max(
+        executorOptions.timeBudget, std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        config.exportToolOptions.budget + std::chrono::seconds{5}));
+    executor_ = std::make_unique<services::McpToolExecutor>(*toolRegistry_, session_.get(),
+                                                            executorOptions);
 
     // The server delegates each well-formed request to the executor's JSON
     // envelope entry point; the executor enforces the timeout/rollback policy.
@@ -780,6 +790,8 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     services::McpProtocolHandler::Options protocolOptions;
     protocolOptions.serverVersion =
         std::string(services::McpProtocolHandler::kDefaultServerVersion);
+    // The protocol layer waits on the executor, so it must not give up first.
+    protocolOptions.toolBudget = executorOptions.timeBudget;
     mcpProtocol_ = std::make_unique<services::McpProtocolHandler>(
         *toolRegistry_, *executor_, *mcpSessions_, config.mainThreadInvoker, protocolOptions);
     mcpServer_->setProtocolDelegate(services::protocolDelegateFor(*mcpProtocol_));
