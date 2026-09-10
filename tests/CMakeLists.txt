@@ -1064,6 +1064,30 @@ palmier_test_enable_openssl(palmier_services_mcp_server_tests)
 palmier_register_test(palmier_services_mcp_server_tests)
 
 
+# ---------------------------------------------------------------------------
+# Health and error tracking (services/HealthMonitor).
+#
+# HealthMonitor depends on nothing but Palmier::core (for the log record type) and
+# the Json value, so both are compiled directly into the test binary and this suite
+# runs without FFmpeg, Qt, libsecret or lcms2 - the same pattern the MCP server
+# tests above use, and for the same reason.
+#
+# The interesting cases are the ones where a health surface could lie: a probe that
+# throws, a clock that goes backwards, and failures counted twice or not at all.
+# ---------------------------------------------------------------------------
+add_executable(palmier_services_health_tests
+    services/health_monitor_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/services/HealthMonitor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/Json.cpp")
+target_include_directories(palmier_services_health_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(palmier_services_health_tests PRIVATE
+    Palmier::core
+    Palmier::test_support)
+
+palmier_register_test(palmier_services_health_tests)
+
+
 
 # ---------------------------------------------------------------------------
 # MCP tool-execution policy unit tests (task 15.3; Requirements 7.4-7.7, 7.10).
@@ -1572,6 +1596,7 @@ palmier_register_test(palmier_ui_preview_controller_tests)
 add_executable(palmier_app_composition_tests
     app/application_composition_test.cpp
     "${PROJECT_SOURCE_DIR}/src/app/ApplicationComposition.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/HealthMonitor.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/AppSettings.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"
@@ -3361,6 +3386,7 @@ add_executable(palmier_e2e_tests
     e2e/editor_end_to_end_test.cpp
     support/SyntheticMedia.cpp
     "${PROJECT_SOURCE_DIR}/src/app/ApplicationComposition.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/HealthMonitor.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/AppSettings.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/PreviewController.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/ProjectSession.cpp"

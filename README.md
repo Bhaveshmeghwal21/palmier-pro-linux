@@ -102,7 +102,7 @@ make test-verbose      # per-test output, JUnit XML, and a generated summary
 make coverage          # instrumented build, then a gcovr line-coverage report
 ```
 
-The suite is **1706 GoogleTest and RapidCheck cases across 93 test executables**, and
+The suite is **1746 GoogleTest and RapidCheck cases across 94 test executables**, and
 CI runs all of them on every push to `main` and on every pull request. It is not only
 unit tests: there are
 property tests over generated timelines, round-trip tests over the project format,
@@ -146,7 +146,7 @@ src/gpu/         Vulkan compositing, effect kernels, scopes, LUTs, codec bridge
 src/services/    Project store, MCP server, tool registry, export coordination
 src/ui/          Qt 6 widgets and view models (view models are Qt-free where possible)
 src/app/         Entry point, settings, platform checks
-tests/           93 test executables: unit, property, integration, e2e, docs
+tests/           94 test executables: unit, property, integration, e2e, docs
 docs/            All operational documentation
 packaging/       Debian, Flatpak and AppImage packaging, and the apt manifest
 scripts/         CI report generators (stdlib-only Python) and their tests
@@ -171,7 +171,7 @@ procedure is documented in exactly one place.
 | [`docs/TOOLS.md`](docs/TOOLS.md) | Every tool the agent surface publishes, with each argument and result field |
 | [`docs/HARDWARE_ENCODE.md`](docs/HARDWARE_ENCODE.md) | NVENC, Quick Sync and VAAPI prerequisites, the software fallback, host verification and the L4 validation procedure |
 | [`docs/REMOTE_ACCESS.md`](docs/REMOTE_ACCESS.md) | Opt-in non-loopback access: token, TLS, Origin allow-list, session and timeout limits |
-| [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Log levels and formats, `PALMIER_LOG_LEVEL` / `PALMIER_LOG_FORMAT`, the category vocabulary, and what each CI run records |
+| [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Log levels and formats, `PALMIER_LOG_LEVEL` / `PALMIER_LOG_FORMAT`, the category vocabulary, the `GET /health` endpoint and its error counters, and what each CI run records |
 | [`docs/UPSTREAM_PARITY.md`](docs/UPSTREAM_PARITY.md) · [`docs/PORT_BACKLOG.md`](docs/PORT_BACKLOG.md) | Upstream parity report and the deferred-port backlog |
 | [`CHANGELOG.md`](CHANGELOG.md) · [`SECURITY.md`](SECURITY.md) | Release history, and the security model and reporting process |
 | [`.env.example`](.env.example) | Every environment variable the editor reads, with its precedence |

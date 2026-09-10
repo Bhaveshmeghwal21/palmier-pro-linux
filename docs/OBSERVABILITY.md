@@ -127,6 +127,104 @@ filtering is what the category field is for.
 
 ---
 
+## Health and error tracking
+
+Two questions the editor could not answer about itself until now: *is it up, and is
+anything degraded?* and *has anything failed, and how often?*
+
+### `GET /health`
+
+The MCP endpoint serves a second path beside `/mcp`:
+
+```console
+$ curl -fsS http://127.0.0.1:19789/health
+{"state":"ok","version":"0.3.0","uptimeSeconds":41,
+ "checks":[{"name":"gpu","state":"ok","detail":""},
+           {"name":"audio","state":"ok","detail":"pipewire"},
+           {"name":"startup","state":"ok","detail":""}],
+ "log":{"total":12,"warnings":1,"errors":0,"critical":0,
+        "errorsByCategory":{},"lastError":null}}
+```
+
+A separate path rather than a tool call, so a container runtime, a load balancer or a
+person with `curl` can ask without speaking JSON-RPC and without holding a session. It
+is `GET` only — anything else is 405, which keeps it from becoming an accidental write
+surface.
+
+The document is rendered by `healthReportToJson`, and its five keys are the whole
+contract:
+
+| Key | Meaning |
+|---|---|
+| `state` | `ok`, `degraded` or `unavailable` — the worst of the component states |
+| `version` | the server version, the same string `initialize` reports |
+| `uptimeSeconds` | seconds since the composition was built |
+| `checks` | one entry per registered component: `name`, `state`, `detail` |
+| `log` | counts of what the log has carried, and the most recent failure |
+
+### The three states, and why `degraded` is served as 200
+
+`healthHttpStatus` maps `ok` and `degraded` to **200**, and only `unavailable` to **503**.
+
+That is deliberate. No GPU and no audio device are *supported* ways to run this editor —
+compositing falls back to the CPU, the audio sink order falls through to `null`, the
+status bar says so, and the suite proves it. A container runtime that restarted the
+process for either would be destroying a perfectly usable editor. `degraded` means
+"working, with something a user would notice missing"; `unavailable` means "cannot do
+its job".
+
+The components that report today, all from what the application composition already
+knows:
+
+| Check | `degraded` when |
+|---|---|
+| `gpu` | no Vulkan device, so compositing is on the CPU |
+| `audio` | no output device, so audio is suppressed |
+| `startup` | one or more startup diagnostics were recorded |
+
+A component answers for itself through a probe registered on `HealthMonitor`, so the
+monitor knows names and states rather than internals, and adding a component does not
+change it. A probe that throws is reported as `unavailable` with the exception's message
+rather than propagating — the endpoint that exists to report brokenness must not be
+brought down by a broken probe.
+
+### Error tracking is the log, counted
+
+`makeCountingLogSink` **decorates** the sink installed on the shared logger rather than
+adding a parallel reporting path:
+
+```cpp
+auto logTally = std::make_shared<services::LogTally>();
+sharedLogger().setSink(services::makeCountingLogSink(
+    logTally, core::makeStreamSink(std::cerr, format)));
+```
+
+So anything already logged is counted by construction, and there is no way to record a
+failure that the log does not also carry. The counters are per-severity plus a
+per-category breakdown of failures, because knowing there were forty errors is much less
+use than knowing all forty were in `media.decode`. The sink is installed **before** any
+component is built, since the failures raised during composition are the interesting
+ones.
+
+`lastError` is `null` until something actually fails, then names the category and message
+of the most recent one.
+
+### What it deliberately does not contain
+
+The document is served over a network socket, so its contents are part of its security
+contract: no token, no credential, no filesystem path, no host, nothing identifying a
+user. A test asserts the key set is exactly the five above, so a future field cannot be
+added without that decision being made again.
+
+When remote access is enabled, `/health` is subject to the **same admission gate** as
+`/mcp` — an unauthenticated remote peer gets 401 and the report is never even built. On
+the default loopback binding the gate admits unconditionally, so a local probe works with
+no configuration. See [`REMOTE_ACCESS.md`](REMOTE_ACCESS.md).
+
+There is no container `HEALTHCHECK` yet: the image ships no HTTP client, and
+`packaging/apt-packages.txt` is held byte-identical to what CI installs, so adding one is
+a deliberate change rather than a side effect of this feature.
+
 ## What CI records about a run
 
 Separately from the application's own log, every CI run publishes:

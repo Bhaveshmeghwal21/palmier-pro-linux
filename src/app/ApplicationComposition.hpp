@@ -84,6 +84,7 @@
 #include "services/LocalizationManager.hpp"      // Catalog, SystemLanguageProvider
 #include "services/McpProtocolHandler.hpp"        // MainThreadInvoker (design.md D5)
 #include "services/McpServer.hpp"                // kDefaultHost/kDefaultPort
+#include "services/HealthMonitor.hpp"            // HealthMonitor, LogTally
 #include "services/RemoteAccessGate.hpp"         // RemoteAccessConfig (task 6.1)
 #include "services/SecretStore.hpp"              // SecretStore
 #include "services/StillFrameCapture.hpp"        // ImageEncoder (tasks.md task 14)
@@ -234,6 +235,14 @@ struct AppConfig {
     /// `app::AppSettings`; validated and enforced by `services::RemoteAccessGate`
     /// (task 6.2). Nothing here binds a non-loopback address on its own.
     services::RemoteAccessConfig remote;
+
+    /// The log tally that counts warnings and failures as they are written, or null.
+    ///
+    /// Created by the entry point, because the counting sink has to be installed on the
+    /// shared logger BEFORE any component is built - otherwise the errors raised during
+    /// composition, which are the interesting ones, are never counted. Null in tests
+    /// that do not care, in which case health reports zero counters rather than failing.
+    std::shared_ptr<services::LogTally> logTally;
 
     /// The Export_Coordinator's injectable collaborators (task 9.7; Requirement
     /// 1.1). Default constructed = the production defaults: the FFmpeg encode
@@ -572,6 +581,10 @@ public:
     ///
     /// Distinct from the fatal path: a failure to construct a component named in
     /// Requirement 1.1 is not reported here, it prevents construction.
+    /// The health monitor, which answers `GET /health` on the MCP endpoint and is the
+    /// only place that rolls component readiness and log counters into one document.
+    [[nodiscard]] services::HealthMonitor& healthMonitor() noexcept { return *healthMonitor_; }
+
     [[nodiscard]] const std::vector<std::string>& startupErrors() const noexcept {
         return startupErrors_;
     }
@@ -659,6 +672,7 @@ private:
     std::string                                 remoteAccessStartupError_;
     std::string                                 remoteAccessWarning_;
     std::unique_ptr<services::McpServer>        mcpServer_;
+    std::unique_ptr<services::HealthMonitor> healthMonitor_;
     std::unique_ptr<services::IAgentAuthGate>   agentGate_;
     std::unique_ptr<services::AgentOrchestrator> agent_;
     std::string                                 agentInterpreterId_;

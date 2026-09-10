@@ -11,6 +11,28 @@ task's completion commit, its CI run and the suite size at that point.
 
 ## [Unreleased]
 
+### Added
+
+- **A health and error-tracking surface.** `GET /health` on the MCP endpoint answers with
+  the process state, version, uptime, one entry per component, and counts of what the log
+  has carried including a per-category breakdown of failures and the most recent one. A
+  separate path rather than a tool call, so a container runtime or a person with `curl`
+  can ask without speaking JSON-RPC or holding a session.
+  - `degraded` is served as **200**, only `unavailable` as 503: no GPU and no audio
+    device are supported ways to run this editor, and restarting the process for either
+    would destroy a usable one.
+  - Error tracking **decorates the existing log sink** rather than adding a parallel
+    reporting path, so anything logged is counted by construction and a failure cannot be
+    recorded that the log does not also carry. The sink is installed before any component
+    is built, because the failures raised during composition are the interesting ones.
+  - When remote access is enabled the endpoint is behind the **same admission gate** as
+    `/mcp`; an unauthenticated remote peer gets 401 and the report is never built. A test
+    asserts the served key set is exactly the five documented ones, so no credential,
+    path or host can be added to it without that decision being made again.
+  - 40 tests, including a probe that throws, a clock that goes backwards, concurrent
+    counting from eight threads, and the refusal path. See
+    [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
+
 ### Changed
 
 - **No production translation unit exceeds 1000 lines any more.** The last two did:

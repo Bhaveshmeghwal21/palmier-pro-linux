@@ -343,8 +343,68 @@ McpRequestContext McpServer::contextFor(const HttpRequest& request, std::string 
     return context;
 }
 
+void McpServer::setHealthReporter(HealthReporter reporter) {
+    healthReporter_ = std::move(reporter);
+}
+
+std::optional<HttpResponse> McpServer::healthResponseFor(const HttpRequest& request) const {
+    if (request.path() != kHealthPath) {
+        return std::nullopt;
+    }
+    HttpResponse r;
+    if (request.method != "GET") {
+        // A health check is a read. Refusing anything else keeps the endpoint from
+        // becoming an accidental write surface.
+        r.status = 405;
+        r.reason = std::string(httpReasonPhrase(405));
+        r.body = Json::object({{"error", Json("method not allowed")}}).dump();
+        return r;
+    }
+    if (!healthReporter_) {
+        r.status = 503;
+        r.reason = std::string(httpReasonPhrase(503));
+        r.body = Json::object({{"state", Json("unavailable")},
+                               {"detail", Json("no health reporter is wired")}})
+                     .dump();
+        return r;
+    }
+    const HealthAnswer answer = healthReporter_();
+    r.status = answer.status;
+    r.reason = std::string(httpReasonPhrase(answer.status));
+    r.body = answer.body.dump();
+    return r;
+}
+
 HttpResponse McpServer::dispatchWithContext(const HttpRequest& request,
                                             const McpRequestContext& context) const {
+    // Health is answered on this path too, but only after admission: on a loopback
+    // binding the gate admits unconditionally, so a local `curl /health` works, while
+    // enabling non-loopback access does not publish telemetry to unauthenticated peers.
+    if (request.path() == kHealthPath) {
+        if (gate_ != nullptr) {
+            const Admission admission = gate_->admit(context);
+            if (!admission.allowed) {
+                HttpResponse r;
+                r.status = admission.httpStatus;
+                r.reason = std::string(httpReasonPhrase(admission.httpStatus));
+                // Identical shape to the refusal on the MCP path: the reason code and
+                // its message, no credential, and nothing that lets a prober tell
+                // "wrong token" from "no token".
+                r.body =
+                    Json::object(
+                        {{"error", Json(std::string(rejectionReasonMessage(admission.reason)))},
+                         {"reason", Json(std::string(rejectionReasonCode(admission.reason)))}})
+                        .dump();
+                if (admission.httpStatus == 401) {
+                    r.headers.emplace_back("WWW-Authenticate", "Bearer");
+                }
+                return r;
+            }
+        }
+        if (std::optional<HttpResponse> health = healthResponseFor(request)) {
+            return *health;
+        }
+    }
     if (request.path() != kPath) {
         HttpResponse r;
         r.status = 404;
@@ -453,6 +513,13 @@ bool McpServer::isLoopbackHost(std::string_view host) {
 }
 
 HttpResponse McpServer::dispatch(const HttpRequest& request) const {
+    // Health first: this overload carries no request context, so there is no gate to
+    // consult. It is the socket-free routing core used by tests and by a transport that
+    // has not wired admission control.
+    if (std::optional<HttpResponse> health = healthResponseFor(request)) {
+        return *health;
+    }
+
     // Route: only the single MCP path is served.
     if (request.path() != kPath) {
         HttpResponse r;

@@ -61,6 +61,7 @@ target_link_libraries(palmier_services PUBLIC
 # this target and the standalone test targets cannot compile different sets.
 target_sources(palmier_services PRIVATE
     Json.cpp
+    HealthMonitor.cpp
     ${PALMIER_TOOL_SURFACE_SOURCES})
 
 

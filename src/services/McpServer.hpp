@@ -79,6 +79,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -179,6 +180,15 @@ public:
     static constexpr std::uint16_t     kDefaultPort = 19789;
     static constexpr std::string_view  kPath = "/mcp";
 
+    /// The liveness/readiness path, served with GET (Requirement: operability).
+    ///
+    /// A separate path rather than a tool call so that a container runtime, a load
+    /// balancer or a person with curl can ask without speaking JSON-RPC and without
+    /// holding a session. It is still subject to the same admission gate as `kPath`
+    /// when one is wired, so enabling non-loopback access does not silently publish
+    /// process telemetry to unauthenticated peers.
+    static constexpr std::string_view kHealthPath = "/health";
+
     /// The request-body cap of Requirements 9.1 and 9.6: a larger body is refused
     /// with JSON-RPC error -32700 and never reaches the protocol layer.
     static constexpr std::size_t kMaxRequestBodyBytes = 1024u * 1024u;
@@ -200,6 +210,25 @@ public:
 
     /// Replace the request handler. Safe to call while stopped.
     void setHandler(McpRequestHandler handler);
+
+    /// What `kHealthPath` should answer with: an HTTP status and a JSON document.
+    ///
+    /// The status travels with the body rather than being derived from it, so this
+    /// transport never has to interpret the document's contents. Keeping the seam this
+    /// shape is also what lets the transport stay independent of HealthMonitor - it
+    /// knows there is something to ask, not what health means.
+    struct HealthAnswer {
+        int status = 200;
+        Json body;
+    };
+
+    /// Supplies a health document on demand. Called on the request thread, so it must
+    /// be cheap and thread-safe. With none wired, `kHealthPath` answers 503 with
+    /// `{"state":"unavailable"}` - honest for a process that cannot describe itself.
+    using HealthReporter = std::function<HealthAnswer()>;
+
+    /// Wire the health reporter. Safe to call while stopped.
+    void setHealthReporter(HealthReporter reporter);
 
     /// Wire the JSON-RPC 2.0 protocol layer (task 5.2). Once set, every request to
     /// `/mcp` is answered by the delegate — `initialize`,
@@ -326,9 +355,15 @@ private:
     void acceptLoop();          ///< Background thread body.
     void closeListenSocket();   ///< Close listen fd if open.
 
+    /// The answer for a health request, or nullopt when `request` is not one. Shared
+    /// by both dispatch paths so the route cannot be served on one and 404 on the
+    /// other - which is exactly the bug a second copy would eventually become.
+    [[nodiscard]] std::optional<HttpResponse> healthResponseFor(const HttpRequest& request) const;
+
     McpRequestHandler   handler_;
     McpProtocolDelegate protocol_;   ///< JSON-RPC 2.0 layer (task 5.2), or empty.
     RemoteAccessGate*   gate_ = nullptr;   ///< Admission control (task 6.2), or null.
+    HealthReporter healthReporter_;        ///< Answers kHealthPath, or empty.
     std::unique_ptr<TlsContext> tls_;      ///< Loaded TLS material (task 6.3), or null.
 
     std::string      boundHost_;       ///< Host of the current bind ("" when stopped).

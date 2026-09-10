@@ -49,6 +49,13 @@ HttpRequest post(std::string target, std::string body) {
     return r;
 }
 
+HttpRequest get(std::string target) {
+    HttpRequest r;
+    r.method = "GET";
+    r.target = std::move(target);
+    return r;
+}
+
 // ---- dispatch() routing ---------------------------------------------------
 
 TEST(McpServerDispatch, UnknownPathIs404) {
@@ -364,6 +371,139 @@ TEST(McpServerStart, TlsMaterialLoadFailureIsReportedNotIgnored) {
     } else {
         EXPECT_EQ(r.error().code(), ErrorCode::Unsupported);
     }
+}
+
+// ---- GET /health ----------------------------------------------------------
+//
+// The endpoint exists so a container runtime, a load balancer or a person with curl
+// can ask whether the process is well without speaking JSON-RPC and without holding a
+// session. Two properties matter most: it must answer when the rest of the server
+// cannot, and it must not become a way to read process telemetry anonymously from off
+// the machine.
+
+TEST(McpServerHealth, WithNoReporterWiredItIsHonestlyUnavailable) {
+    McpServer server;
+    const HttpResponse r = server.dispatch(get("/health"));
+    EXPECT_EQ(r.status, 503);
+    EXPECT_NE(r.body.find("unavailable"), std::string::npos);
+}
+
+TEST(McpServerHealth, ServesTheReportersStatusAndBodyVerbatim) {
+    McpServer server;
+    server.setHealthReporter([] {
+        McpServer::HealthAnswer answer;
+        answer.status = 200;
+        answer.body = Json::object({{"state", Json("ok")}, {"version", Json("0.3.0")}});
+        return answer;
+    });
+
+    const HttpResponse r = server.dispatch(get("/health"));
+    EXPECT_EQ(r.status, 200);
+    EXPECT_EQ(r.reason, "OK");
+    EXPECT_NE(r.body.find("\"state\":\"ok\""), std::string::npos);
+    EXPECT_NE(r.body.find("0.3.0"), std::string::npos);
+}
+
+TEST(McpServerHealth, AnUnavailableReportIsServedAs503) {
+    McpServer server;
+    server.setHealthReporter([] {
+        McpServer::HealthAnswer answer;
+        answer.status = 503;
+        answer.body = Json::object({{"state", Json("unavailable")}});
+        return answer;
+    });
+    EXPECT_EQ(server.dispatch(get("/health")).status, 503);
+}
+
+TEST(McpServerHealth, AnsweredEvenWhenNoMcpHandlerIsWired) {
+    // This is the point of a health endpoint: it reports on a process that cannot serve
+    // its main surface. A 503 from the MCP path must not mean silence from /health.
+    McpServer server;  // no handler
+    server.setHealthReporter([] {
+        McpServer::HealthAnswer answer;
+        answer.body = Json::object({{"state", Json("degraded")}});
+        return answer;
+    });
+    EXPECT_EQ(server.dispatch(post("/mcp", "{}")).status, 503);
+    EXPECT_EQ(server.dispatch(get("/health")).status, 200);
+}
+
+TEST(McpServerHealth, OnlyGetIsAllowedSoItCannotBecomeAWriteSurface) {
+    McpServer server;
+    server.setHealthReporter([] { return McpServer::HealthAnswer{}; });
+    EXPECT_EQ(server.dispatch(post("/health", "{}")).status, 405);
+}
+
+TEST(McpServerHealth, AQueryStringStillRoutesToHealth) {
+    McpServer server;
+    server.setHealthReporter([] {
+        McpServer::HealthAnswer answer;
+        answer.body = Json::object({{"state", Json("ok")}});
+        return answer;
+    });
+    EXPECT_EQ(server.dispatch(get("/health?verbose=1")).status, 200);
+}
+
+TEST(McpServerHealth, AddingTheRouteDidNotStopUnknownPathsBeing404) {
+    McpServer server([](const Json&) { return Json("unused"); });
+    EXPECT_EQ(server.dispatch(get("/healthz")).status, 404);
+    EXPECT_EQ(server.dispatch(get("/")).status, 404);
+}
+
+TEST(McpServerHealth, ALoopbackGateAdmitsHealthUnconditionally) {
+    RecordingRejectionLog log;
+    RemoteAccessConfig config;  // default: loopback only
+    RemoteAccessGate gate(config, log);
+    ASSERT_TRUE(gate.validate().loopbackOnly);
+
+    McpServer server;
+    server.setRemoteAccessGate(&gate);
+    server.setHealthReporter([] {
+        McpServer::HealthAnswer answer;
+        answer.body = Json::object({{"state", Json("ok")}});
+        return answer;
+    });
+
+    McpRequestContext context;
+    context.sourceAddress = "127.0.0.1";
+    const HttpResponse r = server.dispatchWithContext(get("/health"), context);
+    EXPECT_EQ(r.status, 200);
+    EXPECT_EQ(log.size(), 0u);
+}
+
+TEST(McpServerHealth, AnUnauthenticatedRemotePeerCannotReadHealth) {
+    // Enabling non-loopback access must not silently publish uptime, error counts and
+    // the last error message to anyone who can reach the port.
+    RecordingRejectionLog log;
+    RemoteAccessConfig config;
+    config.enabled = true;
+    config.bindAddress = "192.0.2.10";
+    config.bearerToken = std::string(40, 'k');
+    config.acknowledged = true;
+    RemoteAccessGate gate(config, log);
+    ASSERT_FALSE(gate.validate().loopbackOnly);
+
+    bool reporterCalled = false;
+    McpServer server;
+    server.setRemoteAccessGate(&gate);
+    server.setHealthReporter([&reporterCalled] {
+        reporterCalled = true;
+        return McpServer::HealthAnswer{};
+    });
+
+    McpRequestContext context;
+    context.sourceAddress = "198.51.100.4";  // no Authorization header
+
+    const HttpResponse refused = server.dispatchWithContext(get("/health"), context);
+    EXPECT_EQ(refused.status, 401);
+    EXPECT_FALSE(reporterCalled) << "the report was built for a peer that was refused";
+    EXPECT_NE(refused.body.find("no_token"), std::string::npos);
+
+    // The same peer with the configured token is served.
+    context.authorization = "Bearer " + config.bearerToken;
+    const HttpResponse admitted = server.dispatchWithContext(get("/health"), context);
+    EXPECT_EQ(admitted.status, 200);
+    EXPECT_TRUE(reporterCalled);
 }
 
 }  // namespace

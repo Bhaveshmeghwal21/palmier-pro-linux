@@ -40,6 +40,7 @@
 #include "app/PlatformCompatibility.hpp"
 #include "core/Logging.hpp"
 #include "core/Result.hpp"
+#include "services/HealthMonitor.hpp"
 
 #ifdef PALMIER_HAVE_QT
 #include <QApplication>
@@ -74,7 +75,9 @@ using palmier::core::sharedLogger;
 /// The sink writes to stderr, which is where every diagnostic went before this existed,
 /// so redirecting `2>` still captures everything. Standard output stays reserved for
 /// `--help`.
-void configureLoggingFromEnvironment() {
+/// Configure the shared logger from the environment and return the tally that now
+/// counts everything it carries, so the composition can report failures on /health.
+std::shared_ptr<palmier::services::LogTally> configureLoggingFromEnvironment() {
     const char* rawLevel = std::getenv(palmier::core::kLogLevelEnvironmentVariable);
     const char* rawFormat = std::getenv(palmier::core::kLogFormatEnvironmentVariable);
 
@@ -83,7 +86,14 @@ void configureLoggingFromEnvironment() {
         rawFormat != nullptr ? std::optional<std::string_view>(rawFormat) : std::nullopt);
 
     sharedLogger().setThreshold(configuration.level);
-    sharedLogger().setSink(palmier::core::makeStreamSink(std::cerr, configuration.format));
+    // Count every record on its way out, so the health endpoint can answer "has
+    // anything failed?" from the same records the log carries. The tally is installed
+    // BEFORE any component is built, because the failures raised during composition are
+    // exactly the ones worth counting, and it is handed to the composition so the
+    // monitor and the sink share one set of counters rather than two that disagree.
+    auto logTally = std::make_shared<palmier::services::LogTally>();
+    sharedLogger().setSink(palmier::services::makeCountingLogSink(
+        logTally, palmier::core::makeStreamSink(std::cerr, configuration.format)));
 
     // A rejected value is reported rather than silently defaulted, so a typo in
     // PALMIER_LOG_LEVEL does not quietly hide output the operator asked for. Reported
@@ -91,6 +101,7 @@ void configureLoggingFromEnvironment() {
     for (const std::string& diagnostic : configuration.diagnostics) {
         sharedLogger().warning("startup", diagnostic);
     }
+    return logTally;
 }
 
 /// Report the incompatibility report (used on every build, and as the only channel in a
@@ -148,7 +159,7 @@ int main(int argc, char** argv) {
     // Configure the log before anything else can report something: a diagnostic
     // produced while resolving settings below is itself worth logging, and a logger
     // configured afterwards would have missed it.
-    configureLoggingFromEnvironment();
+    const std::shared_ptr<palmier::services::LogTally> logTally = configureLoggingFromEnvironment();
 
     // Resolve the runtime configuration BEFORE anything else: built-in defaults,
     // then $XDG_CONFIG_HOME/palmier-pro/config, then the PALMIER_* environment
@@ -222,6 +233,7 @@ int main(int argc, char** argv) {
     AppConfig config = settings.config();
     config.exportOptions.textRasterizer = textRasterizer.asRasterizer();
     config.imageEncoder = imageEncoder.asEncoder();
+    config.logTally = logTally;
     try {
         compositionPtr = std::make_unique<ApplicationComposition>(std::move(config));
     } catch (const palmier::app::ComponentConstructionError& ex) {
@@ -290,7 +302,9 @@ int main(int argc, char** argv) {
     // console shell honours the same options as the editor.
     std::unique_ptr<ApplicationComposition> compositionPtr;
     try {
-        compositionPtr = std::make_unique<ApplicationComposition>(settings.config());
+        AppConfig consoleConfig = settings.config();
+        consoleConfig.logTally = logTally;
+        compositionPtr = std::make_unique<ApplicationComposition>(std::move(consoleConfig));
     } catch (const palmier::app::ComponentConstructionError& ex) {
         sharedLogger().critical("startup", ex.what());
         return 1;

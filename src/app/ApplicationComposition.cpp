@@ -68,6 +68,7 @@
 #include "services/Json.hpp"
 #include "services/MediaImportService.hpp"
 #include "services/LocalizationManager.hpp"
+#include "services/McpProtocolHandler.hpp"
 #include "services/McpServer.hpp"
 #include "services/McpToolExecutor.hpp"
 #include "services/TranscriptionService.hpp"
@@ -726,6 +727,55 @@ ApplicationComposition::ApplicationComposition(AppConfig config)
     remoteAccessGate_ =
         std::make_unique<services::RemoteAccessGate>(config.remote, *rejectionLog_);
     mcpServer_->setRemoteAccessGate(remoteAccessGate_.get());
+
+    // --- Health and error tracking ----------------------------------------
+    //
+    // Each probe answers for one component from what this composition already knows,
+    // so the monitor never reaches into a subsystem and adding a component does not
+    // change HealthMonitor.
+    //
+    // Every probe here reports Degraded rather than Unavailable on purpose. No GPU, no
+    // audio device and a recorded startup error are all states in which this editor
+    // genuinely works - the status bar says so and the suite proves it - so reporting
+    // them as failures would make the endpoint cry wolf, and a container runtime would
+    // restart a perfectly usable process.
+    healthMonitor_ = std::make_unique<services::HealthMonitor>(
+        std::string(services::McpProtocolHandler::kDefaultServerVersion), config.logTally);
+
+    healthMonitor_->registerProbe("gpu", [this] {
+        const std::string notice = gpuUnavailableNotice();
+        if (notice.empty()) {
+            return services::HealthCheck{"gpu", services::HealthState::Ok, ""};
+        }
+        return services::HealthCheck{"gpu", services::HealthState::Degraded, notice};
+    });
+
+    healthMonitor_->registerProbe("audio", [this] {
+        if (audioOutputAvailable()) {
+            return services::HealthCheck{"audio", services::HealthState::Ok, audioSinkName()};
+        }
+        return services::HealthCheck{"audio", services::HealthState::Degraded,
+                                     audioUnavailableNotice()};
+    });
+
+    healthMonitor_->registerProbe("startup", [this] {
+        const std::vector<std::string>& errors = startupErrors();
+        if (errors.empty()) {
+            return services::HealthCheck{"startup", services::HealthState::Ok, ""};
+        }
+        return services::HealthCheck{
+            "startup", services::HealthState::Degraded,
+            std::to_string(errors.size()) + " startup diagnostic(s) recorded"};
+    });
+
+    services::HealthMonitor* monitor = healthMonitor_.get();
+    mcpServer_->setHealthReporter([monitor] {
+        const services::HealthReport report = monitor->report();
+        services::McpServer::HealthAnswer answer;
+        answer.status = services::healthHttpStatus(report.state);
+        answer.body = services::healthReportToJson(report);
+        return answer;
+    });
 
     // --- Agent interpreter selection (task 10.1; Requirements 11.1, 11.8) --
     //
