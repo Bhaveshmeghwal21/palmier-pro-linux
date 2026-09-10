@@ -11,6 +11,54 @@ task's completion commit, its CI run and the suite size at that point.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-10
+
+Hardware encode works. That is the headline, and it was not a driver, SDK or build-flag
+problem: two lines that were never written meant no GPU could ever have been selected.
+Proven on real NVIDIA L4 hardware through CI, not asserted.
+
+### Added
+
+- **A measured NVENC result.** The `l4-validation` job ran for the first time in this
+  repository's history, on a self-hosted NVIDIA L4 (driver 580.173.02), and passed all
+  ten steps: `h264_nvenc`, 300 frames of 1920x1080, no software fallback. See
+  [`docs/HARDWARE_ENCODE.md`](docs/HARDWARE_ENCODE.md).
+- Seven tests over the Vulkan-extension-to-codec mapping, runnable without a GPU.
+
+### Fixed
+
+- **Hardware encode could not be selected on any GPU.** `GpuCaps::encodeCodecs` and
+  `decodeCodecs` were declared and read in four places that gate hardware selection —
+  `EncoderSelector` requires `hwEncode && encodeCodecs` to contain the codec — but nothing
+  ever populated them. Empty on every device, so the export silently used libx264 no
+  matter what the hardware supported. They are now filled from the Vulkan video extensions
+  the device advertises, gated by the encode/decode queue bits.
+- **The hardware/software comparison test could not have passed either.** Its fixture
+  hard-coded `GpuContext::softwareFallback()` while the skip above it gated on the live
+  device, so on a capable host it proceeded and then measured a software export.
+- **A `PALMIER_BUILD_UI=OFF` build did not compile**, and the `l4-validation` job's CTest
+  filter matched a test only when the build was broken. Both found by running that job's
+  own sequence on real hardware for the first time.
+- **The 0.2.0 release was packaged as 0.1.0.** The git tag has no relationship to
+  `PROJECT_VERSION`, and four files carried the version independently with nothing
+  comparing them. All four now agree and a repository-consistency check enforces it. The
+  `v0.2.0` tag remains in history with that defect; 0.3.0 supersedes it.
+
+### Changed
+
+- **`core/EditCommands.cpp` is one translation unit per subject.** It held all 24 command
+  implementations and their shared helpers in 1583 lines; it is now six subject files, the
+  largest 411 lines, plus a private `EditCommandSupport.hpp` for the six helpers more than
+  one subject uses. The commands are declared in the public `core/EditCommands.hpp`, which
+  is unchanged, so their member definitions already had external linkage and moved
+  untouched.
+- **CI no longer repeats work.** `push` is restricted to `main` and release tags, so a
+  branch with an open pull request no longer runs the whole pipeline twice; a dispatch for
+  the L4 lane runs only that job; a tag push runs only `package`; and coverage is skipped
+  when a commit changes nothing that could move a coverage figure.
+- The format gate checks the **lines** a commit changed rather than whole files, so a fix
+  in a file that predates `.clang-format` no longer requires reformatting all of it.
+
 ## [0.2.0] — 2026-09-09
 
 Engineering-quality release. No change to what the editor does; substantial change to how

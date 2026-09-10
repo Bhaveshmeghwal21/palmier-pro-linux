@@ -53,7 +53,18 @@ add_library(palmier_core STATIC
     ProjectValidation.cpp
     UndoRedoStack.cpp
     TimelineEngine.cpp
-    EditCommands.cpp
+    # core/EditCommands.cpp was one 1583-line translation unit holding all 24 command
+    # implementations plus their shared helpers. It is now one unit per subject; the
+    # helpers the subjects share are declared in EditCommandSupport.hpp. The public
+    # core/EditCommands.hpp is unchanged, and no test target compiled the .cpp
+    # directly, so nothing outside this list had to change.
+    EditCommandSupport.cpp
+    ClipEditCommands.cpp
+    RippleEditCommands.cpp
+    TrackEditCommands.cpp
+    EffectEditCommands.cpp
+    TextCaptionEditCommands.cpp
+    ProjectSettingsEditCommands.cpp
     MediaManager.cpp
     ToneCurve.cpp
     Logging.cpp)

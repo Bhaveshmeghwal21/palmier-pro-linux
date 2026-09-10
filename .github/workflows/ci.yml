@@ -104,11 +104,15 @@ concurrency:
 jobs:
   build-and-test:
     name: Build & Test (ubuntu-24.04)
-    # Skipped when this dispatch is specifically the L4 hardware lane: those jobs
-    # already ran on this commit when it was pushed, and re-running them tells
-    # nobody anything new while occupying runners the L4 job is waiting behind.
+    # Skipped in two cases, both because the same commit was already checked:
+    #
+    #   * a dispatch specifically for the L4 hardware lane — these jobs ran when the
+    #     commit was pushed, and repeating them occupies runners the L4 job waits on;
+    #   * a tag push — a release tag points at a commit that already went through
+    #     main, so the only job a tag needs is `package`, which builds the .deb.
     if: >-
       !(github.event_name == 'workflow_dispatch' && inputs.run_l4_validation)
+      && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
 
     env:
@@ -518,11 +522,15 @@ jobs:
   # ---------------------------------------------------------------------------
   lint:
     name: Lint (format, static analysis, repository hygiene)
-    # Skipped when this dispatch is specifically the L4 hardware lane: those jobs
-    # already ran on this commit when it was pushed, and re-running them tells
-    # nobody anything new while occupying runners the L4 job is waiting behind.
+    # Skipped in two cases, both because the same commit was already checked:
+    #
+    #   * a dispatch specifically for the L4 hardware lane — these jobs ran when the
+    #     commit was pushed, and repeating them occupies runners the L4 job waits on;
+    #   * a tag push — a release tag points at a commit that already went through
+    #     main, so the only job a tag needs is `package`, which builds the .deb.
     if: >-
       !(github.event_name == 'workflow_dispatch' && inputs.run_l4_validation)
+      && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
 
     steps:
@@ -729,11 +737,15 @@ jobs:
   # ---------------------------------------------------------------------------
   coverage-needed:
     name: Decide whether coverage can be skipped
-    # Skipped when this dispatch is specifically the L4 hardware lane: those jobs
-    # already ran on this commit when it was pushed, and re-running them tells
-    # nobody anything new while occupying runners the L4 job is waiting behind.
+    # Skipped in two cases, both because the same commit was already checked:
+    #
+    #   * a dispatch specifically for the L4 hardware lane — these jobs ran when the
+    #     commit was pushed, and repeating them occupies runners the L4 job waits on;
+    #   * a tag push — a release tag points at a commit that already went through
+    #     main, so the only job a tag needs is `package`, which builds the .deb.
     if: >-
       !(github.event_name == 'workflow_dispatch' && inputs.run_l4_validation)
+      && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     outputs:
       needed: ${{ steps.decide.outputs.needed }}
@@ -882,11 +894,15 @@ jobs:
   # ---------------------------------------------------------------------------
   configure-without-vendor-sdks:
     name: Configure without vendor SDKs (ubuntu-24.04)
-    # Skipped when this dispatch is specifically the L4 hardware lane: those jobs
-    # already ran on this commit when it was pushed, and re-running them tells
-    # nobody anything new while occupying runners the L4 job is waiting behind.
+    # Skipped in two cases, both because the same commit was already checked:
+    #
+    #   * a dispatch specifically for the L4 hardware lane — these jobs ran when the
+    #     commit was pushed, and repeating them occupies runners the L4 job waits on;
+    #   * a tag push — a release tag points at a commit that already went through
+    #     main, so the only job a tag needs is `package`, which builds the .deb.
     if: >-
       !(github.event_name == 'workflow_dispatch' && inputs.run_l4_validation)
+      && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
 
     steps:
