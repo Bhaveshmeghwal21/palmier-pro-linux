@@ -252,6 +252,20 @@ Result<AudioBuffer> AudioEngine::mixWindow(const Project* project, Duration from
                 contribution.assetPath = clip.assetRef.sourcePath;
                 contribution.gain = clip.gain >= 0.0 ? clip.gain : 0.0;
 
+                // A clip's edge fades attenuate its audio by exactly the curve they attenuate
+                // its picture by, computed from the one function in core/ClipGeometry.hpp — a cut
+                // whose picture fades while its sound does not is a defect, and the only way to
+                // be sure the two agree is for both to call the same thing.
+                //
+                // One factor per call rather than a per-sample ramp: the export asks for one
+                // video frame interval at a time, so this already yields a per-frame ramp, which
+                // is the same granularity the video fade has. Evaluated at the middle of the
+                // requested span so a block is attenuated by its average rather than its edge.
+                const Duration midpoint =
+                    Duration::fromNanoseconds((from.nanoseconds() + to.nanoseconds()) / 2);
+                contribution.gain *= fadeCoverage(clip.timelineStart, clip.timelineEnd(),
+                                                  clip.fadeIn, clip.fadeOut, midpoint);
+
                 // Requirement 6.9: once a clip's audio decode has failed, the rest
                 // of its timeline range is silence.
                 if (failedClips_.find(clip.id) != failedClips_.end()) {

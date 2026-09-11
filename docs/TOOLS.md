@@ -327,13 +327,37 @@ Change a clip's opacity or audio gain after it has been created.
 | Argument | Type | Required | Accepted values |
 |---|---|---|---|
 | `clipId` | string *uuid* | **yes** | |
-| `opacity` | number | no | 0.0 .. 1.0; absent leaves it unchanged |
-| `gain` | number | no | >= 0; absent leaves it unchanged |
+| `opacity` | number | no | 0.0 .. 1.0 |
+| `gain` | number | no | >= 0, unity = 1.0 |
+| `centerX` | number | no | -10.0 .. 10.0; picture centre across the canvas, 0.5 is the middle |
+| `centerY` | number | no | -10.0 .. 10.0; picture centre down the canvas |
+| `scale` | number | no | 0.001 .. 100.0; multiplies the aspect-preserving fitted size |
+| `rotationDegrees` | number | no | -360.0 .. 360.0, clockwise about the picture's own centre |
+| `flipHorizontal` | boolean | no | mirror left to right |
+| `flipVertical` | boolean | no | mirror top to bottom |
+| `fadeInNs` | integer | no | >= 0; ramp up over this long at the clip's leading edge |
+| `fadeOutNs` | integer | no | >= 0; ramp down over this long at the trailing edge |
 
 Result: `clipId` (string), `opacity` (number), `gain` (number), *(command result)*.
 
-An absent argument leaves that property unchanged, and a call naming neither is an accepted
+An absent argument leaves that property unchanged, and a call naming none is an accepted
 no-op. `opacity` and `gain` appear in the result only when they were given.
+
+**Placement.** A clip's default placement fits it to the canvas preserving aspect ratio and
+centres it, which is what `centerX` 0.5, `centerY` 0.5, `scale` 1.0 mean. `scale` multiplies
+that fitted size, so 0.5 is a half-size inset suitable for picture-in-picture. Scale is
+uniform: upstream Palmier Pro carries independent `width` and `height` and so also permits a
+non-uniform stretch, whereas a single factor cannot distort a source by accident. A
+split-screen half is expressed here by cropping the source with `crop_transform` and moving
+what remains with `centerX`.
+
+**Fades.** `fadeInNs` and `fadeOutNs` ramp a clip's own edges, attenuating both its picture
+and its audio by the identical curve, computed from one function so the two cannot drift
+apart. They are independent of `timeline.add_transition`: a transition belongs to the boundary
+between two clips and is stored on the incoming one, whereas a fade belongs to one clip's own
+edges and needs no neighbour, so a clip may carry both and is then attenuated by both. A fade
+longer than half the clip is clamped, so two overlapping ramps cannot produce a clip that
+never reaches full brightness.
 
 Both properties can also be supplied to `timeline.add_clip`. This tool exists because they
 could previously *only* be supplied there, which made them write-once: adjusting a composite's

@@ -62,13 +62,57 @@ struct FittedRect {
 /// The identity placement draws the layer fitted, fully covering, with no wipe or slide —
 /// which is what every layer outside a transition region gets.
 struct LayerPlacement {
-    /// Uniform coverage multiplier, already including the clip's own opacity.
+    /// Uniform coverage multiplier, already including the clip's own opacity and its fades.
     double opacity{1.0};
     /// Wipe: the fraction of the canvas width revealed from the left edge. 1.0 reveals all.
     double reveal{1.0};
     /// Slide: horizontal offset as a fraction of the canvas width. 0.0 is aligned.
     double slideX{0.0};
+    /// Where the layer's picture sits on the canvas.
+    Transform transform{};
 };
+
+/// The inverse mapping from a canvas pixel to a source pixel for one placed layer.
+///
+/// Expressing placement as an inverse map rather than a forward blit is what lets scale,
+/// rotation and mirroring share a single sampling loop: every canvas pixel in `left..right` x
+/// `top..bottom` asks "which source pixel, if any, lands here", which is well defined however
+/// the picture is oriented. A forward mapping would have to worry about coverage gaps as soon as
+/// anything was rotated or magnified.
+///
+/// `u = ux*x + uy*y + uc` and `v = vx*x + vy*y + vc`, where x and y are canvas pixel CENTRES and
+/// u and v are source pixel centres.
+struct InverseMap {
+    double ux{1.0};
+    double uy{0.0};
+    double uc{0.0};
+    double vx{0.0};
+    double vy{1.0};
+    double vc{0.0};
+
+    /// The half-open canvas box worth iterating: outside it no source pixel lands.
+    std::int64_t left{0};
+    std::int64_t top{0};
+    std::int64_t right{0};
+    std::int64_t bottom{0};
+
+    /// Source pixels covered per canvas pixel on each axis, for choosing between averaging the
+    /// footprint (minifying) and interpolating within it (magnifying).
+    double sourcePerCanvasX{1.0};
+    double sourcePerCanvasY{1.0};
+
+    [[nodiscard]] bool isEmpty() const noexcept { return right <= left || bottom <= top; }
+};
+
+/// Build the inverse map placing a `srcWidth` x `srcHeight` source onto a canvas under
+/// `transform`, with `slideX` shifting it horizontally as a fraction of the canvas width.
+///
+/// The identity transform reproduces fitToCanvas exactly, and when the source already matches the
+/// canvas the map is the identity, so an untransformed clip samples at integer coordinates and is
+/// bit-identical to a straight blit.
+[[nodiscard]] InverseMap inverseMapFor(std::uint32_t srcWidth, std::uint32_t srcHeight,
+                                       std::uint32_t canvasWidth, std::uint32_t canvasHeight,
+                                       const Transform& transform, double slideX) noexcept;
 
 /// A clip selected for compositing, tagged with its painter's-order depth.
 ///

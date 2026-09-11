@@ -117,10 +117,27 @@ Result<void> SetClipPropertiesCommand::apply(Project& project) {
     // property state regardless of which fields this command carried.
     priorOpacity_ = clip.opacity;
     priorGain_ = clip.gain;
+    priorTransform_ = clip.transform;
+    priorFadeIn_ = clip.fadeIn;
+    priorFadeOut_ = clip.fadeOut;
     captured_ = true;
 
     if (properties_.opacity.has_value()) clip.opacity = *properties_.opacity;
     if (properties_.gain.has_value()) clip.gain = *properties_.gain;
+    if (properties_.centerX.has_value()) clip.transform.centerX = *properties_.centerX;
+    if (properties_.centerY.has_value()) clip.transform.centerY = *properties_.centerY;
+    if (properties_.scale.has_value()) clip.transform.scale = *properties_.scale;
+    if (properties_.rotationDegrees.has_value()) {
+        clip.transform.rotationDegrees = *properties_.rotationDegrees;
+    }
+    if (properties_.flipHorizontal.has_value()) {
+        clip.transform.flipHorizontal = *properties_.flipHorizontal;
+    }
+    if (properties_.flipVertical.has_value()) {
+        clip.transform.flipVertical = *properties_.flipVertical;
+    }
+    if (properties_.fadeIn.has_value()) clip.fadeIn = *properties_.fadeIn;
+    if (properties_.fadeOut.has_value()) clip.fadeOut = *properties_.fadeOut;
     return ok();
 }
 
@@ -135,6 +152,9 @@ Result<void> SetClipPropertiesCommand::revert(Project& project) {
     Clip& clip = loc->track->clips[loc->index];
     clip.opacity = priorOpacity_;
     clip.gain = priorGain_;
+    clip.transform = priorTransform_;
+    clip.fadeIn = priorFadeIn_;
+    clip.fadeOut = priorFadeOut_;
     return ok();
 }
 

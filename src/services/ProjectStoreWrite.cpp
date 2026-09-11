@@ -118,6 +118,24 @@ void writeClip(JsonWriter& w, const Clip& clip) {
     w.valueDouble(clip.gain);
     w.key("opacity");
     w.valueDouble(clip.opacity);
+    // Schema 1.6: where the picture sits on the canvas, and the clip's own edge fades.
+    w.key("transform");
+    w.beginObject();
+    w.key("centerX");
+    w.valueDouble(clip.transform.centerX);
+    w.key("centerY");
+    w.valueDouble(clip.transform.centerY);
+    w.key("scale");
+    w.valueDouble(clip.transform.scale);
+    w.key("rotationDegrees");
+    w.valueDouble(clip.transform.rotationDegrees);
+    w.key("flipHorizontal");
+    w.valueBool(clip.transform.flipHorizontal);
+    w.key("flipVertical");
+    w.valueBool(clip.transform.flipVertical);
+    w.endObject();
+    writeDuration(w, "fadeIn", clip.fadeIn);
+    writeDuration(w, "fadeOut", clip.fadeOut);
     // Schema 1.2 (Requirement 9). Present iff this is a text clip.
     w.key("textStyle");
     if (clip.textStyle.has_value()) {

@@ -206,6 +206,24 @@ Clip readClip(const JsonValue& v) {
     clip.gain = requireDouble(v, "gain");
     clip.opacity = requireDouble(v, "opacity");
 
+    // Schema 1.6, read tolerantly: a 1.0-1.5 document carries neither key and keeps the
+    // defaults, which are exactly the behaviour those documents were written under.
+    if (const JsonValue* t = v.find("transform"); t != nullptr && !t->isNull()) {
+        requireObject(*t, "transform");
+        clip.transform.centerX = requireDouble(*t, "centerX");
+        clip.transform.centerY = requireDouble(*t, "centerY");
+        clip.transform.scale = requireDouble(*t, "scale");
+        clip.transform.rotationDegrees = requireDouble(*t, "rotationDegrees");
+        clip.transform.flipHorizontal = requireBool(*t, "flipHorizontal");
+        clip.transform.flipVertical = requireBool(*t, "flipVertical");
+    }
+    if (const JsonValue* f = v.find("fadeIn"); f != nullptr && !f->isNull()) {
+        clip.fadeIn = Duration::fromNanoseconds(parseInt64(*f, "fadeIn"));
+    }
+    if (const JsonValue* f = v.find("fadeOut"); f != nullptr && !f->isNull()) {
+        clip.fadeOut = Duration::fromNanoseconds(parseInt64(*f, "fadeOut"));
+    }
+
     // Schema 1.2 (Requirement 9): absent entirely on a 1.1 document, or present
     // but null on a 1.2 document's own non-text clip — both mean "not a text
     // clip", so no textStyle is set either way.

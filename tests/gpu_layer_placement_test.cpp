@@ -354,5 +354,167 @@ TEST(CompositorFit, AnOversizedSourceContributesItsWholeImageNotItsTopLeftCorner
     EXPECT_NEAR(pixelAt(rf.value(), 1, 1).g, 200, 2);
 }
 
+// --- inverseMapFor: the transform geometry -----------------------------------
+
+TEST(InverseMapFor, AMatchingSourceUnderTheIdentityTransformIsTheIdentityMap) {
+    const InverseMap m = inverseMapFor(64, 32, 64, 32, Transform{}, 0.0);
+    ASSERT_FALSE(m.isEmpty());
+    // A canvas pixel centre must map to the identical source pixel centre, exactly - this is
+    // what keeps an untransformed clip bit-identical to a straight blit.
+    EXPECT_NEAR(m.ux * 10.5 + m.uy * 4.5 + m.uc, 10.5, 1e-9);
+    EXPECT_NEAR(m.vx * 10.5 + m.vy * 4.5 + m.vc, 4.5, 1e-9);
+    EXPECT_NEAR(m.sourcePerCanvasX, 1.0, 1e-9);
+    EXPECT_NEAR(m.sourcePerCanvasY, 1.0, 1e-9);
+}
+
+TEST(InverseMapFor, HalfScaleCoversTheMiddleQuarterOfTheCanvas) {
+    Transform t;
+    t.scale = 0.5;
+    const InverseMap m = inverseMapFor(100, 100, 100, 100, t, 0.0);
+    ASSERT_FALSE(m.isEmpty());
+    // 50x50 centred in 100x100, widened by the one-pixel margin the map adds.
+    EXPECT_GE(m.left, 24);
+    EXPECT_LE(m.left, 25);
+    EXPECT_GE(m.right, 75);
+    EXPECT_LE(m.right, 76);
+    // Half the size means two source pixels per canvas pixel.
+    EXPECT_NEAR(m.sourcePerCanvasX, 2.0, 1e-9);
+}
+
+TEST(InverseMapFor, RecentringMovesTheBoxWithoutResizingIt) {
+    Transform half;
+    half.scale = 0.5;
+    Transform moved = half;
+    // 0.3 rather than 0.25: at 0.25 the half-scale box lands exactly on the canvas edge and
+    // the one-pixel margin is clipped away, so the widths would differ by one for that reason
+    // alone rather than because recentring resized anything.
+    moved.centerX = 0.3;
+
+    const InverseMap centredMap = inverseMapFor(100, 100, 100, 100, half, 0.0);
+    const InverseMap movedMap = inverseMapFor(100, 100, 100, 100, moved, 0.0);
+    ASSERT_FALSE(movedMap.isEmpty());
+    EXPECT_EQ(movedMap.right - movedMap.left, centredMap.right - centredMap.left);
+    EXPECT_LT(movedMap.left, centredMap.left);
+}
+
+TEST(InverseMapFor, ARotationOfNinetyDegreesSwapsTheBoxsExtents) {
+    Transform t;
+    t.rotationDegrees = 90.0;
+    // A 40x20 source on a square canvas: rotated a quarter turn it becomes taller than wide.
+    const InverseMap m = inverseMapFor(40, 20, 100, 100, t, 0.0);
+    ASSERT_FALSE(m.isEmpty());
+    EXPECT_LT(m.right - m.left, m.bottom - m.top);
+}
+
+TEST(InverseMapFor, ANonPositiveScalePlacesNothing) {
+    Transform zero;
+    zero.scale = 0.0;
+    Transform negative;
+    negative.scale = -1.0;
+    EXPECT_TRUE(inverseMapFor(64, 64, 64, 64, zero, 0.0).isEmpty());
+    EXPECT_TRUE(inverseMapFor(64, 64, 64, 64, negative, 0.0).isEmpty());
+}
+
+TEST(LayerPlacements, ThePlacementCarriesTheClipsOwnTransform) {
+    Clip c = makeClip(0.0, 2.0);
+    c.transform.scale = 0.4;
+    c.transform.centerX = 0.75;
+    c.transform.flipVertical = true;
+    const std::vector<PlacedLayer> layers{{&c, 0}};
+
+    const auto p = layerPlacements(layers, Duration::fromSeconds(1.0));
+    ASSERT_EQ(p.size(), 1u);
+    EXPECT_DOUBLE_EQ(p[0].transform.scale, 0.4);
+    EXPECT_DOUBLE_EQ(p[0].transform.centerX, 0.75);
+    EXPECT_TRUE(p[0].transform.flipVertical);
+}
+
+// --- Edge fades -------------------------------------------------------------
+
+TEST(LayerPlacements, AnEdgeFadeRampsCoverageAtBothEndsOfTheClip) {
+    Clip c = makeClip(0.0, 4.0);
+    c.fadeIn = Duration::fromSeconds(1.0);
+    c.fadeOut = Duration::fromSeconds(1.0);
+    const std::vector<PlacedLayer> layers{{&c, 0}};
+
+    const auto at = [&](double s) {
+        return layerPlacements(layers, Duration::fromSeconds(s))[0].opacity;
+    };
+    EXPECT_NEAR(at(0.0), 0.0, 1e-9);
+    EXPECT_NEAR(at(0.5), 0.5, 1e-9);
+    EXPECT_NEAR(at(2.0), 1.0, 1e-9);  // clear of both ramps
+    EXPECT_NEAR(at(3.5), 0.5, 1e-9);
+}
+
+TEST(LayerPlacements, AFadeAndATransitionCompose) {
+    // The two are independent: a transition belongs to the boundary between clips, a fade to a
+    // clip's own edges, so a clip carrying both is multiplied by both.
+    Clip c = makeClip(0.0, 4.0, makeTransition(TransitionKind::Crossfade, 2.0));
+    c.fadeIn = Duration::fromSeconds(2.0);
+    const std::vector<PlacedLayer> layers{{&c, 0}};
+
+    // At 1.0s the fade is half in and the transition is half through: 0.5 * 0.5.
+    EXPECT_NEAR(layerPlacements(layers, Duration::fromSeconds(1.0))[0].opacity, 0.25, 1e-9);
+}
+
+// --- Transform through the real render path ---------------------------------
+
+TEST(CompositorTransform, AHalfScaleClipLeavesTheCanvasEdgesToTheLayerBeneath) {
+    auto ctx = GpuContext::softwareFallback();
+    Compositor comp(ctx);
+
+    const RgbaColor clear{0, 0, 0, 255};
+    const RgbaColor clipColor{200, 200, 200, 255};
+
+    Clip c = makeClip(0.0, 2.0);
+    c.transform.scale = 0.5;
+    Project p = makeProject({makeVideoTrack({c})});
+    comp.setFrameProvider([&](const Clip&, Duration) -> Result<SourceFrame> {
+        return SourceFrame::solid(8, 8, clipColor);
+    });
+
+    auto rf = comp.renderAt(p, Duration::fromSeconds(1.0), RenderTarget(8, 8, clear));
+    ASSERT_TRUE(rf.isOk());
+
+    // A half-scale picture on an 8x8 canvas covers the middle 4x4, so a corner is untouched and
+    // the centre is the clip. Before a transform existed every clip filled the whole canvas.
+    EXPECT_EQ(pixelAt(rf.value(), 0, 0), clear);
+    EXPECT_EQ(pixelAt(rf.value(), 7, 7), clear);
+    EXPECT_NEAR(pixelAt(rf.value(), 4, 4).r, 200, 2);
+}
+
+TEST(CompositorTransform, AHorizontalFlipPutsTheSourcesLeftEdgeOnTheRight) {
+    auto ctx = GpuContext::softwareFallback();
+    Compositor comp(ctx);
+
+    Clip c = makeClip(0.0, 2.0);
+    c.transform.flipHorizontal = true;
+    Project p = makeProject({makeVideoTrack({c})});
+
+    // A 4x4 source whose left half is red and right half green.
+    comp.setFrameProvider([&](const Clip&, Duration) -> Result<SourceFrame> {
+        SourceFrame f;
+        f.width = 4;
+        f.height = 4;
+        f.rgba.resize(4u * 4u * 4u);
+        for (std::uint32_t y = 0; y < 4; ++y) {
+            for (std::uint32_t x = 0; x < 4; ++x) {
+                const std::size_t i = (static_cast<std::size_t>(y) * 4u + x) * 4u;
+                f.rgba[i + 0] = x < 2 ? 200 : 0;
+                f.rgba[i + 1] = x < 2 ? 0 : 200;
+                f.rgba[i + 2] = 0;
+                f.rgba[i + 3] = 255;
+            }
+        }
+        return f;
+    });
+
+    auto rf = comp.renderAt(p, Duration::fromSeconds(1.0), RenderTarget(4, 4));
+    ASSERT_TRUE(rf.isOk());
+    // Mirrored: the canvas's left is now the source's green right half.
+    EXPECT_NEAR(pixelAt(rf.value(), 0, 1).g, 200, 2);
+    EXPECT_NEAR(pixelAt(rf.value(), 3, 1).r, 200, 2);
+}
+
 }  // namespace
 }  // namespace palmier::gpu

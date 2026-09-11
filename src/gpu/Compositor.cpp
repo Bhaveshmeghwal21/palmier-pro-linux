@@ -127,33 +127,47 @@ void blendOver(std::uint8_t* target, std::uint32_t tw, std::uint32_t th, const S
     if (op <= 0.0 || reveal <= 0.0) return;  // contributes nothing to this frame
     if (src.width == 0 || src.height == 0 || tw == 0 || th == 0) return;
 
-    FittedRect rect = fitToCanvas(src.width, src.height, tw, th);
-    if (rect.isEmpty()) return;
-    rect.x += std::llround(placement.slideX * static_cast<double>(tw));
+    const InverseMap map =
+        inverseMapFor(src.width, src.height, tw, th, placement.transform, placement.slideX);
+    if (map.isEmpty()) return;
 
     // Wipe: canvas columns at or beyond this edge are not yet revealed.
     const std::int64_t revealEdge = std::llround(reveal * static_cast<double>(tw));
 
-    const double su = static_cast<double>(src.width) / static_cast<double>(rect.width);
-    const double sv = static_cast<double>(src.height) / static_cast<double>(rect.height);
-    const bool minify = su > 1.0 || sv > 1.0;
+    const bool minify = map.sourcePerCanvasX > 1.0 || map.sourcePerCanvasY > 1.0;
+    const double halfFootprintU = map.sourcePerCanvasX / 2.0;
+    const double halfFootprintV = map.sourcePerCanvasY / 2.0;
+    const auto srcW = static_cast<double>(src.width);
+    const auto srcH = static_cast<double>(src.height);
 
-    for (std::uint32_t ry = 0; ry < rect.height; ++ry) {
-        const std::int64_t dy = rect.y + static_cast<std::int64_t>(ry);
-        if (dy < 0 || dy >= static_cast<std::int64_t>(th)) continue;
+    for (std::int64_t dy = map.top; dy < map.bottom; ++dy) {
+        const double yc = static_cast<double>(dy) + 0.5;
 
-        for (std::uint32_t rx = 0; rx < rect.width; ++rx) {
-            const std::int64_t dx = rect.x + static_cast<std::int64_t>(rx);
-            if (dx < 0 || dx >= static_cast<std::int64_t>(tw)) continue;
+        for (std::int64_t dx = map.left; dx < map.right; ++dx) {
             if (dx >= revealEdge) continue;
+            const double xc = static_cast<double>(dx) + 0.5;
+
+            // The inverse map works in edge coordinates, where pixel i spans [i, i+1) and its
+            // centre is i+0.5 — the space sampleBox's bounds are expressed in. sampleBilinear
+            // and the coverage test want index coordinates, where integer i IS pixel i's centre,
+            // which is half a pixel lower. Conflating the two widens a footprint by a pixel and
+            // bleeds neighbouring content into every minified sample.
+            const double uEdge = map.ux * xc + map.uy * yc + map.uc;
+            const double vEdge = map.vx * xc + map.vy * yc + map.vc;
+            const double u = uEdge - 0.5;
+            const double v = vEdge - 0.5;
+
+            // Outside the source means this canvas pixel is not covered by the layer. The
+            // iterated box is a rectangle, so a rotated picture leaves its corners uncovered
+            // and this is what skips them.
+            if (u < -0.5 || v < -0.5 || u > srcW - 0.5 || v > srcH - 0.5) continue;
 
             double c[4];
             if (minify) {
-                sampleBox(src, static_cast<double>(rx) * su, static_cast<double>(rx + 1) * su,
-                          static_cast<double>(ry) * sv, static_cast<double>(ry + 1) * sv, c);
+                sampleBox(src, uEdge - halfFootprintU, uEdge + halfFootprintU,
+                          vEdge - halfFootprintV, vEdge + halfFootprintV, c);
             } else {
-                sampleBilinear(src, (static_cast<double>(rx) + 0.5) * su - 0.5,
-                               (static_cast<double>(ry) + 0.5) * sv - 0.5, c);
+                sampleBilinear(src, u, v, c);
             }
 
             const std::size_t d =

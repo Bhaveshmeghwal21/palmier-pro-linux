@@ -444,9 +444,22 @@ public:
     struct Properties {
         std::optional<double> opacity;
         std::optional<double> gain;
+        std::optional<double> centerX;
+        std::optional<double> centerY;
+        std::optional<double> scale;
+        std::optional<double> rotationDegrees;
+        std::optional<bool> flipHorizontal;
+        std::optional<bool> flipVertical;
+        std::optional<Duration> fadeIn;
+        std::optional<Duration> fadeOut;
 
         /// True when at least one field is present.
-        [[nodiscard]] bool any() const noexcept { return opacity.has_value() || gain.has_value(); }
+        [[nodiscard]] bool any() const noexcept {
+            return opacity.has_value() || gain.has_value() || centerX.has_value() ||
+                   centerY.has_value() || scale.has_value() || rotationDegrees.has_value() ||
+                   flipHorizontal.has_value() || flipVertical.has_value() || fadeIn.has_value() ||
+                   fadeOut.has_value();
+        }
     };
 
     SetClipPropertiesCommand(ClipId clipId, Properties properties);
@@ -466,6 +479,9 @@ private:
     Properties properties_;
     double priorOpacity_{1.0};
     double priorGain_{1.0};
+    Transform priorTransform_{};
+    Duration priorFadeIn_{Duration::zero()};
+    Duration priorFadeOut_{Duration::zero()};
     bool captured_{false};  // set on apply so revert can refuse without one
 };
 

@@ -13,6 +13,46 @@ task's completion commit, its CI run and the suite size at that point.
 
 ### Added
 
+- **A per-clip transform: position, scale, rotation and mirroring.** A clip could only occupy the
+  whole canvas, so picture-in-picture, split screen, a rotation and a flip were all inexpressible
+  and composition was limited to stacking full-frame layers and cropping. `Clip::transform` carries
+  a centre, a uniform scale, a clockwise rotation and the two mirror flags, and
+  `timeline.set_clip_properties` sets them. Placement is now computed as an inverse map from canvas
+  pixel to source pixel (`gpu/LayerPlacement.hpp`), which lets scale, rotation and mirroring share
+  one sampling loop and subsumes the aspect-preserving fit as its identity case.
+
+  Verified through the shipped binary: an inset at scale 0.35 centred on (0.75, 0.25) occupies
+  canvas x 0.575..0.924 and y 0.078..0.423 against a predicted 0.575..0.925 and 0.075..0.425; a
+  horizontal flip matches ffmpeg's own `hflip` of the same frame to a mean absolute difference of
+  **0.00**; a 20-degree rotation differs from the unrotated frame by 50.4 and leaves black corners.
+
+  Scale is uniform, where upstream carries independent `width` and `height` and so also permits a
+  non-uniform stretch. A single factor cannot distort a source by accident; a split-screen half is
+  expressed by cropping the source and moving what remains.
+
+- **Per-clip edge fades, on picture and sound together.** `fadeInNs` and `fadeOutNs` ramp a clip's
+  own edges. Both the compositor and the audio mix call one function in `core/ClipGeometry.hpp`,
+  because a cut that fades its picture but not its sound is a defect and sharing the curve is the
+  only way to be sure the two agree. A fade longer than half the clip is clamped, so two
+  overlapping ramps cannot leave a clip that never reaches full brightness.
+
+  Fades are independent of transitions: a transition belongs to the boundary between two clips and
+  is stored on the incoming one, a fade to one clip's own edges, and a clip carrying both is
+  attenuated by both.
+
+  Measured on a 4-second clip with 1-second ramps: mean luma 3.0, 43.5, 95.5, 50.8 across it. On
+  audio, a bed's first 0.4 seconds fell from -46.5 dB to -60.3 dB while the level 2 seconds in was
+  unchanged at -27.9 dB.
+
+### Changed
+
+- **Project schema 1.6** adds `Clip::transform` and the two fade durations. A clip carrying none of
+  those keys — every 1.0-1.5 document — reads with the defaults, which are exactly the behaviour
+  those documents were written under, and a 1.5 build reads a 1.6 document by ignoring the extra
+  keys. The round-trip property now draws non-default placements and fades and asserts they
+  survive, because persisting a field without asserting it round-trips is the same shape of defect
+  as a transition that is stored and never rendered.
+
 - **`timeline.set_clip_properties`**, so a clip's `opacity` and `gain` can be changed after it
   has been created. They could previously only be passed to `timeline.add_clip`, which made them
   write-once across the whole tool surface: adjusting a composite's blend or a music bed's level

@@ -164,7 +164,37 @@ Tool makeSetClipPropertiesTool(ProjectSession* session) {
         .arg(ArgSpec{.name = "gain",
                      .kind = JsonKind::Number,
                      .description = "Audio gain, unity = 1.0. Absent leaves it unchanged.",
-                     .minNum = 0.0});
+                     .minNum = 0.0})
+        .arg(ArgSpec{.name = "centerX",
+                     .kind = JsonKind::Number,
+                     .description = "Picture centre across the canvas; 0.5 is the middle.",
+                     .minNum = -10.0,
+                     .maxNum = 10.0})
+        .arg(ArgSpec{.name = "centerY",
+                     .kind = JsonKind::Number,
+                     .description = "Picture centre down the canvas; 0.5 is the middle.",
+                     .minNum = -10.0,
+                     .maxNum = 10.0})
+        .arg(ArgSpec{.name = "scale",
+                     .kind = JsonKind::Number,
+                     .description = "Multiplies the aspect-preserving fitted size; 1.0 fills.",
+                     .minNum = 0.001,
+                     .maxNum = 100.0})
+        .arg(ArgSpec{.name = "rotationDegrees",
+                     .kind = JsonKind::Number,
+                     .description = "Clockwise rotation about the picture's own centre.",
+                     .minNum = -360.0,
+                     .maxNum = 360.0})
+        .arg(ArgSpec{.name = "flipHorizontal",
+                     .kind = JsonKind::Bool,
+                     .description = "Mirror the picture left to right."})
+        .arg(ArgSpec{.name = "flipVertical",
+                     .kind = JsonKind::Bool,
+                     .description = "Mirror the picture top to bottom."})
+        .arg(intArg("fadeInNs", false,
+                    "Ramp up over this long at the clip's leading edge, in nanoseconds.", 0))
+        .arg(intArg("fadeOutNs", false,
+                    "Ramp down over this long at the clip's trailing edge, in nanoseconds.", 0));
     t.handler = [session](const Json& in) -> Result<Json> {
         if (session == nullptr) return err<Json>(noProjectOpen(kSetClipProperties));
         TimelineEngine& engine = session->engine();
@@ -174,6 +204,24 @@ Tool makeSetClipPropertiesTool(ProjectSession* session) {
         SetClipPropertiesCommand::Properties props;
         if (in.find("opacity") != nullptr) props.opacity = in.doubleOr("opacity", 1.0);
         if (in.find("gain") != nullptr) props.gain = in.doubleOr("gain", 1.0);
+        if (in.find("centerX") != nullptr) props.centerX = in.doubleOr("centerX", 0.5);
+        if (in.find("centerY") != nullptr) props.centerY = in.doubleOr("centerY", 0.5);
+        if (in.find("scale") != nullptr) props.scale = in.doubleOr("scale", 1.0);
+        if (in.find("rotationDegrees") != nullptr) {
+            props.rotationDegrees = in.doubleOr("rotationDegrees", 0.0);
+        }
+        if (in.find("flipHorizontal") != nullptr) {
+            props.flipHorizontal = in.boolOr("flipHorizontal", false);
+        }
+        if (in.find("flipVertical") != nullptr) {
+            props.flipVertical = in.boolOr("flipVertical", false);
+        }
+        if (in.find("fadeInNs") != nullptr) {
+            props.fadeIn = Duration::fromNanoseconds(in.intOr("fadeInNs", 0));
+        }
+        if (in.find("fadeOutNs") != nullptr) {
+            props.fadeOut = Duration::fromNanoseconds(in.intOr("fadeOutNs", 0));
+        }
 
         Json out = Json::object();
         out.set("clipId", clipId.value().toString());

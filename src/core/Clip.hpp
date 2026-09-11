@@ -54,6 +54,7 @@
 #include "core/Effect.hpp"
 #include "core/MediaAssetRef.hpp"
 #include "core/TextStyle.hpp"
+#include "core/ClipGeometry.hpp"
 #include "core/Transition.hpp"
 #include "core/Uuid.hpp"
 
@@ -72,6 +73,11 @@ struct Clip {
     std::optional<Transition> transitionIn;
     double                    gain = 1.0;    ///< Audio gain; unity = 1.0.
     double                    opacity = 1.0; ///< Video opacity in [0, 1].
+    /// Where the picture sits on the canvas. The default is the aspect-preserving fit.
+    Transform transform{};
+    /// Ramps at the clip's own edges, applied to both video opacity and audio gain.
+    Duration fadeIn{Duration::zero()};
+    Duration fadeOut{Duration::zero()};
     std::optional<TextStyle>  textStyle;     ///< Present iff this is a text clip.
     std::optional<std::string> captionText;  ///< Present iff this is a caption cue.
 

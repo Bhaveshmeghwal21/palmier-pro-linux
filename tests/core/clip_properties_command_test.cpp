@@ -16,6 +16,7 @@
 #include <gtest/gtest.h>
 
 #include "core/Clip.hpp"
+#include "core/ClipGeometry.hpp"
 #include "core/Duration.hpp"
 #include "core/EditCommands.hpp"
 #include "core/Error.hpp"
@@ -165,6 +166,69 @@ TEST(SetClipProperties, TheCommandReportsWhatItWasAskedToInstall) {
     EXPECT_DOUBLE_EQ(*command.properties().gain, 1.5);
     EXPECT_FALSE(command.properties().opacity.has_value());
     EXPECT_TRUE(command.properties().any());
+}
+
+
+// --- fadeCoverage -----------------------------------------------------------
+//
+// The fade ramp lives in the core rather than in the compositor because the audio mix needs the
+// identical curve: a cut that fades its picture but not its sound is a defect, and computing both
+// from one function is the only way to guarantee they agree.
+
+TEST(FadeCoverage, WithoutFadesACliIsFullyCoveredInsideAndAbsentOutside) {
+    const Duration start = Duration::fromSeconds(1.0);
+    const Duration end = Duration::fromSeconds(3.0);
+    const Duration none = Duration::zero();
+
+    EXPECT_DOUBLE_EQ(fadeCoverage(start, end, none, none, Duration::fromSeconds(2.0)), 1.0);
+    EXPECT_DOUBLE_EQ(fadeCoverage(start, end, none, none, Duration::fromSeconds(1.0)), 1.0);
+    EXPECT_DOUBLE_EQ(fadeCoverage(start, end, none, none, Duration::fromSeconds(0.5)), 0.0);
+    EXPECT_DOUBLE_EQ(fadeCoverage(start, end, none, none, Duration::fromSeconds(3.0)), 0.0);
+}
+
+TEST(FadeCoverage, AFadeInRisesLinearlyFromTheLeadingEdge) {
+    const Duration start = Duration::zero();
+    const Duration end = Duration::fromSeconds(4.0);
+    const Duration in = Duration::fromSeconds(2.0);
+
+    EXPECT_NEAR(fadeCoverage(start, end, in, Duration::zero(), Duration::zero()), 0.0, 1e-9);
+    EXPECT_NEAR(fadeCoverage(start, end, in, Duration::zero(), Duration::fromSeconds(0.5)), 0.25,
+                1e-9);
+    EXPECT_NEAR(fadeCoverage(start, end, in, Duration::zero(), Duration::fromSeconds(1.0)), 0.5,
+                1e-9);
+    EXPECT_NEAR(fadeCoverage(start, end, in, Duration::zero(), Duration::fromSeconds(3.0)), 1.0,
+                1e-9);
+}
+
+TEST(FadeCoverage, AFadeOutFallsTowardsTheTrailingEdge) {
+    const Duration start = Duration::zero();
+    const Duration end = Duration::fromSeconds(4.0);
+    const Duration out = Duration::fromSeconds(2.0);
+
+    EXPECT_NEAR(fadeCoverage(start, end, Duration::zero(), out, Duration::fromSeconds(1.0)), 1.0,
+                1e-9);
+    EXPECT_NEAR(fadeCoverage(start, end, Duration::zero(), out, Duration::fromSeconds(3.0)), 0.5,
+                1e-9);
+    EXPECT_NEAR(fadeCoverage(start, end, Duration::zero(), out, Duration::fromSeconds(3.5)), 0.25,
+                1e-9);
+}
+
+TEST(FadeCoverage, AFadeLongerThanTheClipIsClampedToHalfOfIt) {
+    // Otherwise two overlapping ramps would multiply into a clip that never reaches full
+    // coverage, which reads as a mistake rather than as a fade.
+    const Duration start = Duration::zero();
+    const Duration end = Duration::fromSeconds(2.0);
+    const Duration huge = Duration::fromSeconds(10.0);
+
+    // Each ramp is clamped to 1.0s, so the midpoint is where they meet: fully in, starting out.
+    EXPECT_NEAR(fadeCoverage(start, end, huge, huge, Duration::fromSeconds(1.0)), 1.0, 1e-9);
+    EXPECT_NEAR(fadeCoverage(start, end, huge, huge, Duration::fromSeconds(0.5)), 0.5, 1e-9);
+    EXPECT_NEAR(fadeCoverage(start, end, huge, huge, Duration::fromSeconds(1.5)), 0.5, 1e-9);
+}
+
+TEST(FadeCoverage, AnEmptyClipCoversNothing) {
+    const Duration at = Duration::fromSeconds(1.0);
+    EXPECT_DOUBLE_EQ(fadeCoverage(at, at, Duration::zero(), Duration::zero(), at), 0.0);
 }
 
 }  // namespace

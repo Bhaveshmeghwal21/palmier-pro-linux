@@ -355,6 +355,20 @@ Project drawProject(const Shape& shape) {
             clip.gain = static_cast<double>(*rc::gen::inRange(0, 4'001)) / 1'000.0;
             clip.opacity = static_cast<double>(*rc::gen::inRange(0, 1'001)) / 1'000.0;
 
+            // Schema 1.6: the placement and the edge fades. Drawn from integer ranges for
+            // the same reason gain and opacity are -- a double that survives a decimal
+            // round-trip exactly, so an inequality here means the store lost the field
+            // rather than that it rounded.
+            clip.transform.centerX = static_cast<double>(*rc::gen::inRange(0, 1'001)) / 1'000.0;
+            clip.transform.centerY = static_cast<double>(*rc::gen::inRange(0, 1'001)) / 1'000.0;
+            clip.transform.scale = static_cast<double>(*rc::gen::inRange(1, 4'001)) / 1'000.0;
+            clip.transform.rotationDegrees =
+                static_cast<double>(*rc::gen::inRange(-360'000, 360'001)) / 1'000.0;
+            clip.transform.flipHorizontal = *rc::gen::arbitrary<bool>();
+            clip.transform.flipVertical = *rc::gen::arbitrary<bool>();
+            clip.fadeIn = Duration::fromMilliseconds(*rc::gen::inRange(0, 2'001));
+            clip.fadeOut = Duration::fromMilliseconds(*rc::gen::inRange(0, 2'001));
+
             track.clips.push_back(std::move(clip));
         }
 
@@ -379,6 +393,9 @@ void assertSameClip(const Clip& a, const Clip& b) {
     RC_ASSERT(a.sourceOut.ticks() == b.sourceOut.ticks());
     RC_ASSERT(a.gain == b.gain);
     RC_ASSERT(a.opacity == b.opacity);
+    RC_ASSERT(a.transform == b.transform);
+    RC_ASSERT(a.fadeIn.ticks() == b.fadeIn.ticks());
+    RC_ASSERT(a.fadeOut.ticks() == b.fadeOut.ticks());
 
     RC_ASSERT(a.effects.size() == b.effects.size());
     for (std::size_t i = 0; i < a.effects.size(); ++i) {

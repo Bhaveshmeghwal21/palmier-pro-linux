@@ -50,6 +50,7 @@
 add_library(palmier_core STATIC
     Uuid.cpp
     SchemaVersion.cpp
+    ClipGeometry.cpp
     ProjectValidation.cpp
     UndoRedoStack.cpp
     TimelineEngine.cpp

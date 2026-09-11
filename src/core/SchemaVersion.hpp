@@ -10,7 +10,16 @@
 // supports a stored version iff the major numbers match and the reader's minor is
 // >= the stored minor.
 //
-// The current version is 1.5. Its addition over 1.4 is Effect::resourcePath
+// The current version is 1.6. Its addition over 1.5 is Clip::transform (where the
+// picture sits on the canvas: centre, scale, rotation and the two mirror flags) and
+// Clip::fadeIn / Clip::fadeOut. A clip carrying none of those keys -- every 1.0-1.5
+// document -- reads with the defaults, which are precisely the behaviour those documents
+// were written under: fitted to the canvas, centred, unrotated, with no fades. A 1.5
+// build reads a 1.6 document too, dropping the placement and the fades; that degrades
+// where a picture sits rather than silently discarding a colour decision, which is why
+// it follows the extra-key rule instead of the unrecognised-effect-kind rule.
+//
+// Version 1.5's addition over 1.4 is Effect::resourcePath
 // (monitoring-and-grading task 7; Requirement 7.2): one optional string field on
 // an effect naming an external resource, which the LUT effect uses to carry a
 // `.cube` file's path. Like tags before it, an effect carrying no
@@ -72,9 +81,7 @@ struct SchemaVersion {
         : major(major_), minor(minor_) {}
 
     /// The schema version this build writes and can fully round-trip.
-    [[nodiscard]] static constexpr SchemaVersion current() noexcept {
-        return SchemaVersion{1, 5};
-    }
+    [[nodiscard]] static constexpr SchemaVersion current() noexcept { return SchemaVersion{1, 6}; }
 
     /// Can a reader at `reader` load data written at `stored`?
     /// Same major, and the reader is at least as new (minor) as the data.
