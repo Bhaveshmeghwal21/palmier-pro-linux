@@ -420,6 +420,56 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// SetClipPropertiesCommand — change a clip's per-clip properties after creation.
+// ---------------------------------------------------------------------------
+//
+// `opacity` and `gain` could previously only be supplied as arguments to
+// `timeline.add_clip`, so they were effectively write-once: adjusting a composite's
+// blend or a bed's level meant deleting the clip and adding it again, losing its id
+// and any effects, transition or text style attached to it. Upstream's
+// `set_clip_properties` changes them at any time, and an agent iterating on a look
+// needs to.
+//
+// Every field is optional and an absent field is left alone, so one call can change
+// a single property without having to restate the others (which the caller may not
+// know). A call carrying no field at all is applied as a no-op, matching
+// SetTrackMutedCommand's treatment of a flag set to the value it already holds: a
+// legal, idempotent edit whose revert is equally a no-op.
+//
+// Both prior values are captured on apply() so revert() restores exactly what was
+// there, including for a field this command did not touch.
+class SetClipPropertiesCommand final : public EditCommand {
+public:
+    /// The properties to change. An absent field leaves the clip's value alone.
+    struct Properties {
+        std::optional<double> opacity;
+        std::optional<double> gain;
+
+        /// True when at least one field is present.
+        [[nodiscard]] bool any() const noexcept { return opacity.has_value() || gain.has_value(); }
+    };
+
+    SetClipPropertiesCommand(ClipId clipId, Properties properties);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "SetClipProperties"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+    /// The target clip.
+    [[nodiscard]] ClipId clipId() const noexcept { return clipId_; }
+
+    /// The properties this command installs.
+    [[nodiscard]] const Properties& properties() const noexcept { return properties_; }
+
+private:
+    ClipId clipId_;
+    Properties properties_;
+    double priorOpacity_{1.0};
+    double priorGain_{1.0};
+    bool captured_{false};  // set on apply so revert can refuse without one
+};
+
+// ---------------------------------------------------------------------------
 // SetTransitionCommand — set a clip's incoming transition.
 // ---------------------------------------------------------------------------
 //

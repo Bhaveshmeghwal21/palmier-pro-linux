@@ -168,8 +168,7 @@ std::vector<ToolExpectation> expectedSurface() {
         // Task 10.1 — the third track edit, added so the offline interpreter's
         // documented "mute track N" / "unmute track N" phrases resolve to a tool
         // that is really in the surface (Requirements 11.2, 11.3).
-        {"timeline.set_track_muted",
-         {{"trackId", "string", true}, {"muted", "boolean", true}}},
+        {"timeline.set_track_muted", {{"trackId", "string", true}, {"muted", "boolean", true}}},
         {"timeline.add_clip",
          {{"trackId", "string", true},
           {"assetId", "string", true},
@@ -181,17 +180,16 @@ std::vector<ToolExpectation> expectedSurface() {
           {"opacity", "number", false},
           {"gain", "number", false}}},
         {"timeline.delete_clip", {{"clipId", "string", true}}},
-        {"timeline.move_clip",
-         {{"clipId", "string", true}, {"timelineStartNs", "integer", true}}},
+        {"timeline.move_clip", {{"clipId", "string", true}, {"timelineStartNs", "integer", true}}},
+        {"timeline.set_clip_properties",
+         {{"clipId", "string", true}, {"opacity", "number", false}, {"gain", "number", false}}},
         {"timeline.trim_clip",
          {{"clipId", "string", true},
           {"edge", "string", true},
           {"boundaryNs", "integer", true},
           {"sourceDurationNs", "integer", false}}},
-        {"timeline.split_clip",
-         {{"clipId", "string", true}, {"playheadNs", "integer", true}}},
-        {"timeline.reorder_clips",
-         {{"trackId", "string", true}, {"order", "array", true}}},
+        {"timeline.split_clip", {{"clipId", "string", true}, {"playheadNs", "integer", true}}},
+        {"timeline.reorder_clips", {{"trackId", "string", true}, {"order", "array", true}}},
         // Task 8.2 — ripple editing and gap management (Requirement 5).
         // `timeline.ripple_trim` mirrors `timeline.trim_clip`'s declaration because
         // the two commands share their clamping rules; the other two take only the
@@ -204,13 +202,9 @@ std::vector<ToolExpectation> expectedSurface() {
           {"sourceDurationNs", "integer", false}}},
         {"timeline.close_gap", {{"clipId", "string", true}}},
         {"timeline.add_effect",
-         {{"clipId", "string", true},
-          {"type", "string", true},
-          {"parameters", "object", false}}},
-        {"timeline.remove_effect",
-         {{"clipId", "string", true}, {"effectId", "string", true}}},
-        {"timeline.reorder_effects",
-         {{"clipId", "string", true}, {"order", "array", true}}},
+         {{"clipId", "string", true}, {"type", "string", true}, {"parameters", "object", false}}},
+        {"timeline.remove_effect", {{"clipId", "string", true}, {"effectId", "string", true}}},
+        {"timeline.reorder_effects", {{"clipId", "string", true}, {"order", "array", true}}},
         {"timeline.set_effect_parameter",
          {{"clipId", "string", true},
           {"effectId", "string", true},
@@ -221,9 +215,7 @@ std::vector<ToolExpectation> expectedSurface() {
         // `operation`'s value, which the vocabulary cannot express; that gap is
         // documented as Class 1 in tool_schema_conformance_property_test.cpp.
         {"timeline.set_effect_resource",
-         {{"clipId", "string", true},
-          {"effectId", "string", true},
-          {"path", "string", true}}},
+         {{"clipId", "string", true}, {"effectId", "string", true}, {"path", "string", true}}},
         {"timeline.edit_curve_point",
          {{"clipId", "string", true},
           {"effectId", "string", true},
@@ -233,9 +225,7 @@ std::vector<ToolExpectation> expectedSurface() {
           {"x", "number", false},
           {"y", "number", false}}},
         {"timeline.add_transition",
-         {{"clipId", "string", true},
-          {"kind", "string", true},
-          {"durationNs", "integer", true}}},
+         {{"clipId", "string", true}, {"kind", "string", true}, {"durationNs", "integer", true}}},
         // Text and titles (usable-editor task 12; Requirement 9). Argument order
         // matches the schema declaration order in makeAddTextClipTool /
         // makeSetTextContentTool / makeSetTextStyleTool exactly, since
@@ -255,8 +245,7 @@ std::vector<ToolExpectation> expectedSurface() {
           {"alignment", "string", false},
           {"x", "number", false},
           {"y", "number", false}}},
-        {"timeline.set_text_content",
-         {{"clipId", "string", true}, {"content", "string", true}}},
+        {"timeline.set_text_content", {{"clipId", "string", true}, {"content", "string", true}}},
         {"timeline.set_text_style",
          {{"clipId", "string", true},
           {"fontFamily", "string", false},
@@ -278,8 +267,7 @@ std::vector<ToolExpectation> expectedSurface() {
           {"timelineStartNs", "integer", false},
           {"durationNs", "integer", true},
           {"text", "string", true}}},
-        {"timeline.set_caption_text",
-         {{"clipId", "string", true}, {"text", "string", true}}},
+        {"timeline.set_caption_text", {{"clipId", "string", true}, {"text", "string", true}}},
         {"timeline.retime_caption_cue",
          {{"clipId", "string", true},
           {"timelineStartNs", "integer", false},

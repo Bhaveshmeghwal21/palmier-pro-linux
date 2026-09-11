@@ -320,6 +320,26 @@ command.
 
 Result: `clipId` (string), `timelineStartNs` (integer), *(command result)*.
 
+## `timeline.set_clip_properties`
+
+Change a clip's opacity or audio gain after it has been created.
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | |
+| `opacity` | number | no | 0.0 .. 1.0; absent leaves it unchanged |
+| `gain` | number | no | >= 0; absent leaves it unchanged |
+
+Result: `clipId` (string), `opacity` (number), `gain` (number), *(command result)*.
+
+An absent argument leaves that property unchanged, and a call naming neither is an accepted
+no-op. `opacity` and `gain` appear in the result only when they were given.
+
+Both properties can also be supplied to `timeline.add_clip`. This tool exists because they
+could previously *only* be supplied there, which made them write-once: adjusting a composite's
+blend or a music bed's level meant deleting the clip and adding it again, losing its identifier
+along with any effects, transition or text style attached to it.
+
 ## `timeline.trim_clip`
 
 Trim a clip's start or end edge to a new source boundary.
@@ -425,6 +445,51 @@ Append an effect to a clip's effect chain.
 An unknown `type` is rejected rather than silently becoming `custom`.
 
 Result: `effectId` (string), *(command result)*.
+
+### Effect parameters
+
+Each effect type reads a fixed set of numeric parameters. **A name the effect does not read is
+silently ignored** — there is no error — so a misspelled or invented parameter renders as if it
+had never been passed. The defaults below are what an absent parameter falls back to.
+
+| Type | Parameter | Default | Meaning |
+|---|---|---|---|
+| `brightness` | `amount` | 0.0 | Added to each channel, as a fraction of full scale. |
+| `contrast` | `amount` | 0.0 | Applied as `1.0 + amount`, so `0.15` is +15% and `1.0` is +100%. |
+| `blur` | `radius` | 0.0 | Blur radius in source pixels. |
+| `crop_transform` | `cropLeft` | 0.0 | Left edge of the visible rectangle. |
+| | `cropTop` | 0.0 | Top edge. |
+| | `cropRight` | 1.0 | Right edge. |
+| | `cropBottom` | 1.0 | Bottom edge. |
+| `color_grade` | `liftR` `liftG` `liftB` | 0.0 | Per-channel lift; the legacy scalar `lift` applies to all three. |
+| | `gammaR` `gammaG` `gammaB` | 1.0 | Per-channel gamma. |
+| | `gainR` `gainG` `gainB` | 1.0 | Per-channel gain. |
+| | `saturation` | 1.0 | 0.0 is monochrome, 1.0 unchanged. |
+| `invert_colors` | — | | No parameters. |
+| `tone_curve` | *(written by `timeline.edit_curve_point`)* | | Do not set these by hand. |
+| `lut` | *(the cube file is set by `timeline.set_effect_resource`)* | | An unreadable path renders un-graded. |
+| `custom` | *(any)* | | Carries parameters for a kernel this build does not implement. |
+
+There is no `temperature`, `tint`, `scale`, `rotation` or `opacity` among these. Clip opacity is
+a property of the clip, set by `timeline.add_clip` or `timeline.set_clip_properties`.
+
+#### `crop_transform` coordinates
+
+`cropLeft`/`cropTop`/`cropRight`/`cropBottom` are **absolute normalized edges** of the visible
+rectangle, not insets: `{cropLeft: 0.5, cropRight: 1.0}` keeps the right half, and the defaults
+`0, 0, 1, 1` keep everything. Everything outside the rectangle becomes transparent, so it shows
+whatever is on a lower track or the canvas's clear colour.
+
+The coordinates are relative to the **source frame**, and the source is fitted to the canvas
+before compositing, so the same values land in the same place on the canvas whatever the source's
+resolution. A right-half crop of a 1920x1080 source and of a 3840x2160 source both occupy canvas
+x 0.500..1.000.
+
+> **Divergence from upstream Palmier Pro.** Upstream's `crop` names the same four edges but means
+> **insets from each edge**, where all zeros keep the full source. The two conventions are
+> inverses of each other: `{left: 0.5, right: 0.05}` keeps the middle in upstream and would be an
+> almost-empty rectangle here, while this port's defaults (`0, 0, 1, 1`) would be read upstream as
+> cropping everything but a sliver. An agent written against upstream's semantics must convert.
 
 ## `timeline.remove_effect`
 

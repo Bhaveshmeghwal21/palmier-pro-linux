@@ -95,6 +95,50 @@ Result<void> AddEffectCommand::revert(Project& project) {
 }
 
 // ===========================================================================
+// SetClipPropertiesCommand
+// ===========================================================================
+
+SetClipPropertiesCommand::SetClipPropertiesCommand(ClipId clipId, Properties properties)
+    : clipId_(clipId), properties_(properties) {}
+
+Result<void> SetClipPropertiesCommand::apply(Project& project) {
+    // A call naming no property at all is applied as a no-op rather than refused, for the same
+    // reason SetTrackMutedCommand accepts setting a flag to the value it already holds: it is a
+    // legal, idempotent edit whose revert is equally a no-op. Refusing it would also put the
+    // advertised schema and the handler in permanent disagreement, because "at least one of
+    // these optional arguments" is a relation between arguments that the schema cannot state.
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("SetClipProperties: clip " + idLabel(clipId_) + " not found"));
+    }
+    Clip& clip = loc->track->clips[loc->index];
+
+    // Capture both, not only the fields being changed: revert() then restores the clip's whole
+    // property state regardless of which fields this command carried.
+    priorOpacity_ = clip.opacity;
+    priorGain_ = clip.gain;
+    captured_ = true;
+
+    if (properties_.opacity.has_value()) clip.opacity = *properties_.opacity;
+    if (properties_.gain.has_value()) clip.gain = *properties_.gain;
+    return ok();
+}
+
+Result<void> SetClipPropertiesCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition("SetClipProperties: revert before a successful apply"));
+    }
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("SetClipProperties: clip " + idLabel(clipId_) + " not found"));
+    }
+    Clip& clip = loc->track->clips[loc->index];
+    clip.opacity = priorOpacity_;
+    clip.gain = priorGain_;
+    return ok();
+}
+
+// ===========================================================================
 // SetTransitionCommand
 // ===========================================================================
 

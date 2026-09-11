@@ -9,8 +9,8 @@
 
 namespace palmier::gpu {
 
-FittedRect fitToCanvas(std::uint32_t srcWidth, std::uint32_t srcHeight,
-                       std::uint32_t canvasWidth, std::uint32_t canvasHeight) noexcept {
+FittedRect fitToCanvas(std::uint32_t srcWidth, std::uint32_t srcHeight, std::uint32_t canvasWidth,
+                       std::uint32_t canvasHeight) noexcept {
     if (srcWidth == 0 || srcHeight == 0 || canvasWidth == 0 || canvasHeight == 0) {
         return FittedRect{};
     }
@@ -97,4 +97,4 @@ std::vector<LayerPlacement> layerPlacements(const std::vector<PlacedLayer>& laye
     return placements;
 }
 
-} // namespace palmier::gpu
+}  // namespace palmier::gpu

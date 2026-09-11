@@ -430,6 +430,13 @@ private:
     move.set("timelineStartNs", 6 * kSecond);
     observer.run("timeline.move_clip", move);
 
+    // Both properties at once, so each optional field of the rendered payload is observed.
+    services::Json clipProps = object();
+    clipProps.set("clipId", secondClip);
+    clipProps.set("opacity", services::Json(0.5));
+    clipProps.set("gain", services::Json(0.75));
+    observer.run("timeline.set_clip_properties", clipProps);
+
     services::Json trim = object();
     trim.set("clipId", firstClip);
     trim.set("edge", std::string{"end"});

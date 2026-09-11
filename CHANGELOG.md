@@ -11,6 +11,22 @@ task's completion commit, its CI run and the suite size at that point.
 
 ## [Unreleased]
 
+### Added
+
+- **`timeline.set_clip_properties`**, so a clip's `opacity` and `gain` can be changed after it
+  has been created. They could previously only be passed to `timeline.add_clip`, which made them
+  write-once across the whole tool surface: adjusting a composite's blend or a music bed's level
+  meant deleting the clip and adding it back, losing its identifier along with any effects,
+  transition or text style attached to it. An absent argument leaves that property unchanged.
+
+- **The effect parameter surface is documented.** `timeline.add_effect` accepted "named numeric
+  effect parameters" and no document stated which names each of the nine effect types reads.
+  Unknown parameters are silently ignored rather than rejected, so a wrong guess produces no
+  error and no effect. `docs/TOOLS.md` now lists every parameter, its default and its meaning,
+  records that `crop_transform`'s coordinates are absolute normalized edges rather than insets
+  (the inverse of upstream's convention), and states that the coordinates are now
+  resolution-independent because the source is fitted to the canvas before compositing.
+
 ### Fixed
 
 - **Every transition rendered as a hard cut.** `timeline.add_transition` stored a transition,

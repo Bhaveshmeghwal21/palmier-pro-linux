@@ -61,11 +61,11 @@ void appendTag(std::vector<std::uint8_t>& out, const char (&tag)[5]) {
     appendLe32(w, 36u + dataBytes);
     appendTag(w, "WAVE");
     appendTag(w, "fmt ");
-    appendLe32(w, 16u);                                        // PCM fmt chunk size
-    appendLe16(w, 1u);                                         // PCM
+    appendLe32(w, 16u);  // PCM fmt chunk size
+    appendLe16(w, 1u);   // PCM
     appendLe16(w, kChannels);
     appendLe32(w, kRate);
-    appendLe32(w, kRate * kChannels * (kBits / 8u));           // byte rate
+    appendLe32(w, kRate * kChannels * (kBits / 8u));                      // byte rate
     appendLe16(w, static_cast<std::uint16_t>(kChannels * (kBits / 8u)));  // block align
     appendLe16(w, kBits);
     appendTag(w, "data");
@@ -159,5 +159,5 @@ TEST_F(AudioOnlyAssetTest, AFileWithNeitherAudioNorVideoIsStillRefused) {
     EXPECT_TRUE(ffmpegDecodeBackendFactory()(junk, DecodePrefs{}).isError());
 }
 
-} // namespace
-} // namespace palmier::media
+}  // namespace
+}  // namespace palmier::media

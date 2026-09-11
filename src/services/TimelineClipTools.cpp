@@ -142,6 +142,50 @@ Tool makeMoveClipTool(ProjectSession* session) {
     return t;
 }
 
+Tool makeSetClipPropertiesTool(ProjectSession* session) {
+    Tool t;
+    t.name = kSetClipProperties;
+    t.description = "Change a clip's opacity or audio gain after it has been created.";
+    // Both fields are optional and an absent field leaves the clip's value alone, so a caller
+    // can change one property without knowing the other. The bounds match Clip's invariants
+    // (ProjectValidation: opacity within [0,1], gain >= 0) so an out-of-range value is refused
+    // by the schema with the range in the message, rather than by validation after the edit has
+    // been built.
+    //
+    // A call naming neither property is an applied no-op, not a refusal: "at least one of
+    // these optional arguments" is a relation between arguments that the schema cannot state,
+    // and the suite asserts that whatever the advertised schema accepts the handler accepts.
+    t.schema.arg(uuidArg("clipId", true, "UUID of the clip to change."))
+        .arg(ArgSpec{.name = "opacity",
+                     .kind = JsonKind::Number,
+                     .description = "Video opacity in [0,1]. Absent leaves it unchanged.",
+                     .minNum = 0.0,
+                     .maxNum = 1.0})
+        .arg(ArgSpec{.name = "gain",
+                     .kind = JsonKind::Number,
+                     .description = "Audio gain, unity = 1.0. Absent leaves it unchanged.",
+                     .minNum = 0.0});
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kSetClipProperties));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> clipId = requireUuid(in, "clipId");
+        if (clipId.isError()) return err<Json>(std::move(clipId).error());
+
+        SetClipPropertiesCommand::Properties props;
+        if (in.find("opacity") != nullptr) props.opacity = in.doubleOr("opacity", 1.0);
+        if (in.find("gain") != nullptr) props.gain = in.doubleOr("gain", 1.0);
+
+        Json out = Json::object();
+        out.set("clipId", clipId.value().toString());
+        if (props.opacity.has_value()) out.set("opacity", *props.opacity);
+        if (props.gain.has_value()) out.set("gain", *props.gain);
+        return applyCommand(engine,
+                            std::make_unique<SetClipPropertiesCommand>(clipId.value(), props),
+                            std::move(out));
+    };
+    return t;
+}
+
 Tool makeTrimClipTool(ProjectSession* session) {
     Tool t;
     t.name = kTrimClip;

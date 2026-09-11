@@ -39,8 +39,8 @@ namespace palmier::gpu {
 /// because a fitted rectangle is centred (so it is negative only when a caller has shifted
 /// it). Width and height are the on-canvas extent, not the source's own size.
 struct FittedRect {
-    std::int64_t  x{0};
-    std::int64_t  y{0};
+    std::int64_t x{0};
+    std::int64_t y{0};
     std::uint32_t width{0};
     std::uint32_t height{0};
 
@@ -112,6 +112,6 @@ struct PlacedLayer {
 [[nodiscard]] std::vector<LayerPlacement> layerPlacements(const std::vector<PlacedLayer>& layers,
                                                           Duration position);
 
-} // namespace palmier::gpu
+}  // namespace palmier::gpu
 
 #endif  // PALMIER_GPU_LAYERPLACEMENT_HPP

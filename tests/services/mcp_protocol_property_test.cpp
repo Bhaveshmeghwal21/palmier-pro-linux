@@ -143,6 +143,7 @@ constexpr std::string_view kRedo          = "edit.redo";
 constexpr std::string_view kAddClip       = "timeline.add_clip";
 constexpr std::string_view kDeleteClip    = "timeline.delete_clip";
 constexpr std::string_view kMoveClip      = "timeline.move_clip";
+constexpr std::string_view kSetClipProperties = "timeline.set_clip_properties";
 constexpr std::string_view kTrimClip      = "timeline.trim_clip";
 constexpr std::string_view kSplitClip     = "timeline.split_clip";
 constexpr std::string_view kReorderClips  = "timeline.reorder_clips";
@@ -884,6 +885,14 @@ struct Invocation {
         args.set("timelineStartNs",
                  Json(projectEndNs(project) +
                       Duration::fromMilliseconds(2 * kClipGapMs).nanoseconds()));
+        return Invocation{name, std::move(args)};
+    }
+    if (name == kSetClipProperties) {
+        // Both properties, so each optional field of the rendered payload is exercised.
+        // opacity is bounded to [0,1] and gain to >= 0 by the advertised schema.
+        args.set("clipId", Json(anyClip.id.toString()));
+        args.set("opacity", Json(static_cast<double>(drawIndex(101)) / 100.0));
+        args.set("gain", Json(static_cast<double>(drawIndex(201)) / 100.0));
         return Invocation{name, std::move(args)};
     }
     if (name == kSplitClip) {

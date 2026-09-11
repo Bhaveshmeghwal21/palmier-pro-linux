@@ -303,8 +303,9 @@ TEST(CompositorTransition, AFadeOnALoneClipRisesFromTheClearColour) {
 
     Project p = makeProject(
         {makeVideoTrack({makeClip(0.0, 2.0, makeTransition(TransitionKind::Fade, 1.0))})});
-    comp.setFrameProvider(
-        [&](const Clip&, Duration) -> Result<SourceFrame> { return SourceFrame::solid(2, 2, clip); });
+    comp.setFrameProvider([&](const Clip&, Duration) -> Result<SourceFrame> {
+        return SourceFrame::solid(2, 2, clip);
+    });
 
     // A quarter of the way in, the clip contributes a quarter of its brightness.
     auto quarter = comp.renderAt(p, Duration::fromSeconds(0.25), RenderTarget(2, 2, clear));
@@ -353,5 +354,5 @@ TEST(CompositorFit, AnOversizedSourceContributesItsWholeImageNotItsTopLeftCorner
     EXPECT_NEAR(pixelAt(rf.value(), 1, 1).g, 200, 2);
 }
 
-} // namespace
-} // namespace palmier::gpu
+}  // namespace
+}  // namespace palmier::gpu
