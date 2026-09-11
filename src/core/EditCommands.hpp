@@ -486,6 +486,40 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// SetClipTransformsCommand — place several clips at once.
+// ---------------------------------------------------------------------------
+//
+// One edit covering many clips, which is what an arrangement is: undoing a split screen has to
+// restore every participant's placement together, and a half-applied layout is not a state
+// anybody asked for. Applying N separate SetClipPropertiesCommands would put N entries on the
+// undo stack and leave the timeline in an arrangement nobody chose if one of them failed.
+//
+// Refused, with the project unchanged, if ANY named clip is missing — checked before the first
+// assignment, so a bad clip id cannot leave a partial arrangement behind.
+class SetClipTransformsCommand final : public EditCommand {
+public:
+    /// A clip and where it should sit.
+    struct Placement {
+        ClipId clipId;
+        Transform transform;
+    };
+
+    explicit SetClipTransformsCommand(std::vector<Placement> placements);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "SetClipTransforms"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+    /// The placements this command installs.
+    [[nodiscard]] const std::vector<Placement>& placements() const noexcept { return placements_; }
+
+private:
+    std::vector<Placement> placements_;
+    std::vector<Transform> prior_;  // parallel to placements_, captured on apply
+    bool captured_{false};
+};
+
+// ---------------------------------------------------------------------------
 // SetTransitionCommand — set a clip's incoming transition.
 // ---------------------------------------------------------------------------
 //

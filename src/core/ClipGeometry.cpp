@@ -5,8 +5,77 @@
 #include "core/ClipGeometry.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <vector>
 
 namespace palmier {
+
+std::vector<Transform> layoutTransforms(LayoutKind kind, std::size_t count) {
+    std::vector<Transform> out;
+    if (count == 0) return out;
+    out.resize(count);
+
+    switch (kind) {
+        case LayoutKind::SideBySide: {
+            // Equal columns across the middle. One clip is left untouched rather than shrunk to a
+            // full-width column, because "side by side" with a single participant means nothing
+            // and filling the frame is the only sensible reading.
+            if (count == 1) return out;
+            const double scale = 1.0 / static_cast<double>(count);
+            for (std::size_t i = 0; i < count; ++i) {
+                out[i].scale = scale;
+                out[i].centerX = (static_cast<double>(i) + 0.5) * scale;
+                out[i].centerY = 0.5;
+            }
+            return out;
+        }
+
+        case LayoutKind::PictureInPicture: {
+            // The first clip is the programme and keeps the frame; the rest are insets at a
+            // quarter size, walking the corners clockwise from the top right. A fifth clip would
+            // land back on the first corner, so the corners repeat rather than shrinking further:
+            // an unreadably small inset is worse than an overlapping one, and the caller can place
+            // extras itself.
+            constexpr double kInset = 0.25;
+            constexpr double kMargin = 0.03;
+            const double offset = kInset / 2.0 + kMargin;
+            const double corners[4][2] = {{1.0 - offset, offset},
+                                          {1.0 - offset, 1.0 - offset},
+                                          {offset, 1.0 - offset},
+                                          {offset, offset}};
+            for (std::size_t i = 1; i < count; ++i) {
+                const auto* corner = corners[(i - 1) % 4];
+                out[i].scale = kInset;
+                out[i].centerX = corner[0];
+                out[i].centerY = corner[1];
+            }
+            return out;
+        }
+
+        case LayoutKind::Grid: {
+            if (count == 1) return out;
+            // The squarest grid that holds them all: columns = ceil(sqrt(count)).
+            auto columns =
+                static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(count))));
+            if (columns == 0) columns = 1;
+            const std::size_t rows = (count + columns - 1) / columns;
+            const double cellW = 1.0 / static_cast<double>(columns);
+            const double cellH = 1.0 / static_cast<double>(rows);
+            // One uniform scale for every cell so no clip is larger than another; the smaller of
+            // the two cell dimensions is what fits.
+            const double scale = std::min(cellW, cellH);
+            for (std::size_t i = 0; i < count; ++i) {
+                const std::size_t column = i % columns;
+                const std::size_t row = i / columns;
+                out[i].scale = scale;
+                out[i].centerX = (static_cast<double>(column) + 0.5) * cellW;
+                out[i].centerY = (static_cast<double>(row) + 0.5) * cellH;
+            }
+            return out;
+        }
+    }
+    return out;
+}
 
 double fadeCoverage(Duration start, Duration end, Duration fadeIn, Duration fadeOut,
                     Duration position) noexcept {

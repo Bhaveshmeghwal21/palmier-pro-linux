@@ -77,6 +77,7 @@ inline constexpr const char* kAddClip = "timeline.add_clip";
 inline constexpr const char* kDeleteClip = "timeline.delete_clip";
 inline constexpr const char* kMoveClip = "timeline.move_clip";
 inline constexpr const char* kSetClipProperties = "timeline.set_clip_properties";
+inline constexpr const char* kApplyLayout = "timeline.apply_layout";
 inline constexpr const char* kTrimClip = "timeline.trim_clip";
 inline constexpr const char* kSplitClip = "timeline.split_clip";
 inline constexpr const char* kReorderClips = "timeline.reorder_clips";
@@ -169,7 +170,14 @@ std::string_view transitionKindName(TransitionKind kind);
 
 const std::vector<std::string>& transitionKindValues();
 
+/// The accepted `layout` values of `timeline.apply_layout`, declared once for the same
+/// reason as transitionKindValues().
+const std::vector<std::string>& layoutKindValues();
+
 std::optional<TransitionKind> parseTransitionKind(std::string_view s);
+
+/// The LayoutKind named by `s`, or nullopt when it names none.
+std::optional<LayoutKind> parseLayoutKind(std::string_view s);
 
 std::string_view trackKindName(TrackKind kind);
 
@@ -244,6 +252,7 @@ Tool makeAddClipTool(ProjectSession* session);
 Tool makeDeleteClipTool(ProjectSession* session);
 Tool makeMoveClipTool(ProjectSession* session);
 Tool makeSetClipPropertiesTool(ProjectSession* session);
+Tool makeApplyLayoutTool(ProjectSession* session);
 Tool makeTrimClipTool(ProjectSession* session);
 Tool makeRippleDeleteTool(ProjectSession* session);
 Tool makeRippleTrimTool(ProjectSession* session);

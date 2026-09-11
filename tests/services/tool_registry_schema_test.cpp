@@ -193,6 +193,7 @@ std::vector<ToolExpectation> expectedSurface() {
           {"flipVertical", "boolean", false},
           {"fadeInNs", "integer", false},
           {"fadeOutNs", "integer", false}}},
+        {"timeline.apply_layout", {{"clipIds", "array", true}, {"layout", "string", true}}},
         {"timeline.trim_clip",
          {{"clipId", "string", true},
           {"edge", "string", true},

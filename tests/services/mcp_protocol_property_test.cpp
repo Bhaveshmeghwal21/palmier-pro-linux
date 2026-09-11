@@ -144,6 +144,7 @@ constexpr std::string_view kAddClip       = "timeline.add_clip";
 constexpr std::string_view kDeleteClip    = "timeline.delete_clip";
 constexpr std::string_view kMoveClip      = "timeline.move_clip";
 constexpr std::string_view kSetClipProperties = "timeline.set_clip_properties";
+constexpr std::string_view kApplyLayout = "timeline.apply_layout";
 constexpr std::string_view kTrimClip      = "timeline.trim_clip";
 constexpr std::string_view kSplitClip     = "timeline.split_clip";
 constexpr std::string_view kReorderClips  = "timeline.reorder_clips";
@@ -885,6 +886,15 @@ struct Invocation {
         args.set("timelineStartNs",
                  Json(projectEndNs(project) +
                       Duration::fromMilliseconds(2 * kClipGapMs).nanoseconds()));
+        return Invocation{name, std::move(args)};
+    }
+    if (name == kApplyLayout) {
+        // One clip is enough for the arrangement to be a legal edit, and it keeps the generator
+        // independent of how many clips the drawn project happens to hold.
+        Json ids = Json::array();
+        ids.push_back(Json(anyClip.id.toString()));
+        args.set("clipIds", std::move(ids));
+        args.set("layout", Json(drawEnumValue(registry, kApplyLayout, "layout")));
         return Invocation{name, std::move(args)};
     }
     if (name == kSetClipProperties) {

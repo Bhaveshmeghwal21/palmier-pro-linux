@@ -126,6 +126,18 @@ const std::vector<std::string>& transitionKindValues() {
     return values;
 }
 
+const std::vector<std::string>& layoutKindValues() {
+    static const std::vector<std::string> values = {"side_by_side", "picture_in_picture", "grid"};
+    return values;
+}
+
+std::optional<LayoutKind> parseLayoutKind(std::string_view s) {
+    if (s == "side_by_side") return LayoutKind::SideBySide;
+    if (s == "picture_in_picture") return LayoutKind::PictureInPicture;
+    if (s == "grid") return LayoutKind::Grid;
+    return std::nullopt;
+}
+
 std::optional<TransitionKind> parseTransitionKind(std::string_view s) {
     if (s == "crossfade") return TransitionKind::Crossfade;
     if (s == "dip_to_color") return TransitionKind::DipToColor;

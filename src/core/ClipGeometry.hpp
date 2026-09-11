@@ -27,6 +27,9 @@
 
 #include "core/Duration.hpp"
 
+#include <cstddef>
+#include <vector>
+
 namespace palmier {
 
 /// Where a clip's picture sits on the canvas.
@@ -66,6 +69,27 @@ struct Transform {
 
     [[nodiscard]] friend bool operator==(const Transform&, const Transform&) = default;
 };
+
+/// A named arrangement of several clips on the canvas.
+enum class LayoutKind {
+    /// Every clip at half size in a row across the middle.
+    SideBySide,
+    /// The first clip fills the frame; the rest are insets in the corners, clockwise from the
+    /// top right.
+    PictureInPicture,
+    /// A square-ish grid, filled left to right and top to bottom.
+    Grid,
+};
+
+/// The transform for each of `count` clips under `kind`, in the order the clips were given.
+///
+/// Pure arithmetic over a count, so the arrangement is pinned by unit tests rather than inferred
+/// from a rendered frame. Returns an empty vector for a count of zero.
+///
+/// Every layout positions and scales only. A full-bleed split screen, where each half fills its
+/// side edge to edge, additionally needs the source cropped — the transform alone letterboxes each
+/// half, because scaling is uniform and cannot stretch a 16:9 source into a 8:9 box.
+[[nodiscard]] std::vector<Transform> layoutTransforms(LayoutKind kind, std::size_t count);
 
 /// The coverage multiplier a clip's own edge fades contribute at `position`.
 ///

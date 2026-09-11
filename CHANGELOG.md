@@ -13,6 +13,20 @@ task's completion commit, its CI run and the suite size at that point.
 
 ### Added
 
+- **`timeline.apply_layout`**, arranging several clips at once as `side_by_side`,
+  `picture_in_picture` or `grid`. One edit covering every named clip, so undoing an arrangement
+  restores all of their placements together and a bad clip identifier refuses the whole thing
+  before the first clip is moved -- N separate property edits would put N entries on the undo
+  stack and could leave an arrangement nobody chose. The arithmetic is a pure function over a
+  count in `core/ClipGeometry.hpp`, so the arrangements are pinned by unit tests.
+
+  Every layout positions and scales only, so each participant keeps its aspect ratio and is
+  letterboxed within its share of the canvas. Measured: `side_by_side` on two clips letterboxes
+  the picture to canvas y 0.252..0.745, `picture_in_picture` leaves the first clip filling the
+  frame at y 0.007..0.997, and undo returns to the previous arrangement. A full-bleed split
+  screen additionally needs a `crop_transform`, because scaling is uniform and cannot stretch a
+  16:9 source into a half-width box.
+
 - **A per-clip transform: position, scale, rotation and mirroring.** A clip could only occupy the
   whole canvas, so picture-in-picture, split screen, a rotation and a flip were all inexpressible
   and composition was limited to stacking full-frame layers and cropping. `Clip::transform` carries

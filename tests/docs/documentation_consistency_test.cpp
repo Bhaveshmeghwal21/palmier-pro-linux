@@ -437,6 +437,16 @@ private:
     clipProps.set("gain", services::Json(0.75));
     observer.run("timeline.set_clip_properties", clipProps);
 
+    // Two clips so the arrangement actually places something, and the rendered clipCount is
+    // observed.
+    services::Json layout = object();
+    services::Json layoutIds = services::Json::array();
+    layoutIds.push_back(firstClip);
+    layoutIds.push_back(secondClip);
+    layout.set("clipIds", std::move(layoutIds));
+    layout.set("layout", std::string{"side_by_side"});
+    observer.run("timeline.apply_layout", layout);
+
     services::Json trim = object();
     trim.set("clipId", firstClip);
     trim.set("edge", std::string{"end"});

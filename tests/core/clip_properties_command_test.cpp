@@ -231,5 +231,83 @@ TEST(FadeCoverage, AnEmptyClipCoversNothing) {
     EXPECT_DOUBLE_EQ(fadeCoverage(at, at, Duration::zero(), Duration::zero(), at), 0.0);
 }
 
+// --- layoutTransforms -------------------------------------------------------
+//
+// A named arrangement is pure arithmetic over a count, so it is pinned here rather than inferred
+// from a rendered frame.
+
+TEST(LayoutTransforms, NoClipsYieldNoPlacements) {
+    EXPECT_TRUE(layoutTransforms(LayoutKind::SideBySide, 0).empty());
+    EXPECT_TRUE(layoutTransforms(LayoutKind::Grid, 0).empty());
+}
+
+TEST(LayoutTransforms, SideBySideSplitsTheWidthEvenlyAndCentresEachColumn) {
+    const std::vector<Transform> two = layoutTransforms(LayoutKind::SideBySide, 2);
+    ASSERT_EQ(two.size(), 2u);
+    EXPECT_DOUBLE_EQ(two[0].scale, 0.5);
+    EXPECT_DOUBLE_EQ(two[0].centerX, 0.25);
+    EXPECT_DOUBLE_EQ(two[1].centerX, 0.75);
+    EXPECT_DOUBLE_EQ(two[0].centerY, 0.5);
+
+    const std::vector<Transform> three = layoutTransforms(LayoutKind::SideBySide, 3);
+    ASSERT_EQ(three.size(), 3u);
+    EXPECT_NEAR(three[1].scale, 1.0 / 3.0, 1e-9);
+    EXPECT_NEAR(three[1].centerX, 0.5, 1e-9);
+}
+
+TEST(LayoutTransforms, SideBySideLeavesASingleClipFillingTheFrame) {
+    // "Side by side" with one participant means nothing, and shrinking it to a full-width column
+    // would be a strange reading of the request.
+    const std::vector<Transform> one = layoutTransforms(LayoutKind::SideBySide, 1);
+    ASSERT_EQ(one.size(), 1u);
+    EXPECT_TRUE(one[0].isIdentity());
+}
+
+TEST(LayoutTransforms, PictureInPictureKeepsTheFirstClipFullFrame) {
+    const std::vector<Transform> three = layoutTransforms(LayoutKind::PictureInPicture, 3);
+    ASSERT_EQ(three.size(), 3u);
+    EXPECT_TRUE(three[0].isIdentity());
+    // The insets are small, and the first one sits in the top right.
+    EXPECT_DOUBLE_EQ(three[1].scale, 0.25);
+    EXPECT_GT(three[1].centerX, 0.5);
+    EXPECT_LT(three[1].centerY, 0.5);
+    // The second inset is in a different corner.
+    EXPECT_NE(three[1].centerY, three[2].centerY);
+}
+
+TEST(LayoutTransforms, PictureInPictureReusesCornersRatherThanShrinkingIndefinitely) {
+    // A fifth clip returns to the first corner: an unreadably small inset is worse than an
+    // overlapping one, and the caller can place extras itself.
+    const std::vector<Transform> six = layoutTransforms(LayoutKind::PictureInPicture, 6);
+    ASSERT_EQ(six.size(), 6u);
+    EXPECT_DOUBLE_EQ(six[1].centerX, six[5].centerX);
+    EXPECT_DOUBLE_EQ(six[1].centerY, six[5].centerY);
+    EXPECT_DOUBLE_EQ(six[5].scale, 0.25);
+}
+
+TEST(LayoutTransforms, AGridIsTheSquarestArrangementThatHoldsThemAll) {
+    // Four clips make a 2x2: two distinct columns and two distinct rows, every cell the same size.
+    const std::vector<Transform> four = layoutTransforms(LayoutKind::Grid, 4);
+    ASSERT_EQ(four.size(), 4u);
+    EXPECT_DOUBLE_EQ(four[0].scale, 0.5);
+    EXPECT_DOUBLE_EQ(four[0].centerX, 0.25);
+    EXPECT_DOUBLE_EQ(four[0].centerY, 0.25);
+    EXPECT_DOUBLE_EQ(four[3].centerX, 0.75);
+    EXPECT_DOUBLE_EQ(four[3].centerY, 0.75);
+
+    // Five clips need three columns, so two rows of three with the last row half empty.
+    const std::vector<Transform> five = layoutTransforms(LayoutKind::Grid, 5);
+    ASSERT_EQ(five.size(), 5u);
+    EXPECT_NEAR(five[0].centerX, 1.0 / 6.0, 1e-9);
+    EXPECT_NEAR(five[4].centerY, 0.75, 1e-9);
+}
+
+TEST(LayoutTransforms, EveryGridCellSharesOneScaleSoNoClipIsLargerThanAnother) {
+    const std::vector<Transform> five = layoutTransforms(LayoutKind::Grid, 5);
+    for (const Transform& t : five) {
+        EXPECT_DOUBLE_EQ(t.scale, five[0].scale);
+    }
+}
+
 }  // namespace
 }  // namespace palmier

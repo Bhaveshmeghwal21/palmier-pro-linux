@@ -364,6 +364,32 @@ could previously *only* be supplied there, which made them write-once: adjusting
 blend or a music bed's level meant deleting the clip and adding it again, losing its identifier
 along with any effects, transition or text style attached to it.
 
+## `timeline.apply_layout`
+
+Arrange several clips on the canvas in a named layout.
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipIds` | array | **yes** | clip UUID strings, in the order they should be placed; at least one |
+| `layout` | string | **yes** | `side_by_side`, `picture_in_picture`, `grid` |
+
+Result: `clipCount` (integer), *(command result)*.
+
+One edit covering every named clip, so undoing an arrangement restores all of their placements
+together. Refused with the project unchanged if any named clip does not exist, checked before the
+first clip is moved so a bad identifier cannot leave a half-applied arrangement.
+
+| Layout | Arrangement |
+|---|---|
+| `side_by_side` | Equal columns across the middle, each scaled to `1/n`. A single clip is left filling the frame. |
+| `picture_in_picture` | The first clip keeps the frame; the rest are quarter-size insets walking the corners clockwise from the top right. A fifth clip returns to the first corner rather than shrinking further. |
+| `grid` | The squarest grid that holds them all, filled left to right and top to bottom, every cell at one uniform scale. |
+
+Every layout positions and scales only, so each participant keeps its aspect ratio and is
+letterboxed within its share of the canvas. A full-bleed split screen, where each half fills its
+side edge to edge, additionally needs the source cropped with a `crop_transform` effect: scaling
+is uniform and cannot stretch a 16:9 source into a half-width box.
+
 ## `timeline.trim_clip`
 
 Trim a clip's start or end edge to a new source boundary.

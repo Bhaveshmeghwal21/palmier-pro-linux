@@ -159,6 +159,57 @@ Result<void> SetClipPropertiesCommand::revert(Project& project) {
 }
 
 // ===========================================================================
+// SetClipTransformsCommand
+// ===========================================================================
+
+SetClipTransformsCommand::SetClipTransformsCommand(std::vector<Placement> placements)
+    : placements_(std::move(placements)) {}
+
+Result<void> SetClipTransformsCommand::apply(Project& project) {
+    if (placements_.empty()) {
+        return err(invalidArgument("SetClipTransforms: no clip was named"));
+    }
+
+    // Resolve every clip before writing anything, so a bad id refuses the whole arrangement
+    // rather than leaving some clips moved and others not.
+    std::vector<ClipLocation> located;
+    located.reserve(placements_.size());
+    for (const Placement& placement : placements_) {
+        std::optional<ClipLocation> loc = findClip(project, placement.clipId);
+        if (!loc) {
+            return err(
+                notFound("SetClipTransforms: clip " + idLabel(placement.clipId) + " not found"));
+        }
+        located.push_back(*loc);
+    }
+
+    prior_.clear();
+    prior_.reserve(placements_.size());
+    for (std::size_t i = 0; i < placements_.size(); ++i) {
+        Clip& clip = located[i].track->clips[located[i].index];
+        prior_.push_back(clip.transform);
+        clip.transform = placements_[i].transform;
+    }
+    captured_ = true;
+    return ok();
+}
+
+Result<void> SetClipTransformsCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition("SetClipTransforms: revert before a successful apply"));
+    }
+    for (std::size_t i = 0; i < placements_.size(); ++i) {
+        std::optional<ClipLocation> loc = findClip(project, placements_[i].clipId);
+        if (!loc) {
+            return err(notFound("SetClipTransforms: clip " + idLabel(placements_[i].clipId) +
+                                " not found"));
+        }
+        loc->track->clips[loc->index].transform = prior_[i];
+    }
+    return ok();
+}
+
+// ===========================================================================
 // SetTransitionCommand
 // ===========================================================================
 

@@ -234,6 +234,69 @@ Tool makeSetClipPropertiesTool(ProjectSession* session) {
     return t;
 }
 
+Tool makeApplyLayoutTool(ProjectSession* session) {
+    Tool t;
+    t.name = kApplyLayout;
+    t.description = "Arrange several clips on the canvas in a named layout.";
+    // `layout` is a closed value set so it is declared as one. That the array holds UUID strings
+    // is checked by the handler, and that each names a real clip by the command — which resolves
+    // every id before moving anything, so a bad id refuses the whole arrangement.
+    t.schema
+        .arg(ArgSpec{.name = "clipIds",
+                     .kind = JsonKind::Array,
+                     .required = true,
+                     .description = "UUIDs of the clips to arrange, in the order they should "
+                                    "be placed."})
+        .arg(ArgSpec{.name = "layout",
+                     .kind = JsonKind::String,
+                     .required = true,
+                     .description = "The arrangement to apply.",
+                     .enumValues = layoutKindValues()});
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kApplyLayout));
+        TimelineEngine& engine = session->engine();
+
+        const Json* ids = in.find("clipIds");
+        if (ids == nullptr || !ids->isArray()) {
+            return err<Json>(invalidArgument("missing or non-array field 'clipIds'"));
+        }
+        if (ids->asArray().empty()) {
+            return err<Json>(invalidArgument("field 'clipIds' must name at least one clip"));
+        }
+        std::vector<Uuid> clipIds;
+        clipIds.reserve(ids->asArray().size());
+        for (const Json& entry : ids->asArray()) {
+            if (!entry.isString()) {
+                return err<Json>(invalidArgument("field 'clipIds' must contain UUID strings"));
+            }
+            std::optional<Uuid> parsed = Uuid::parse(entry.asString());
+            if (!parsed) {
+                return err<Json>(invalidArgument("field 'clipIds' contains an invalid UUID"));
+            }
+            clipIds.push_back(*parsed);
+        }
+
+        const std::optional<LayoutKind> layout = parseLayoutKind(in.stringOr("layout", ""));
+        if (!layout.has_value()) {
+            return err<Json>(invalidArgument("field 'layout' does not name a known layout"));
+        }
+
+        const std::vector<Transform> transforms = layoutTransforms(*layout, clipIds.size());
+        std::vector<SetClipTransformsCommand::Placement> placements;
+        placements.reserve(transforms.size());
+        for (std::size_t i = 0; i < transforms.size(); ++i) {
+            placements.push_back(SetClipTransformsCommand::Placement{clipIds[i], transforms[i]});
+        }
+
+        Json out = Json::object();
+        out.set("clipCount", static_cast<std::int64_t>(placements.size()));
+        return applyCommand(engine,
+                            std::make_unique<SetClipTransformsCommand>(std::move(placements)),
+                            std::move(out));
+    };
+    return t;
+}
+
 Tool makeTrimClipTool(ProjectSession* session) {
     Tool t;
     t.name = kTrimClip;
