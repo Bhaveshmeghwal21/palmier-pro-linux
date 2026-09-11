@@ -108,8 +108,18 @@ struct SyntheticAsset {
     FrameRate     rate{};
     int           frameCount{0};
     std::uint32_t salt{0};
+    /// Frames between keyframes, as in a real encoded stream. A backward seek can
+    /// only land on a keyframe, so this is what makes a seek inexact.
+    int keyframeInterval{12};
 
     [[nodiscard]] Duration frameStep() const noexcept { return rate.frameDuration(); }
+
+    /// The keyframe at or before `index` -- where av_seek_frame(AVSEEK_FLAG_BACKWARD)
+    /// actually leaves the cursor.
+    [[nodiscard]] int keyframeAtOrBefore(int index) const noexcept {
+        const int gop = keyframeInterval > 0 ? keyframeInterval : 1;
+        return (index / gop) * gop;
+    }
 };
 
 /// The identifiable pixel content of frame `index` of `asset`. R is a bijection
@@ -159,8 +169,16 @@ struct BackendCounters {
 };
 
 /// A deterministic video decode backend over a SyntheticAsset. It behaves like a
-/// real one where it matters: it is a *cursor*, nextFrame() advances it, and a
-/// seek repositions it to the frame nearest the requested timestamp.
+/// real one where it matters: it is a *cursor*, nextFrame() advances it, and a seek
+/// lands on the KEYFRAME at or before the requested timestamp -- never on the
+/// requested frame itself unless that frame happens to be a keyframe.
+///
+/// That last property is deliberate and load-bearing. FFmpeg seeks with
+/// AVSEEK_FLAG_BACKWARD and then flushes the codec, so the first frame decoded after a
+/// seek is the preceding keyframe. A double that repositioned to the nearest frame
+/// would be more accurate than the decoder it stands in for, and this suite -- whose
+/// whole subject is whether the frame delivered is the frame requested -- would be
+/// unable to observe an inexact seek at all.
 class SyntheticVideoBackend final : public IDecodeBackend {
 public:
     SyntheticVideoBackend(SyntheticAsset asset, std::shared_ptr<BackendCounters> counters)
@@ -202,7 +220,9 @@ public:
         const std::int64_t step = asset_.frameStep().ticks();
         std::int64_t       index = step > 0 ? (ts.ticks() + step / 2) / step : 0;
         index                    = std::clamp<std::int64_t>(index, 0, asset_.frameCount);
-        cursor_                  = static_cast<int>(index);
+        // Not `index`: a backward seek can only reach a keyframe. Everything between
+        // the keyframe and the frame that was asked for has to be decoded through.
+        cursor_ = asset_.keyframeAtOrBefore(static_cast<int>(index));
         if (counters_) counters_->noteSeek();
         return ok();
     }
@@ -903,6 +923,125 @@ TEST(DecodeWorkerPool, ToSourceFrameRejectsUnusableDecodedFrames) {
     EXPECT_EQ(converted.value().height, 4u);
     EXPECT_TRUE(converted.value().valid());
     EXPECT_EQ(converted.value().rgba[0], 0x7Fu);
+}
+
+// ---------------------------------------------------------------------------
+// Frame accuracy across a keyframe-granular seek
+// ---------------------------------------------------------------------------
+//
+// A backward seek reaches a keyframe, not the frame asked for. These tests pin the three
+// behaviours that make a request nonetheless yield its own frame. Before they existed the
+// pool returned whatever the seek landed on and labelled it with the requested position,
+// so an export repeated frames wherever anything moved the shared cursor: measured at 31,
+// 45, 52 repeats out of 672 across runs of ONE unchanged 22.4 s project, and zero
+// afterwards.
+
+TEST(DecodeWorkerPool, SeekIntoAKeyframeIntervalDeliversTheRequestedFrame) {
+    Fixture fx(16, 16, /*frameCount=*/16);
+    fx.asset.keyframeInterval = 12;  // frames 0 and 12 are keyframes; 7 is not
+    DecoderTeardownQueue teardown;
+    DecodeWorkerPool pool(teardown, DecodeWorkerPoolOptions{});
+    ASSERT_TRUE(
+        pool.activateAsset(fx.asset.assetId, fx.asset.path, softwarePrefs(), fx.factory()).isOk());
+
+    const ClipId clipId = Uuid::generateV4();
+    const Duration step = fx.step();
+    const int wanted = 7;
+
+    auto frame =
+        pool.decodeFor(fx.asset.assetId, clipId, step * static_cast<std::int64_t>(wanted), step);
+    ASSERT_TRUE(frame.isOk()) << frame.error().toString();
+
+    // The frame asked for, not the keyframe the seek could reach.
+    EXPECT_TRUE(framesEqual(frame.value().image, syntheticPixels(fx.asset, wanted)));
+    EXPECT_FALSE(framesEqual(frame.value().image, syntheticPixels(fx.asset, 0)));
+
+    // Tagged with where it is, which is what lets a later request be judged against it.
+    EXPECT_EQ(frame.value().sourcePosition, step * static_cast<std::int64_t>(wanted));
+
+    // Getting there meant decoding through the frames between the keyframe and the
+    // target, and that work is reported.
+    EXPECT_EQ(pool.stats().seeks, 1u);
+    EXPECT_EQ(pool.stats().seekSkippedFrames, static_cast<std::uint64_t>(wanted));
+
+    pool.retireAsset(fx.asset.assetId);
+    ASSERT_TRUE(
+        teardown.drainFor(std::chrono::duration_cast<std::chrono::milliseconds>(kWaitCeiling)));
+}
+
+TEST(DecodeWorkerPool, TwoClipsAlternatingOnOneAssetEachGetTheirOwnFrame) {
+    // The picture-in-picture case: an inset over a clip that reads the same file. Both
+    // readers share one decoder cursor, so every alternation is random access. Each must
+    // still receive its own frame -- this is exactly where repeats survived after
+    // prefetch was quietened.
+    Fixture fx(16, 16, /*frameCount=*/24);
+    fx.asset.keyframeInterval = 12;
+    DecoderTeardownQueue teardown;
+    DecodeWorkerPool pool(teardown, DecodeWorkerPoolOptions{});
+    ASSERT_TRUE(
+        pool.activateAsset(fx.asset.assetId, fx.asset.path, softwarePrefs(), fx.factory()).isOk());
+
+    const ClipId below = Uuid::generateV4();
+    const ClipId inset = Uuid::generateV4();
+    const Duration step = fx.step();
+
+    for (int i = 0; i < 4; ++i) {
+        const int belowIndex = 2 + i;   // one run of the source
+        const int insetIndex = 17 + i;  // a different part of the same source
+        for (const auto& [clipId, index] : {std::pair<ClipId, int>{below, belowIndex},
+                                            std::pair<ClipId, int>{inset, insetIndex}}) {
+            auto frame = pool.decodeFor(fx.asset.assetId, clipId,
+                                        step * static_cast<std::int64_t>(index), step);
+            ASSERT_TRUE(frame.isOk()) << frame.error().toString();
+            EXPECT_TRUE(framesEqual(frame.value().image, syntheticPixels(fx.asset, index)))
+                << "clip asked for frame " << index << " and did not get it";
+            EXPECT_EQ(frame.value().sourcePosition, step * static_cast<std::int64_t>(index));
+        }
+    }
+
+    pool.retireAsset(fx.asset.assetId);
+    ASSERT_TRUE(
+        teardown.drainFor(std::chrono::duration_cast<std::chrono::milliseconds>(kWaitCeiling)));
+}
+
+TEST(DecodeWorkerPool, PrefetchDeclinesWorkThatWouldNeedASeek) {
+    // Speculation must stay cheap. A seek costs a decode from the preceding keyframe, and
+    // repositioning the cursor turns the render thread's next sequential request into
+    // random access too, so both sides pay. A job that is not a continuation is dropped.
+    Fixture fx(16, 16, /*frameCount=*/32);
+    fx.asset.keyframeInterval = 16;
+    DecoderTeardownQueue teardown;
+    DecodeWorkerPoolOptions options;
+    options.workerCount = 2;
+    options.clipQueueCapacity = 4;
+    DecodeWorkerPool pool(teardown, options);
+    ASSERT_TRUE(
+        pool.activateAsset(fx.asset.assetId, fx.asset.path, softwarePrefs(), fx.factory()).isOk());
+
+    const ClipId clipId = Uuid::generateV4();
+    const Duration step = fx.step();
+
+    // Establish the cursor at the head of the stream: no seek needed for frame 0.
+    ASSERT_TRUE(pool.decodeFor(fx.asset.assetId, clipId, Duration::zero(), step).isOk());
+    EXPECT_EQ(pool.stats().seeks, 0u);
+
+    // Ask it to run ahead somewhere the cursor is not. Every one of these needs a seek.
+    pool.prefetch(fx.asset.assetId, clipId, step * 20, step, /*frameCount=*/4);
+    ASSERT_TRUE(pool.drainFor(std::chrono::duration_cast<std::chrono::milliseconds>(kWaitCeiling)));
+
+    EXPECT_EQ(pool.stats().seeks, 0u) << "prefetch sought, which is the expensive mistake";
+    EXPECT_EQ(pool.queuedFrames(clipId), 0u);
+    EXPECT_GE(pool.stats().prefetchDrops, 1u);
+
+    // A continuation is still prefetched, so declining a seek has not disabled the queue.
+    pool.prefetch(fx.asset.assetId, clipId, step, step, /*frameCount=*/2);
+    ASSERT_TRUE(pool.drainFor(std::chrono::duration_cast<std::chrono::milliseconds>(kWaitCeiling)));
+    EXPECT_GE(pool.stats().prefetchedFrames, 1u);
+    EXPECT_EQ(pool.stats().seeks, 0u);
+
+    pool.retireAsset(fx.asset.assetId);
+    ASSERT_TRUE(
+        teardown.drainFor(std::chrono::duration_cast<std::chrono::milliseconds>(kWaitCeiling)));
 }
 
 } // namespace palmier::media

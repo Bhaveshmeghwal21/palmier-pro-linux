@@ -40,6 +40,12 @@ namespace {
     return (have - want).abs().ticks() <= tolerance;
 }
 
+/// Upper bound on frames decoded through to reach a requested position after a seek.
+/// A backward seek lands on the preceding keyframe, so the distance is one keyframe
+/// interval; 600 is far beyond any sane encoder's interval and exists only so a stream
+/// with broken timestamps cannot spin here forever.
+constexpr std::size_t kMaxFramesDecodedPerSeek = 600;
+
 [[nodiscard]] std::string describe(const Uuid& assetId, const std::filesystem::path& path) {
     std::string out = "asset ";
     out += assetId.toString();
@@ -165,6 +171,14 @@ Result<void> DecodeWorkerPool::activateAsset(const Uuid& assetId,
     auto entry     = std::make_unique<AssetEntry>();
     entry->decoder = std::make_unique<MediaDecoder>(std::move(opened).value());
     entry->path    = path;
+    // A newly opened decoder is positioned at the start of the stream, so the next frame
+    // it produces is the one at time zero. Recording that is what lets the first frame of
+    // a clip be decoded rather than sought, and lets a prefetch run before any other
+    // request has moved the cursor. If a stream in fact begins later, the exact-lookup
+    // loop in decodeClaimed decodes forward and reports the frame's own timestamp, so
+    // this is a hint about position, never an assertion about content.
+    entry->hasExpected = true;
+    entry->nextExpected = Duration::zero();
     if (const MediaStreamInfo* video = entry->decoder->info().primaryVideoStream();
         video != nullptr && video->frameRate.isValid()) {
         entry->frameDuration = video->frameRate.frameDuration();
@@ -240,29 +254,51 @@ Duration DecodeWorkerPool::sourceFrameDuration(const Uuid& assetId, Duration fal
 // ---------------------------------------------------------------------------
 
 Result<DecodedClipFrame> DecodeWorkerPool::decodeClaimed(AssetEntry& entry, Duration position,
-                                                        bool seekFirst) const {
+                                                         Duration step, bool seekFirst,
+                                                         std::uint64_t& skippedFrames) const {
     if (seekFirst) {
         auto sought = entry.decoder->seek(position);
         if (sought.isError()) return err<DecodedClipFrame>(std::move(sought).error());
     }
 
-    auto decoded = entry.decoder->nextFrame();
-    if (decoded.isError()) return err<DecodedClipFrame>(std::move(decoded).error());
+    // A seek is keyframe-granular: av_seek_frame(AVSEEK_FLAG_BACKWARD) leaves the
+    // demuxer at the keyframe at or before the target and the codec is flushed, so the
+    // first frame decoded afterwards is usually EARLIER than the one asked for. Decode
+    // through the intervening frames until the frame covering `position` arrives.
+    //
+    // Only the accepted frame is converted, so the frames decoded through cost a decode
+    // and no pixel copy.
+    const std::int64_t tolerance = step.isPositive() ? step.ticks() / 2 : 0;
 
-    DecodedFrame frame = std::move(decoded).value();
-    if (frame.isEndOfStream()) {
-        return err<DecodedClipFrame>(
-            outOfRange("the source has no frame at " + std::to_string(position.milliseconds()) +
-                       " ms (end of stream)"));
+    for (std::size_t decodes = 0;; ++decodes) {
+        auto decoded = entry.decoder->nextFrame();
+        if (decoded.isError()) return err<DecodedClipFrame>(std::move(decoded).error());
+
+        DecodedFrame frame = std::move(decoded).value();
+        if (frame.isEndOfStream()) {
+            return err<DecodedClipFrame>(outOfRange("the source has no frame at " +
+                                                    std::to_string(position.milliseconds()) +
+                                                    " ms (end of stream)"));
+        }
+
+        // Strictly before the requested frame: keep going. The bound is a safety net for
+        // a stream whose timestamps never reach the target, not an expected path.
+        if ((position - frame.timestamp()).ticks() > tolerance &&
+            decodes < kMaxFramesDecodedPerSeek) {
+            ++skippedFrames;
+            continue;
+        }
+
+        auto image = toSourceFrame(frame);
+        if (image.isError()) return err<DecodedClipFrame>(std::move(image).error());
+
+        DecodedClipFrame out;
+        // The frame's OWN timestamp, not the position requested. This is what makes
+        // satisfies() a check on the frame rather than a restatement of the request.
+        out.sourcePosition = frame.timestamp();
+        out.image = std::move(image).value();
+        return out;
     }
-
-    auto image = toSourceFrame(frame);
-    if (image.isError()) return err<DecodedClipFrame>(std::move(image).error());
-
-    DecodedClipFrame out;
-    out.sourcePosition = position;
-    out.image          = std::move(image).value();
-    return out;
 }
 
 Result<DecodedClipFrame> DecodeWorkerPool::decodeFor(const Uuid& assetId, const ClipId& clipId,
@@ -307,9 +343,12 @@ Result<DecodedClipFrame> DecodeWorkerPool::decodeFor(const Uuid& assetId, const 
     const std::filesystem::path path = entry->path;
 
     lock.unlock();
-    Result<DecodedClipFrame> decoded = decodeClaimed(*entry, sourcePosition, seekFirst);
+    std::uint64_t skipped = 0;
+    Result<DecodedClipFrame> decoded =
+        decodeClaimed(*entry, sourcePosition, frameStep, seekFirst, skipped);
     lock.lock();
 
+    stats_.seekSkippedFrames += skipped;
     if (seekFirst) {
         ++stats_.seeks;
     } else {
@@ -317,8 +356,10 @@ Result<DecodedClipFrame> DecodeWorkerPool::decodeFor(const Uuid& assetId, const 
     }
 
     if (decoded.isOk()) {
-        entry->hasExpected  = true;
-        entry->nextExpected = sourcePosition + frameStep;
+        entry->hasExpected = true;
+        // Advance from where the delivered frame actually is, so the cursor stays true
+        // even when a seek landed short of the request.
+        entry->nextExpected = decoded.value().sourcePosition + frameStep;
     } else {
         // The cursor is unknown after a failure, so the next request seeks.
         entry->hasExpected = false;
@@ -418,18 +459,34 @@ void DecodeWorkerPool::workerLoop() {
             continue;
         }
 
-        const bool seekFirst =
-            !entry->hasExpected || !satisfies(entry->nextExpected, job.position, job.step);
+        // Prefetch never seeks. A seek is keyframe-granular, so with the ~200-frame
+        // keyframe interval typical of camera footage it costs on the order of a hundred
+        // decodes to reach the frame asked for. Paying that for speculative work is
+        // wrong twice over: the frame may never be wanted, and repositioning the cursor
+        // makes the render thread's next sequential request look like random access, so
+        // the two sides drag one shared cursor back and forth and both pay the seek.
+        //
+        // A job that is not the continuation of this asset's cursor is therefore
+        // abandoned; the synchronous path reaches that frame in order without seeking.
+        if (!entry->hasExpected || !satisfies(entry->nextExpected, job.position, job.step)) {
+            ++stats_.prefetchDrops;
+            releaseAsset(*entry);
+            finishJob(lock);
+            continue;
+        }
 
         lock.unlock();
-        Result<DecodedClipFrame> decoded = decodeClaimed(*entry, job.position, seekFirst);
+        std::uint64_t skipped = 0;
+        Result<DecodedClipFrame> decoded =
+            decodeClaimed(*entry, job.position, job.step, /*seekFirst=*/false, skipped);
         lock.lock();
 
-        if (seekFirst) ++stats_.seeks;
+        stats_.seekSkippedFrames += skipped;
 
         if (decoded.isOk()) {
-            entry->hasExpected  = true;
-            entry->nextExpected = job.position + job.step;
+            entry->hasExpected = true;
+            // The frame's real position, so a queued frame is judged on where it is.
+            entry->nextExpected = decoded.value().sourcePosition + job.step;
             auto& queue         = clipQueues_[job.clipId];
             if (queue.size() < options_.clipQueueCapacity) {
                 queue.push_back(std::move(decoded).value());

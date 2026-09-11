@@ -108,6 +108,8 @@ struct DecodeWorkerPoolStats {
     std::uint64_t queueHits{0};         ///< Requests satisfied from a prefetched queue.
     std::uint64_t sequentialDecodes{0}; ///< Synchronous decodes that needed no seek.
     std::uint64_t seeks{0};             ///< Decodes (synchronous or prefetch) preceded by a seek.
+    std::uint64_t seekSkippedFrames{
+        0};  ///< Frames decoded through and discarded to reach a requested position.
     std::uint64_t prefetchedFrames{0};  ///< Frames a worker pushed onto a clip queue.
     std::uint64_t prefetchDrops{0};     ///< Prefetch jobs abandoned (queue full, asset gone, decode failed).
     std::uint64_t decodeFailures{0};    ///< Decode attempts that reported an error.
@@ -217,8 +219,12 @@ private:
 
     /// Decode one frame from a *claimed* entry. Runs with the pool mutex
     /// released, which is the whole point of the claim.
+    /// Decode the frame covering `position`, decoding forward through any frames a
+    /// backward seek landed before. `skippedFrames` receives that count; the caller adds
+    /// it to the stats under the pool mutex, because this runs with the mutex released.
     [[nodiscard]] Result<DecodedClipFrame> decodeClaimed(AssetEntry& entry, Duration position,
-                                                         bool seekFirst) const;
+                                                         Duration step, bool seekFirst,
+                                                         std::uint64_t& skippedFrames) const;
 
     void workerLoop();
     void finishJob(std::unique_lock<std::mutex>& lock);

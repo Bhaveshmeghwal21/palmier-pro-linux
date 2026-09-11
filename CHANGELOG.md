@@ -11,6 +11,39 @@ task's completion commit, its CI run and the suite size at that point.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Exported video repeated frames, because a seek delivered the wrong one.** Playback and
+  export located a source frame by seeking and taking the next frame decoded. An FFmpeg
+  backward seek reaches the keyframe at or before the target and the codec is flushed, so
+  that frame is generally *earlier* than the one asked for - by up to a whole keyframe
+  interval, which is around 200 frames in ordinary camera footage. The frame was then
+  tagged with the position that had been *requested* rather than with its own timestamp, so
+  the check asking "does this frame answer that request" compared one request against
+  another and could never notice.
+
+  Anything that moved a shared cursor therefore produced repeats: the prefetch workers
+  raced the render thread over the one decoder an asset has, and a second clip reading the
+  same file (a picture-in-picture over its own source) alternated with the first. Measured
+  on one unchanged 22.4-second project: **31, 45 and 52 repeated frames out of 672 across
+  separate runs**, so the same project did not even export the same way twice.
+
+  Frame lookup now decodes forward from the keyframe to the frame that covers the requested
+  position and reports that frame's own timestamp, which is what turns the check into a
+  check. Prefetch declines any job that would need a seek instead of dragging the cursor
+  away from the render thread, and a freshly opened decoder records that it sits at the
+  start of its stream so a clip's first frame is decoded rather than sought.
+
+  Now **zero repeated frames**, and two runs of the same project produce byte-identical
+  frame content. Export is also **10% faster** on a timeline where no two clips share a
+  file, because the seeking it no longer does cost more than the forward decoding it now
+  does; where two clips do read one file over the same span it is 23% slower and correct.
+  Found by measuring a real export frame by frame, not by a test - the suite's own decode
+  double repositioned to the *nearest* frame, making it more accurate than the decoder it
+  stood in for, so the property test on frame fidelity could not fail. The double now
+  models a keyframe-granular seek, which makes six existing assertions fail against the old
+  code, and three new tests name each behaviour the fix rests on.
+
 ### Added
 
 - **`export.tool_budget_seconds`, because a real edit could not be exported at all.** The
