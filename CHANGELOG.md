@@ -13,6 +13,41 @@ task's completion commit, its CI run and the suite size at that point.
 
 ### Fixed
 
+- **Every transition rendered as a hard cut.** `timeline.add_transition` stored a transition,
+  project save/load round-tripped it, the timeline panel drew it and a tested cross-dissolve
+  kernel sat in the GPU layer — but `transitionIn` appeared in no line of the compositor, the
+  export engine or the preview controller, so nothing ever blended. All five kinds were visual
+  no-ops. Measured before the fix: across a 1.0s crossfade between an inverted clip and a
+  normal one, mean luma went 159.9 to 95.6 in a single frame with no intermediate value; a
+  `fade` on a lone clip, which needs no neighbour at all, held a flat ~90 from its first frame
+  instead of rising from black. After: the crossfade reads 161.7, 146.5, 131.4, 112.2 across
+  the region, and the fade 3.0, 22.6, 43.5, 67.5, 89.3.
+
+  Two causes. The clip lookup returned only the *first* clip covering a position, so the
+  outgoing half of a transition was never even fetched; and no per-layer blend weight existed
+  for the blend stage to apply. Both now live in `gpu/LayerPlacement.hpp` as pure functions
+  over a position and a `Transition`, so the arithmetic is pinned by unit tests rather than
+  inferred from a rendered frame.
+
+- **A source was never scaled to the canvas, so an oversized clip showed only its top-left
+  corner.** The blend stage aligned a source to the canvas's top-left and clipped it. A
+  3840x2160 clip on a 1920x1080 canvas therefore showed a quarter of its image, and
+  `crop_transform`'s coordinates moved with the source's resolution. `blendOver` carried a
+  comment saying scaling was "an effect-kernel concern" while `applyCropTransform`'s said the
+  blend stage did it, so neither did. Sources are now fitted to the canvas preserving aspect
+  ratio and centred, box-averaged when minifying and bilinear when magnifying. Measured: the
+  render of a 4K source now matches ffmpeg's own area downscale to within 0.54 mean absolute
+  difference (previously it matched the top-left crop exactly, and differed from a correct
+  downscale by 59.9). A source that already matches the canvas is bit-identical to before.
+
+- **An audio-only asset contributed silence.** Requirement 2.2 requires import to register an
+  asset with no decodable video stream, and it did — but the decode backend factory demanded
+  a video stream and refused the file, so the mix could never open it, even though the
+  backend's audio path is entirely separate and works. A music bed imported, sat on an audio
+  track and exported as digital silence. Measured: a bed at -28.2 dB exported at -91.0 dB
+  before, and -29.8 dB after. Asking such an asset for a video frame now reports that it
+  carries audio only, rather than "decoder was not initialized".
+
 - **Exported video repeated frames, because a seek delivered the wrong one.** Playback and
   export located a source frame by seeking and taking the next frame decoded. An FFmpeg
   backward seek reaches the keyframe at or before the target and the codec is flushed, so

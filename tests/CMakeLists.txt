@@ -161,6 +161,7 @@ add_executable(palmier_gpu_tests
     gpu_codec_bridge_test.cpp
     frame_pool_test.cpp
     gpu_compositor_test.cpp
+    gpu_layer_placement_test.cpp
     gpu_effect_kernels_test.cpp
     gpu_video_scopes_test.cpp
     gpu_cube_lut_test.cpp
@@ -233,7 +234,8 @@ palmier_register_test(palmier_services_byok_tests)
 # brings in Palmier::gpu and Palmier::core).
 # ---------------------------------------------------------------------------
 add_executable(palmier_media_tests
-    media_decoder_test.cpp)
+    media_decoder_test.cpp
+    media_audio_only_asset_test.cpp)
 target_link_libraries(palmier_media_tests PRIVATE
     Palmier::media
     Palmier::test_support)

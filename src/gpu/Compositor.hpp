@@ -65,6 +65,7 @@
 #include "core/Result.hpp"
 #include "core/TextStyle.hpp"
 #include "gpu/FramePool.hpp"
+#include "gpu/LayerPlacement.hpp"
 
 namespace palmier::gpu {
 
@@ -274,9 +275,14 @@ void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba,
 /// of identical geometry, at `progress` in [0,1]: out = round(a*(1-p) + b*p) per
 /// channel including alpha. This is the P5 reference for the transition SPIR-V
 /// kernel (EffectKernel::Transition). Transitions blend two inputs and so are
-/// not part of applyEffectSoftware (which transforms a single image); the
-/// Compositor invokes them where a clip carries a transition. `out` may alias
-/// `a` or `b`. All three buffers hold width*height*4 bytes.
+/// not part of applyEffectSoftware (which transforms a single image). This is the reference
+/// kernel the GPU parity property test measures against.
+///
+/// The compositor does not call this directly: it reaches the identical result by blending the
+/// incoming layer over the already-accumulated canvas at coverage `progress`, which expands to
+/// a*(1-progress) + b*progress for opaque layers — the same arithmetic, without materializing
+/// a second full-canvas buffer. See gpu/LayerPlacement.hpp. `out` may alias `a` or `b`. All
+/// three buffers hold width*height*4 bytes.
 void applyTransitionSoftware(const std::uint8_t* a, const std::uint8_t* b,
                              std::uint8_t* out, std::uint32_t width,
                              std::uint32_t height, double progress) noexcept;
@@ -290,10 +296,11 @@ class Compositor {
 public:
     /// One visible clip layer gathered at a position: the clip and its z-order
     /// (its track index in Project.tracks; lower z is drawn first / underneath).
-    struct VisibleLayer {
-        const Clip* clip{nullptr};
-        std::size_t z{0};
-    };
+    ///
+    /// Shared with gpu/LayerPlacement.hpp, which computes the per-frame blend weights for a
+    /// sequence of these — the transition arithmetic needs the same {clip, z} pairing to find
+    /// the outgoing clip a transition blends against.
+    using VisibleLayer = PlacedLayer;
 
     /// Construct against a GpuContext; the compositor draws output frames from
     /// the context's FramePool (bounded by the device's VRAM, or a host budget

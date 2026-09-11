@@ -101,7 +101,14 @@ public:
     [[nodiscard]] const MediaInfo& info() const override { return info_; }
 
     [[nodiscard]] Result<BackendFrame> decode(bool /*useHardware*/) override {
-        if (codec_ == nullptr || frame_ == nullptr || packet_ == nullptr) {
+        if (codec_ == nullptr) {
+            // An audio-only asset opens successfully and serves audio; asking it for a video
+            // frame means it was placed on a video track.
+            return err<BackendFrame>(makeError(
+                ErrorCode::Unsupported,
+                "no video stream in: " + path_.string() + " (this asset carries audio only)"));
+        }
+        if (frame_ == nullptr || packet_ == nullptr) {
             return err<BackendFrame>(makeError(ErrorCode::Internal,
                                                "decoder was not initialized"));
         }
@@ -487,9 +494,24 @@ private:
     const AVCodec* decoder = nullptr;
     const int streamIndex = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
     if (streamIndex < 0 || decoder == nullptr) {
+        // An audio-only file is a legitimate asset — a music bed, a voice-over, a sound effect
+        // — and this backend's audio path (openAudio/decodeAudio/seekAudio) is entirely
+        // separate from its video path, holding its own format and codec context. Refusing the
+        // file here meant an audio-only asset imported, sat on an audio track, and then
+        // contributed silence, because the mix could never construct a backend for it:
+        // measured, a bed at -28.2 dB exported at -91.0 dB, and at -32.4 dB once the same
+        // audio was muxed onto a file that also carried a video stream.
+        //
+        // Constructed with no video codec, decode() and seek() already return
+        // "no video stream" rather than dereferencing a null context.
+        if (av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0) >= 0) {
+            return std::unique_ptr<IDecodeBackend>(
+                std::make_unique<FfmpegDecodeBackend>(std::move(info), fmt, nullptr, -1, path));
+        }
         avformat_close_input(&fmt);
         return err<std::unique_ptr<IDecodeBackend>>(
-            makeError(ErrorCode::Unsupported, "no decodable video stream found in: " + path.string()));
+            makeError(ErrorCode::Unsupported,
+                      "no decodable video or audio stream found in: " + path.string()));
     }
 
     AVCodecContext* codec = avcodec_alloc_context3(decoder);

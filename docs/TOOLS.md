@@ -536,6 +536,35 @@ Set a clip's incoming transition (crossfade, wipe, slide, fade, ...).
 
 Result: `transitionId` (string), *(command result)*.
 
+The transition region is `[clip.timelineStart, clip.timelineStart + durationNs)` — at the
+**incoming** clip's leading edge — and it is the one place two clips on a track may overlap.
+
+**Arranging an overlap takes three calls, in this order.** `timeline.add_clip` refuses an
+overlapping placement with *"clips overlap outside an explicit transition region"*, and a
+transition can only be attached to a clip that already exists, so add the clip contiguously
+first, attach the transition, then move it back over its neighbour:
+
+```jsonc
+{"tool": "timeline.add_clip",       "args": {"timelineStartNs": 2000000000, "...": "..."}}
+{"tool": "timeline.add_transition", "args": {"clipId": "<id>", "kind": "crossfade",
+                                             "durationNs": 1000000000}}
+{"tool": "timeline.move_clip",      "args": {"clipId": "<id>", "timelineStartNs": 1000000000}}
+```
+
+What each kind does over the region, where *p* runs 0 to 1 across it:
+
+| Kind | Behaviour |
+|---|---|
+| `crossfade` | The incoming clip's coverage ramps 0 to 1, dissolving over whatever is beneath. |
+| `fade` | Identical arithmetic; with no overlapping neighbour this is a fade up from the render target's clear colour. |
+| `dip_to_color` | The outgoing clip fades out over the first half and the incoming rises over the second, so the frame passes through the clear colour at the midpoint. |
+| `wipe` | A hard vertical edge travels left to right, revealing the incoming clip. |
+| `slide` | The incoming clip travels in from the right edge at full coverage. |
+
+An overlap is not required: a transition on a clip with no neighbour blends against the clear
+colour, which is what makes `fade` useful at the head of a track. `dip_to_color` dips to the
+render target's clear colour because `Transition` carries no colour field of its own yet.
+
 ## `timeline.add_text_clip`
 
 Add a text clip — a title or lower third — onto a text track at a timeline position

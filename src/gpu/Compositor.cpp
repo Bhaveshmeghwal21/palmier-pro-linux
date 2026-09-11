@@ -48,35 +48,125 @@ namespace {
     return nullptr;
 }
 
-/// Alpha-composite `src` "over" the RGBA8 `target` (tw x th), scaling the
-/// source's coverage by `opacity`. Straight (non-premultiplied) alpha; the
-/// source is aligned to the target's top-left and clipped to the overlap
-/// (scaling/transform is an effect-kernel concern, task 7.4). This is the step
-/// that preserves the render-pass loop invariant: it blends one more layer onto
-/// the accumulated lower-z result without disturbing pixels the layer does not
-/// cover.
-void blendOver(std::uint8_t* target, std::uint32_t tw, std::uint32_t th,
-               const SourceFrame& src, double opacity) noexcept {
-    const double op = std::clamp(opacity, 0.0, 1.0);
-    const std::uint32_t w = std::min(tw, src.width);
-    const std::uint32_t h = std::min(th, src.height);
+/// Bilinear sample at source coordinate (u, v), clamped at the edges. Used when magnifying,
+/// where a destination pixel covers less than one source pixel.
+void sampleBilinear(const SourceFrame& src, double u, double v, double out[4]) noexcept {
+    const auto maxX = static_cast<std::int64_t>(src.width) - 1;
+    const auto maxY = static_cast<std::int64_t>(src.height) - 1;
+    const std::int64_t x0 =
+        std::clamp(static_cast<std::int64_t>(std::floor(u)), std::int64_t{0}, maxX);
+    const std::int64_t y0 =
+        std::clamp(static_cast<std::int64_t>(std::floor(v)), std::int64_t{0}, maxY);
+    const std::int64_t x1 = std::min(x0 + 1, maxX);
+    const std::int64_t y1 = std::min(y0 + 1, maxY);
+    const double fx = std::clamp(u - static_cast<double>(x0), 0.0, 1.0);
+    const double fy = std::clamp(v - static_cast<double>(y0), 0.0, 1.0);
 
-    for (std::uint32_t y = 0; y < h; ++y) {
-        for (std::uint32_t x = 0; x < w; ++x) {
-            const std::size_t s = (static_cast<std::size_t>(y) * src.width + x) * 4u;
-            const std::size_t d = (static_cast<std::size_t>(y) * tw + x) * 4u;
+    const std::size_t i00 =
+        (static_cast<std::size_t>(y0) * src.width + static_cast<std::size_t>(x0)) * 4u;
+    const std::size_t i10 =
+        (static_cast<std::size_t>(y0) * src.width + static_cast<std::size_t>(x1)) * 4u;
+    const std::size_t i01 =
+        (static_cast<std::size_t>(y1) * src.width + static_cast<std::size_t>(x0)) * 4u;
+    const std::size_t i11 =
+        (static_cast<std::size_t>(y1) * src.width + static_cast<std::size_t>(x1)) * 4u;
 
-            const double sa = (static_cast<double>(src.rgba[s + 3]) / 255.0) * op; // effective src alpha
+    for (int c = 0; c < 4; ++c) {
+        const double top = static_cast<double>(src.rgba[i00 + c]) * (1.0 - fx) +
+                           static_cast<double>(src.rgba[i10 + c]) * fx;
+        const double bot = static_cast<double>(src.rgba[i01 + c]) * (1.0 - fx) +
+                           static_cast<double>(src.rgba[i11 + c]) * fx;
+        out[c] = top * (1.0 - fy) + bot * fy;
+    }
+}
+
+/// Average every source pixel covered by one destination pixel, whose footprint in source
+/// coordinates is [u0, u1) x [v0, v1). Used when minifying: point-sampling a 4K source down to
+/// 1080p would alias badly and discard three quarters of the image.
+void sampleBox(const SourceFrame& src, double u0, double u1, double v0, double v1,
+               double out[4]) noexcept {
+    const auto width = static_cast<std::int64_t>(src.width);
+    const auto height = static_cast<std::int64_t>(src.height);
+    const std::int64_t x0 =
+        std::clamp(static_cast<std::int64_t>(std::floor(u0)), std::int64_t{0}, width - 1);
+    const std::int64_t y0 =
+        std::clamp(static_cast<std::int64_t>(std::floor(v0)), std::int64_t{0}, height - 1);
+    // Ceil the exclusive edge so a footprint of 2.0 pixels covers two, not one, and clamp to
+    // at least one pixel past the start so the loops always execute.
+    const std::int64_t x1 = std::clamp(static_cast<std::int64_t>(std::ceil(u1)), x0 + 1, width);
+    const std::int64_t y1 = std::clamp(static_cast<std::int64_t>(std::ceil(v1)), y0 + 1, height);
+
+    double acc[4] = {0.0, 0.0, 0.0, 0.0};
+    std::size_t n = 0;
+    for (std::int64_t y = y0; y < y1; ++y) {
+        for (std::int64_t x = x0; x < x1; ++x) {
+            const std::size_t i =
+                (static_cast<std::size_t>(y) * src.width + static_cast<std::size_t>(x)) * 4u;
+            for (int c = 0; c < 4; ++c) acc[c] += static_cast<double>(src.rgba[i + c]);
+            ++n;
+        }
+    }
+    const double inv = n == 0 ? 0.0 : 1.0 / static_cast<double>(n);
+    for (int c = 0; c < 4; ++c) out[c] = acc[c] * inv;
+}
+
+/// Alpha-composite `src` "over" the RGBA8 `target` (tw x th) according to `placement`.
+///
+/// The source is fitted to the canvas preserving its aspect ratio and centred, so a source of
+/// any resolution contributes its whole image rather than the top-left crop the previous
+/// straight 1:1 blit produced. Straight (non-premultiplied) alpha. This is the step that
+/// preserves the render-pass loop invariant: it blends one more layer onto the accumulated
+/// lower-z result without disturbing pixels the layer does not cover.
+///
+/// When the source already matches the canvas the fit is the identity and the bilinear sample
+/// lands exactly on integer coordinates, so the result is bit-identical to a 1:1 blit.
+void blendOver(std::uint8_t* target, std::uint32_t tw, std::uint32_t th, const SourceFrame& src,
+               const LayerPlacement& placement) noexcept {
+    const double op = std::clamp(placement.opacity, 0.0, 1.0);
+    const double reveal = std::clamp(placement.reveal, 0.0, 1.0);
+    if (op <= 0.0 || reveal <= 0.0) return;  // contributes nothing to this frame
+    if (src.width == 0 || src.height == 0 || tw == 0 || th == 0) return;
+
+    FittedRect rect = fitToCanvas(src.width, src.height, tw, th);
+    if (rect.isEmpty()) return;
+    rect.x += std::llround(placement.slideX * static_cast<double>(tw));
+
+    // Wipe: canvas columns at or beyond this edge are not yet revealed.
+    const std::int64_t revealEdge = std::llround(reveal * static_cast<double>(tw));
+
+    const double su = static_cast<double>(src.width) / static_cast<double>(rect.width);
+    const double sv = static_cast<double>(src.height) / static_cast<double>(rect.height);
+    const bool minify = su > 1.0 || sv > 1.0;
+
+    for (std::uint32_t ry = 0; ry < rect.height; ++ry) {
+        const std::int64_t dy = rect.y + static_cast<std::int64_t>(ry);
+        if (dy < 0 || dy >= static_cast<std::int64_t>(th)) continue;
+
+        for (std::uint32_t rx = 0; rx < rect.width; ++rx) {
+            const std::int64_t dx = rect.x + static_cast<std::int64_t>(rx);
+            if (dx < 0 || dx >= static_cast<std::int64_t>(tw)) continue;
+            if (dx >= revealEdge) continue;
+
+            double c[4];
+            if (minify) {
+                sampleBox(src, static_cast<double>(rx) * su, static_cast<double>(rx + 1) * su,
+                          static_cast<double>(ry) * sv, static_cast<double>(ry + 1) * sv, c);
+            } else {
+                sampleBilinear(src, (static_cast<double>(rx) + 0.5) * su - 0.5,
+                               (static_cast<double>(ry) + 0.5) * sv - 0.5, c);
+            }
+
+            const std::size_t d =
+                (static_cast<std::size_t>(dy) * tw + static_cast<std::size_t>(dx)) * 4u;
+
+            const double sa = (c[3] / 255.0) * op;  // effective src alpha
             const double da = static_cast<double>(target[d + 3]) / 255.0;
             const double inv = 1.0 - sa;
 
-            for (int c = 0; c < 3; ++c) {
-                const double sc = static_cast<double>(src.rgba[s + c]);
-                const double dc = static_cast<double>(target[d + c]);
-                target[d + c] = toByte(sc * sa + dc * inv);
+            for (int ch = 0; ch < 3; ++ch) {
+                target[d + ch] = toByte(c[ch] * sa + static_cast<double>(target[d + ch]) * inv);
             }
-            const double outA = sa + da * inv;
-            target[d + 3] = toByte(outA * 255.0);
+            target[d + 3] = toByte((sa + da * inv) * 255.0);
         }
     }
 }
@@ -450,11 +540,20 @@ std::vector<Compositor::VisibleLayer> Compositor::gatherVisibleClips(const Proje
     std::vector<VisibleLayer> visible;
     // z = the track's index in Project.tracks (design: "sort ascending by z,
     // bottom track drawn first"). Only non-muted VIDEO tracks contribute.
+    //
+    // Every clip covering the position contributes, not just the first: inside a transition
+    // region two clips on one track legitimately overlap (core/Transition.hpp — "the one place
+    // adjacent clips on a track are permitted to overlap"), and the blend needs both the
+    // outgoing and the incoming clip. Track.hpp keeps a track's clips sorted by timelineStart,
+    // so the outgoing clip is appended first and the stable sort below preserves that, which is
+    // what lets layerPlacements identify the outgoing clip as the one drawn immediately before.
     for (std::size_t i = 0; i < project.tracks.size(); ++i) {
         const Track& track = project.tracks[i];
         if (track.kind != TrackKind::Video || track.muted) continue;
-        if (const Clip* clip = clipAt(track, position)) {
-            visible.push_back(VisibleLayer{clip, i});
+        for (const Clip& clip : track.clips) {
+            if (position >= clip.timelineStart && position < clip.timelineEnd()) {
+                visible.push_back(VisibleLayer{&clip, i});
+            }
         }
     }
     // Sort ascending by z. Iteration above already yields ascending z, but the
@@ -569,8 +668,15 @@ Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration posi
     // the loop invariant — the target holds the blend of zero clips.
     fillColor(out, pixels, target.clearColor);
 
+    // Per-layer blend weights for this frame. Outside a transition region every placement is
+    // the identity carrying only the clip's own opacity, so this is what makes a transition
+    // visible at all: before it, transitionIn was stored, persisted and drawn in the timeline
+    // panel but read by nothing in the render path.
+    const std::vector<LayerPlacement> placements = layerPlacements(layers, position);
+
     // Painter's order: composite each visible clip onto the accumulated result.
-    for (const VisibleLayer& layer : layers) {
+    for (std::size_t li = 0; li < layers.size(); ++li) {
+        const VisibleLayer& layer = layers[li];
         SourceFrame frame;
         if (layer.clip->isTextClip() || layer.clip->isCaptionCue()) {
             // A text clip's or caption cue's "source frame" is a full-canvas
@@ -613,9 +719,10 @@ Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration posi
             effectFn_(effect, frame.rgba.data(), frame.width, frame.height);
         }
 
-        // Alpha-composite onto the target scaled by opacity; preserves the
-        // loop invariant for the next layer.
-        blendOver(out, target.width, target.height, frame, layer.clip->opacity);
+        // Alpha-composite onto the target according to this layer's placement (its opacity,
+        // and any transition weight, wipe edge or slide offset); preserves the loop invariant
+        // for the next layer.
+        blendOver(out, target.width, target.height, frame, placements[li]);
     }
 
     return RenderedFrame{std::move(lease), position, layers.size()};

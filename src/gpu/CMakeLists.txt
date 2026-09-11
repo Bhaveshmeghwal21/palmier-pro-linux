@@ -20,6 +20,7 @@ add_library(palmier_gpu STATIC
     CodecBridge.cpp
     FramePool.cpp
     Compositor.cpp
+    LayerPlacement.cpp
     EffectKernels.cpp
     VideoScopes.cpp
     CubeLut.cpp
