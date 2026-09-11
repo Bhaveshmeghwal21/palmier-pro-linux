@@ -432,7 +432,20 @@ TEST(ToolRegistrySchema, UndeclaredArgumentsAreRejectedByEveryTool) {
                     unknown.set(spec.name, std::max<double>(spec.minNum.value_or(1.0), 1.0));
                     break;
                 case JsonKind::Bool:    unknown.set(spec.name, true); break;
-                case JsonKind::Array:   unknown.set(spec.name, Json::array()); break;
+                case JsonKind::Array: {
+                    // As for a string's minimum length, a declared minimum item count is part of
+                    // "its own required arguments": timeline.apply_layout's clipIds declares
+                    // minItems 1, so an empty array is not a valid filling of it. The items are
+                    // UUID strings because every array argument on this surface holds either UUID
+                    // strings or plain strings, and a UUID string satisfies both -- though the
+                    // schema constrains only the count, never the item shape.
+                    Json items = Json::array();
+                    for (std::size_t i = 0; i < spec.minLength.value_or(0); ++i) {
+                        items.push_back(Json(Uuid::generateV4().toString()));
+                    }
+                    unknown.set(spec.name, std::move(items));
+                    break;
+                }
                 case JsonKind::Object:  unknown.set(spec.name, Json::object()); break;
             }
         }

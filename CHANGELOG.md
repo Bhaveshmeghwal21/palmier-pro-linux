@@ -11,6 +11,16 @@ task's completion commit, its CI run and the suite size at that point.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The upstream parity report rested on an inference it did not need to make.** Its provenance
+  recorded the upstream repository as unreachable and took the upstream side of every row from a
+  spec document instead. Upstream is public, and its GPLv3 source is preserved at the
+  `last-gpl-source` tag, so the comparison is now made against the real tool surface -- the
+  `ToolName` enum in `Sources/PalmierPro/Agent/Tools/ToolDefinitions.swift`, which declares 52
+  tools against this port's 44. The `layout` entry, which said no multi-clip layout or
+  picture-in-picture operation existed, is now `present`.
+
 ### Added
 
 - **`timeline.apply_layout`**, arranging several clips at once as `side_by_side`,

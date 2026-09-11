@@ -47,9 +47,10 @@
 //   1. Cross-field relations. `timeline.add_clip`'s `sourceOutNs > sourceInNs`
 //      and `generation.generate`'s `sourceOutTicks > sourceInTicks` relate two
 //      arguments; `ArgSpec` constrains one argument at a time.
-//   2. Array item shape. `timeline.reorder_clips.order` can be declared an array
-//      (with an item count) but not "an array of canonical UUID strings", so the
-//      handler still checks the items.
+//   2. Array item shape. `timeline.reorder_clips.order`, `timeline.reorder_effects.order`
+//      and `timeline.apply_layout.clipIds` can each be declared an array (with an item
+//      count, which apply_layout uses to require at least one) but not "an array of
+//      canonical UUID strings", so the handler still checks the items.
 //   3. Object member value types. `timeline.add_effect.parameters` and
 //      `generation.generate.params` are open maps; the vocabulary cannot
 //      constrain an object's member VALUES.
@@ -123,6 +124,7 @@ namespace {
 constexpr const char* kAddClip  = "timeline.add_clip";
 constexpr const char* kReorder  = "timeline.reorder_clips";
 constexpr const char* kReorderEffects = "timeline.reorder_effects";
+constexpr const char* kApplyLayout = "timeline.apply_layout";
 constexpr const char* kEditCurvePoint = "timeline.edit_curve_point";
 constexpr const char* kGenerate = "generation.generate";
 constexpr const char* kSetProjectSettings = "project.set_settings";
@@ -641,7 +643,7 @@ enum class SharedRule { None, MissingRequired, WrongTypedRequired, OutOfEnumRequ
     }
 
     // Class 2 — an array's item shape (only its item count is expressible).
-    if (tool.name == kReorder || tool.name == kReorderEffects) {
+    if (tool.name == kReorder || tool.name == kReorderEffects || tool.name == kApplyLayout) {
         const Json* order = args.find("order");
         if (order != nullptr && !allItemsAreUuidStrings(*order)) {
             return "class 2: array item shape — 'order' can only be declared an array, "
@@ -649,6 +651,11 @@ enum class SharedRule { None, MissingRequired, WrongTypedRequired, OutOfEnumRequ
         }
     }
     if (tool.name == kMediaSetTags) {
+        const Json* clipIds = args.find("clipIds");
+        if (clipIds != nullptr && !allItemsAreUuidStrings(*clipIds)) {
+            return "class 2: array item shape - 'clipIds' can only be declared an array with a "
+                   "minimum item count, not an array of canonical UUID strings";
+        }
         const Json* tags = args.find("tags");
         if (tags != nullptr && !allItemsAreStrings(*tags)) {
             return "class 2: array item shape — 'tags' can only be declared an array, "

@@ -143,17 +143,23 @@ void blendOver(std::uint8_t* target, std::uint32_t tw, std::uint32_t th, const S
     for (std::int64_t dy = map.top; dy < map.bottom; ++dy) {
         const double yc = static_cast<double>(dy) + 0.5;
 
-        for (std::int64_t dx = map.left; dx < map.right; ++dx) {
-            if (dx >= revealEdge) continue;
-            const double xc = static_cast<double>(dx) + 0.5;
+        // The map is affine, so along a row u advances by map.ux and v by map.vx per pixel.
+        // Stepping them replaces four multiplies per pixel with two adds, which matters because
+        // this is the innermost loop of every frame of every export. Recomputed from scratch each
+        // row so the accumulated error cannot grow past one row's width.
+        //
+        // Edge coordinates, where pixel i spans [i, i+1) and its centre is i+0.5 -- the space
+        // sampleBox's bounds are expressed in. sampleBilinear and the coverage test want index
+        // coordinates, where integer i IS pixel i's centre, which is half a pixel lower.
+        // Conflating the two widens a footprint by a pixel and bleeds neighbouring content into
+        // every minified sample.
+        const double firstX = static_cast<double>(map.left) + 0.5;
+        double uEdge = map.ux * firstX + map.uy * yc + map.uc;
+        double vEdge = map.vx * firstX + map.vy * yc + map.vc;
 
-            // The inverse map works in edge coordinates, where pixel i spans [i, i+1) and its
-            // centre is i+0.5 — the space sampleBox's bounds are expressed in. sampleBilinear
-            // and the coverage test want index coordinates, where integer i IS pixel i's centre,
-            // which is half a pixel lower. Conflating the two widens a footprint by a pixel and
-            // bleeds neighbouring content into every minified sample.
-            const double uEdge = map.ux * xc + map.uy * yc + map.uc;
-            const double vEdge = map.vx * xc + map.vy * yc + map.vc;
+        for (std::int64_t dx = map.left; dx < map.right; ++dx, uEdge += map.ux, vEdge += map.vx) {
+            if (dx >= revealEdge) continue;
+
             const double u = uEdge - 0.5;
             const double v = vEdge - 0.5;
 

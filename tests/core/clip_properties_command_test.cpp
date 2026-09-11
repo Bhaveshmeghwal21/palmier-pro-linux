@@ -168,7 +168,6 @@ TEST(SetClipProperties, TheCommandReportsWhatItWasAskedToInstall) {
     EXPECT_TRUE(command.properties().any());
 }
 
-
 // --- fadeCoverage -----------------------------------------------------------
 //
 // The fade ramp lives in the core rather than in the compositor because the audio mix needs the

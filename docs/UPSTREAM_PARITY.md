@@ -10,14 +10,22 @@ find is a defect in this document, not in the parser.
 ## Provenance (Requirement 13.4)
 
 - upstream-repository: https://github.com/palmier-io/palmier-pro
-- upstream-ref: unknown — the upstream repository is not reachable from the environment this
-  comparison was made in, and no upstream snapshot, submodule or vendored tree exists in this
-  repository, so no upstream commit identifier or release tag could be observed. The upstream
-  side of every row below is therefore taken from the upstream description recorded in
-  `.kiro/specs/end-to-end-editor-integration/requirements.md` ("Upstream reference"), which is
-  also the source of the 22 tool-category names and the 12 capability-area names.
-- linux-ref: 25ef5840ef3f4547141b964431f143ba437e93eb (branch `main`)
-- comparison-date: 2026-09-02
+- upstream-ref: 8805801 (tag `last-gpl-source`), the last commit whose source is published
+    under GPLv3.
+    Releases after `last-gpl-source` are proprietary, so this tag is the newest upstream
+    source that can be read and compared against.
+
+  An earlier revision of this document recorded the upstream repository as unreachable and
+  took the upstream side of every row from the upstream description in
+  `.kiro/specs/end-to-end-editor-integration/requirements.md` instead. That was wrong:
+  palmier-io/palmier-pro is public, and the comparison has since been made against its
+  actual source. The authoritative upstream tool surface is the `ToolName` enum in
+  `Sources/PalmierPro/Agent/Tools/ToolDefinitions.swift`, which declares **52 tools**
+  against this port's 44. The 22 tool-category and 12 capability-area names below still
+  come from the requirements document, because those are the categories Requirements 13.1
+  and 13.2 name rather than an upstream artefact.
+- linux-ref: 30ed4a4de11ae41043514e151b03ba553de4b168 (branch `main`)
+- comparison-date: 2026-09-11
 
 ## Status definitions (Requirement 13.7)
 
@@ -73,7 +81,7 @@ every `N. ` line as a build-order item.
 | denoise | absent | none | later | No denoise effect type and no denoise kernel exist in core::Effect or gpu::EffectKernels, so noise reduction is unavailable on every surface. | - | - |
 | multicam | partial | core::ClipGroup, core::EditCommands::RippleTrimCommand, services::ToolRegistry timeline.ripple_trim | should | A ripple-trim on a grouped clip propagates the same source-time delta to every clipGroups member (PR 397); no angle-switching tool exists, so angles trim in sync but cannot be cut between. | - | - |
 | organize | partial | core::MediaAssetRef::tags, services::ToolRegistry media.set_tags, ui::MediaBrowserViewModel | later | MediaAssetRef::tags lets an asset carry free-form labels, round-tripping through save/open, and media.set_tags publishes this; no bin, folder, rating or colour-label structure exists. | - | - |
-| layout | partial | core::EffectType::CropTransform, gpu::EffectKernels | later | Only crop_transform changes clip geometry; no multi-clip layout or picture-in-picture operation exists, so composing more than one clip on screen is not possible. | - | - |
+| layout | present | core::Transform, core::layoutTransforms, core::EditCommands::SetClipTransformsCommand, gpu::LayerPlacement, core::EffectType::CropTransform, services::ToolRegistry timeline.apply_layout/timeline.set_clip_properties | - | - | - | - |
 | media | partial | services::MediaImportService, core::MediaManager, services::ToolRegistry media.import/media.list, ui::MediaBrowserPanel | should | Import and list are reachable and the media browser panel is mounted, showing the library and a selected clip's retained versions and key moments; no tool removes, relinks or re-probes an asset. | - | - |
 | import | present | services::MediaImportService, media::MediaProbe, media::ImportValidation, services::ToolRegistry media.import | - | - | - | - |
 | export | present | services::ExportCoordinator, media::ExportEngine, media::MediaEncoder, media::EncoderSelector, services::ToolRegistry timeline.export | - | - | - | - |
@@ -105,12 +113,13 @@ every `N. ` line as a build-order item.
 
 ## Build order (Requirement 13.9)
 
-Exactly the `absent` and `partial` entries of both tables — 22 of the 34 — sorted `must` before
+Exactly the `absent` and `partial` entries of both tables — 21 of the 34 — sorted `must` before
 `should` before `later`. This list is a **projection** of the two tables and carries no
 independent facts: an entry appears here if and only if its status above is `absent` or `partial`,
-with the priority recorded above. The twelve omitted entries are the twelve `present` ones —
+with the priority recorded above. The thirteen omitted entries are the thirteen `present` ones —
 `import`, `export`, `projects`, `generate`, `clips`, `effects`, `project settings`, `texts` and
-`capture frame` (all table 1, the last two as of usable-editor tasks 12 and 14 respectively), plus
+`capture frame` and `layout` (all table 1; the last three as of usable-editor tasks 12 and 14
+and the transform/apply_layout work respectively), plus
 `generation and upscaling`, `timeline editing` and `audio scrub and metering` (all capability
 areas; the second as of usable-editor task 11 and the third as of monitoring-and-grading tasks 1
 to 3).
@@ -130,18 +139,17 @@ Each item is written `<name> (<table>) — <priority>` because `multicam` appear
 11. color (tool category) — later
 12. denoise (tool category) — later
 13. organize (tool category) — later
-14. layout (tool category) — later
-15. search (tool category) — later
-16. sync (tool category) — later
-17. beats (tool category) — later
-18. words (tool category) — later
-19. color and effects (capability area) — later
-20. project browser and search (capability area) — later
-21. telemetry (capability area) — later
-22. auto-update (capability area) — later
+14. search (tool category) — later
+15. sync (tool category) — later
+16. beats (tool category) — later
+17. words (tool category) — later
+18. color and effects (capability area) — later
+19. project browser and search (capability area) — later
+20. telemetry (capability area) — later
+21. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 12 `present`, 15 `partial`, 7 `absent`; 22 in this list, of which 1 `must`, 9 `should` and 12 `later`. Per table:
-table 1 holds 22 entries (9 `present`, 8 `partial`, 5 `absent`, so 13 appear below) and table 2
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 13 `present`, 14 `partial`, 7 `absent`; 21 in this list, of which 1 `must`, 9 `should` and 11 `later`. Per table:
+table 1 holds 22 entries (10 `present`, 7 `partial`, 5 `absent`, so 12 appear below) and table 2
 holds 12 (3 `present`, 7 `partial`, 2 `absent`, so 9 appear below).
 
 ## Known limits of this comparison

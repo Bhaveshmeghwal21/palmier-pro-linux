@@ -246,7 +246,8 @@ Tool makeApplyLayoutTool(ProjectSession* session) {
                      .kind = JsonKind::Array,
                      .required = true,
                      .description = "UUIDs of the clips to arrange, in the order they should "
-                                    "be placed."})
+                                    "be placed.",
+                     .minLength = 1})
         .arg(ArgSpec{.name = "layout",
                      .kind = JsonKind::String,
                      .required = true,
@@ -260,9 +261,8 @@ Tool makeApplyLayoutTool(ProjectSession* session) {
         if (ids == nullptr || !ids->isArray()) {
             return err<Json>(invalidArgument("missing or non-array field 'clipIds'"));
         }
-        if (ids->asArray().empty()) {
-            return err<Json>(invalidArgument("field 'clipIds' must name at least one clip"));
-        }
+        // No empty check here: the schema declares minItems 1 and the executor validates before
+        // dispatching, so an empty array never reaches this handler.
         std::vector<Uuid> clipIds;
         clipIds.reserve(ids->asArray().size());
         for (const Json& entry : ids->asArray()) {
