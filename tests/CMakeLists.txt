@@ -1601,6 +1601,7 @@ palmier_register_test(palmier_ui_preview_controller_tests)
 add_executable(palmier_app_composition_tests
     app/application_composition_test.cpp
     "${PROJECT_SOURCE_DIR}/src/app/ApplicationComposition.cpp"
+    "${PROJECT_SOURCE_DIR}/src/app/ApplicationCompositionHooks.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/HealthMonitor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"
@@ -3059,6 +3060,7 @@ target_link_libraries(palmier_docs_tests PRIVATE
 # ---------------------------------------------------------------------------
 target_sources(palmier_docs_tests PRIVATE
     docs/documentation_consistency_test.cpp
+    docs/file_size_property_test.cpp
     docs/suite_hygiene_property_test.cpp
     support/DocumentationChecker.cpp
     "${PROJECT_SOURCE_DIR}/src/services/GenerationModelCatalog.cpp"
@@ -3393,6 +3395,7 @@ add_executable(palmier_e2e_tests
     e2e/editor_end_to_end_test.cpp
     support/SyntheticMedia.cpp
     "${PROJECT_SOURCE_DIR}/src/app/ApplicationComposition.cpp"
+    "${PROJECT_SOURCE_DIR}/src/app/ApplicationCompositionHooks.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/HealthMonitor.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpProtocolHandler.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpSessionRegistry.cpp"

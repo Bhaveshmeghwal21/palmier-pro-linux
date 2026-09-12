@@ -745,7 +745,8 @@ const CheckRun& checkRun() {
         const std::vector<std::pair<std::string, std::pair<std::string, std::string>>> hookOwned{
             {"timeline.export",
              {"src/services/ExportToolSurface.cpp", "Json exportOutcomeToJson("}},
-            {"generation.generate", {"src/app/ApplicationComposition.cpp", "makeGenerateHook("}}};
+            {"generation.generate",
+             {"src/app/ApplicationCompositionHooks.cpp", "makeGenerateHook("}}};
         for (const auto& [toolName, where] : hookOwned) {
             const testsupport::FunctionFieldScan scan =
                 testsupport::scanJsonSetFields(testsupport::readWholeFile(sourcePath(where.first)),

@@ -113,6 +113,7 @@ endif()
 # command line, and has no dependency the composition root does not already have.
 add_library(palmier_app_composition STATIC
     ApplicationComposition.cpp
+    ApplicationCompositionHooks.cpp
     AppSettings.cpp)
 add_library(Palmier::app_composition ALIAS palmier_app_composition)
 
