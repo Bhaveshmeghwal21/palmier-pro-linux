@@ -102,16 +102,16 @@ make test-verbose      # per-test output, JUnit XML, and a generated summary
 make coverage          # instrumented build, then a gcovr line-coverage report
 ```
 
-The suite is **1845 GoogleTest and RapidCheck cases across 94 test executables**, and
-CI runs all of them on every push to `main` and on every pull request. It is not only
-unit tests: there are
-property tests over generated timelines, round-trip tests over the project format,
-agent/UI edit-equivalence tests, and documentation-consistency tests that fail the build
-when a CMake option or an agent tool is added without documenting it.
+The suite is **more than 1800 GoogleTest and RapidCheck cases across 90 test
+executables**, and CI runs all of them on every push to `main` and on every pull request.
+It is not only unit tests: there are property tests over generated timelines, round-trip
+tests over the project format, agent/UI edit-equivalence tests, and
+documentation-consistency tests that fail the build when a CMake option or an agent tool is
+added without documenting it.
 
-**Line coverage is 80.8%** (16814 of 20812 lines), measured by a dedicated CI job that
-fails the build below a floor of 78% and publishes Cobertura XML, an lcov
-`coverage.info` and drill-down HTML as an artifact. Branch coverage is 45.9% and is
+**Line coverage is around 81%**, measured by a dedicated CI job that fails the build below
+a floor of 78% and publishes Cobertura XML, an lcov `coverage.info` and drill-down HTML as
+an artifact. Branch coverage is around 46% and is
 deliberately not gated: most of the unhit branches are the vendor hardware-codec and
 Vulkan paths no hosted runner can execute, so gating them would gate on the absence of
 a GPU rather than on the quality of the tests.
@@ -146,7 +146,7 @@ src/gpu/         Vulkan compositing, effect kernels, scopes, LUTs, codec bridge
 src/services/    Project store, MCP server, tool registry, export coordination
 src/ui/          Qt 6 widgets and view models (view models are Qt-free where possible)
 src/app/         Entry point, settings, platform checks
-tests/           94 test executables: unit, property, integration, e2e, docs
+tests/           90 test executables: unit, property, integration, e2e, docs
 docs/            All operational documentation
 packaging/       Debian, Flatpak and AppImage packaging, and the apt manifest
 scripts/         CI report generators (stdlib-only Python) and their tests

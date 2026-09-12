@@ -241,6 +241,190 @@ class ReleaseVersionAgreement(unittest.TestCase):
         self.assertIn("no version matching", failures[0])
 
 
+# A README fragment carrying every figure the check inspects, and the two sources it compares them
+# against. Two distinct add_executable names plus a repeat of one inside an if/else and one in a
+# comment, so the counter is exercised on the shape that made the real README claim 94 for 90.
+GOOD_README = """\
+The suite is **more than 1800 GoogleTest and RapidCheck cases across 2 test executables**, and
+CI runs all of them on every push.
+
+**Line coverage is around 81%**, measured by a job that fails the build below a
+floor of 78% and publishes Cobertura XML. Branch coverage is around 46% and is not gated.
+"""
+
+GOOD_TEST_CMAKE = """\
+add_executable(palmier_one
+    one.cpp)
+
+if(SOMETHING)
+    add_executable(palmier_two
+        two_a.cpp)
+else()
+    add_executable(palmier_two
+        two_b.cpp)
+endif()
+
+# A comment that mentions add_executable(palmier_not_real) in prose.
+"""
+
+GOOD_WORKFLOW = """\
+jobs:
+  coverage:
+    env:
+      COVERAGE_MIN_LINE: 78
+"""
+
+
+class ReadmeMeasuredClaims(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        write(self.root, "README.md", GOOD_README)
+        write(self.root, "tests/CMakeLists.txt", GOOD_TEST_CMAKE)
+        write(self.root, ".github/workflows/ci.yml", GOOD_WORKFLOW)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_a_well_formed_readme_is_clean(self):
+        self.assertEqual(checker.check_readme_measurements(self.root), [])
+
+    def test_distinct_targets_are_counted_not_occurrences(self):
+        # The if/else declares one target twice and a comment names a third; the answer is 2.
+        self.assertEqual(checker._declared_test_executables(self.root), 2)
+
+    def test_a_wrong_executable_count_is_a_failure(self):
+        write(
+            self.root, "README.md", GOOD_README.replace("2 test executables", "9 test executables")
+        )
+        failures = checker.check_readme_measurements(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("claims 9 test executables", failures[0])
+        self.assertIn("declares 2", failures[0])
+
+    def test_omitting_the_executable_count_is_a_failure(self):
+        write(
+            self.root, "README.md", GOOD_README.replace("across 2 test executables", "across many")
+        )
+        failures = checker.check_readme_measurements(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("states no test executable count", failures[0])
+
+    def test_a_floor_that_disagrees_with_the_workflow_is_a_failure(self):
+        write(self.root, ".github/workflows/ci.yml", GOOD_WORKFLOW.replace("78", "70"))
+        failures = checker.check_readme_measurements(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("floor of 78%", failures[0])
+        self.assertIn("enforces 70%", failures[0])
+
+    def test_a_claim_wrapped_across_lines_is_still_understood(self):
+        # README.md wraps its prose, so "90 test executables" and "floor of 78%" can each straddle a
+        # line break -- the real README wraps the first of those on purpose. A pattern anchored to one
+        # line would find nothing here and report success, which is the one failure mode a
+        # consistency check must not have.
+        wrapped = GOOD_README.replace("2 test executables", "2 test\nexecutables").replace(
+            "floor of 78%", "floor\nof 78%"
+        )
+        write(self.root, "README.md", wrapped)
+        self.assertEqual(checker.check_readme_measurements(self.root), [])
+
+    def test_a_wrapped_claim_that_disagrees_is_still_caught(self):
+        write(
+            self.root, "README.md", GOOD_README.replace("2 test executables", "9 test\nexecutables")
+        )
+        failures = checker.check_readme_measurements(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("claims 9 test executables", failures[0])
+
+    def test_a_wrapped_brittle_claim_is_still_caught(self):
+        write(
+            self.root,
+            "README.md",
+            GOOD_README.replace("around 81%**", "around 81%** (16814\nof 20812 lines)"),
+        )
+        failures = checker.check_readme_measurements(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("exact covered-line count", failures[0])
+
+    def test_an_unhedged_case_count_is_a_failure(self):
+        write(
+            self.root,
+            "README.md",
+            GOOD_README.replace("more than 1800 GoogleTest", "1849 GoogleTest"),
+        )
+        failures = checker.check_readme_measurements(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("unhedged test-case count", failures[0])
+
+    def test_every_approximation_word_satisfies_the_hedge(self):
+        for word in checker.APPROXIMATION_WORDS:
+            write(
+                self.root,
+                "README.md",
+                GOOD_README.replace("more than 1800 GoogleTest", f"{word} 1800 GoogleTest"),
+            )
+            self.assertEqual(checker.check_readme_measurements(self.root), [], word)
+
+    def test_an_approximation_word_merely_nearby_does_not_satisfy_the_hedge(self):
+        # Regression: the first version of this check searched the preceding 40 characters for an
+        # approximation word, and README.md says "line-coverage report" just before the count --
+        # "coverage" contains "over", so an exact count passed. The hedge has to qualify the number.
+        write(
+            self.root,
+            "README.md",
+            GOOD_README.replace(
+                "The suite is **more than 1800 GoogleTest",
+                "A gcovr line-coverage report is published. The suite is **1849 GoogleTest",
+            ),
+        )
+        failures = checker.check_readme_measurements(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("unhedged test-case count", failures[0])
+
+    def test_a_hedge_directly_qualifying_the_number_is_accepted(self):
+        write(
+            self.root,
+            "README.md",
+            GOOD_README.replace(
+                "The suite is **more than 1800 GoogleTest",
+                "A gcovr line-coverage report is published. The suite is **more than 1800 GoogleTest",
+            ),
+        )
+        self.assertEqual(checker.check_readme_measurements(self.root), [])
+
+    def test_an_exact_covered_line_count_is_a_failure(self):
+        write(
+            self.root,
+            "README.md",
+            GOOD_README.replace("around 81%**", "around 81%** (16814 of 20812 lines)"),
+        )
+        failures = checker.check_readme_measurements(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("exact covered-line count", failures[0])
+
+    def test_a_one_decimal_coverage_figure_is_a_failure(self):
+        write(
+            self.root,
+            "README.md",
+            GOOD_README.replace("coverage is around 81%", "coverage is 80.8%"),
+        )
+        failures = checker.check_readme_measurements(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("one decimal place", failures[0])
+
+    def test_a_missing_readme_is_reported_rather_than_ignored(self):
+        os.remove(os.path.join(self.root, "README.md"))
+        failures = checker.check_readme_measurements(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("README.md is missing", failures[0])
+
+    def test_a_missing_workflow_is_reported_rather_than_ignored(self):
+        os.remove(os.path.join(self.root, ".github/workflows/ci.yml"))
+        failures = checker.check_readme_measurements(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("coverage floor cannot be checked", failures[0])
+
+
 class TheRealRepository(unittest.TestCase):
     """What makes a passing run evidence about this tree and not only about fixtures."""
 
@@ -262,6 +446,7 @@ class TheRealRepository(unittest.TestCase):
                 "relative links",
                 "Makefile targets",
                 "release version agreement",
+                "README measured claims",
             ],
         )
 
