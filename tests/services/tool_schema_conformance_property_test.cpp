@@ -92,6 +92,8 @@
 
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <system_error>
 #include <optional>
 #include <string>
 #include <utility>
@@ -218,6 +220,41 @@ Project makeFixtureProject(std::vector<Uuid>& pool) {
     }
     return Uuid::generateV4().toString();
 }
+
+/// Runs a test case in a directory of its own, restoring and removing it afterwards.
+///
+/// This property invokes every tool's real handler, and some tools write files: `project.save`
+/// takes an optional `path`, and drawText below fills a plain string argument with std::string(n,
+/// 'x'), so a drawn "xx" saves a project to ./xx relative to wherever the binary was run. That left
+/// stray project files named x, xx, xxx... in the repository root.
+///
+/// Containing it here rather than teaching the generator which argument names denote paths means a
+/// tool that writes a file is contained whether or not this test knows it writes one -- including
+/// tools added later, which is the case a name heuristic would quietly miss.
+class ScratchCwd {
+public:
+    ScratchCwd() : previous_(std::filesystem::current_path()) {
+        path_ = std::filesystem::temp_directory_path() /
+                ("palmier-conformance-" + Uuid::generateV4().toString());
+        std::filesystem::create_directories(path_);
+        std::filesystem::current_path(path_);
+    }
+
+    ~ScratchCwd() {
+        std::error_code ec;
+        std::filesystem::current_path(previous_, ec);
+        std::filesystem::remove_all(path_, ec);
+    }
+
+    ScratchCwd(const ScratchCwd&) = delete;
+    ScratchCwd& operator=(const ScratchCwd&) = delete;
+    ScratchCwd(ScratchCwd&&) = delete;
+    ScratchCwd& operator=(ScratchCwd&&) = delete;
+
+private:
+    std::filesystem::path previous_;
+    std::filesystem::path path_;
+};
 
 /// Text of a length inside the declared `[minLength, maxLength]` window (capped so
 /// a 2000-character upper bound does not produce 2000-character cases).
@@ -729,6 +766,10 @@ enum class SharedRule { None, MissingRequired, WrongTypedRequired, OutOfEnumRequ
 RC_GTEST_PROP(ToolSchemaConformanceProperties,
               TheAdvertisedSchemaAndTheHandlerAgree,
               ()) {
+    // Every case runs in a directory of its own, because the handlers invoked below are the
+    // real ones and some of them write files.
+    const ScratchCwd scratch;
+
     // A fresh session per case: the handlers apply real EditCommands, so each case
     // must start from the same fixture project.
     std::vector<Uuid> pool;
