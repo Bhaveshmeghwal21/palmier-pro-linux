@@ -194,7 +194,13 @@ Tool makeSetClipPropertiesTool(ProjectSession* session) {
         .arg(intArg("fadeInNs", false,
                     "Ramp up over this long at the clip's leading edge, in nanoseconds.", 0))
         .arg(intArg("fadeOutNs", false,
-                    "Ramp down over this long at the clip's trailing edge, in nanoseconds.", 0));
+                    "Ramp down over this long at the clip's trailing edge, in nanoseconds.", 0))
+        .arg(ArgSpec{.name = "speed",
+                     .kind = JsonKind::Number,
+                     .description = "Playback rate; 2.0 plays twice as fast and halves the "
+                                    "clip's timeline length.",
+                     .minNum = 0.01,
+                     .maxNum = 100.0});
     t.handler = [session](const Json& in) -> Result<Json> {
         if (session == nullptr) return err<Json>(noProjectOpen(kSetClipProperties));
         TimelineEngine& engine = session->engine();
@@ -222,6 +228,7 @@ Tool makeSetClipPropertiesTool(ProjectSession* session) {
         if (in.find("fadeOutNs") != nullptr) {
             props.fadeOut = Duration::fromNanoseconds(in.intOr("fadeOutNs", 0));
         }
+        if (in.find("speed") != nullptr) props.speed = in.doubleOr("speed", 1.0);
 
         Json out = Json::object();
         out.set("clipId", clipId.value().toString());
@@ -230,6 +237,84 @@ Tool makeSetClipPropertiesTool(ProjectSession* session) {
         return applyCommand(engine,
                             std::make_unique<SetClipPropertiesCommand>(clipId.value(), props),
                             std::move(out));
+    };
+    return t;
+}
+
+Tool makeSetKeyframesTool(ProjectSession* session) {
+    Tool t;
+    t.name = kSetKeyframes;
+    t.description = "Animate one of a clip's properties over the timeline.";
+    // Replaces the property's whole keyframe list, so the call is idempotent and an empty list
+    // clears the animation. `property` and each entry's `interpolation` are closed value sets, so
+    // they are declared as such; that the array holds objects with the right members is checked by
+    // the handler, which is documented gap class 2 (an array's item shape is inexpressible).
+    t.schema.arg(uuidArg("clipId", true, "UUID of the clip to animate."))
+        .arg(ArgSpec{.name = "property",
+                     .kind = JsonKind::String,
+                     .required = true,
+                     .description = "Which property to animate.",
+                     .enumValues = animatablePropertyValues()})
+        .arg(ArgSpec{.name = "keyframes",
+                     .kind = JsonKind::Array,
+                     .required = true,
+                     .description =
+                         "Objects with timeNs and value, and an optional interpolation "
+                         "of 'linear' or 'smooth'. An empty array clears the animation."});
+    t.handler = [session](const Json& in) -> Result<Json> {
+        if (session == nullptr) return err<Json>(noProjectOpen(kSetKeyframes));
+        TimelineEngine& engine = session->engine();
+        Result<Uuid> clipId = requireUuid(in, "clipId");
+        if (clipId.isError()) return err<Json>(std::move(clipId).error());
+
+        const std::optional<AnimatableProperty> property =
+            parseAnimatableProperty(in.stringOr("property", ""));
+        if (!property.has_value()) {
+            return err<Json>(invalidArgument("field 'property' does not name an animatable "
+                                             "property"));
+        }
+
+        const Json* list = in.find("keyframes");
+        if (list == nullptr || !list->isArray()) {
+            return err<Json>(invalidArgument("missing or non-array field 'keyframes'"));
+        }
+        std::vector<Keyframe> keyframes;
+        keyframes.reserve(list->asArray().size());
+        for (const Json& entry : list->asArray()) {
+            if (!entry.isObject()) {
+                return err<Json>(invalidArgument("field 'keyframes' must contain objects"));
+            }
+            const Json* timeNs = entry.find("timeNs");
+            const Json* value = entry.find("value");
+            if (timeNs == nullptr || !timeNs->isNumber() || value == nullptr ||
+                !value->isNumber()) {
+                return err<Json>(
+                    invalidArgument("every keyframe needs a numeric 'timeNs' and 'value'"));
+            }
+            Keyframe frame;
+            frame.time = Duration::fromNanoseconds(timeNs->asInt());
+            if (frame.time.isNegative()) {
+                return err<Json>(invalidArgument("a keyframe's 'timeNs' must be >= 0"));
+            }
+            frame.value = value->asDouble();
+            const std::optional<Interpolation> interpolation =
+                parseInterpolation(entry.stringOr("interpolation", "linear"));
+            if (!interpolation.has_value()) {
+                return err<Json>(
+                    invalidArgument("a keyframe's 'interpolation' must be 'linear' or 'smooth'"));
+            }
+            frame.interpolation = *interpolation;
+            keyframes.push_back(frame);
+        }
+
+        Json out = Json::object();
+        out.set("clipId", clipId.value().toString());
+        out.set("property", std::string{animatablePropertyName(*property)});
+        out.set("keyframeCount", static_cast<std::int64_t>(keyframes.size()));
+        return applyCommand(
+            engine,
+            std::make_unique<SetKeyframesCommand>(clipId.value(), *property, std::move(keyframes)),
+            std::move(out));
     };
     return t;
 }

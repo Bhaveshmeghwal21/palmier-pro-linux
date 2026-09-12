@@ -599,7 +599,9 @@ palmier_register_test(palmier_services_key_moment_tests)
 # ---------------------------------------------------------------------------
 add_executable(palmier_core_edit_commands_tests
     core/edit_commands_test.cpp
-    core/clip_properties_command_test.cpp)
+    core/clip_properties_command_test.cpp
+    core/clip_speed_test.cpp
+    core/keyframes_test.cpp)
 target_link_libraries(palmier_core_edit_commands_tests PRIVATE
     Palmier::core
     Palmier::test_support)

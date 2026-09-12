@@ -123,6 +123,7 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(detail::makeMoveClipTool(session));
     registry.add(detail::makeSetClipPropertiesTool(session));
     registry.add(detail::makeApplyLayoutTool(session));
+    registry.add(detail::makeSetKeyframesTool(session));
     registry.add(detail::makeTrimClipTool(session));
     registry.add(detail::makeSplitClipTool(session));
     registry.add(detail::makeReorderClipsTool(session));

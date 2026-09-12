@@ -55,6 +55,7 @@
 #include "core/MediaAssetRef.hpp"
 #include "core/TextStyle.hpp"
 #include "core/ClipGeometry.hpp"
+#include "core/Keyframes.hpp"
 #include "core/Transition.hpp"
 #include "core/Uuid.hpp"
 
@@ -78,11 +79,25 @@ struct Clip {
     /// Ramps at the clip's own edges, applied to both video opacity and audio gain.
     Duration fadeIn{Duration::zero()};
     Duration fadeOut{Duration::zero()};
+    /// Playback rate. 1.0 plays the source at its own rate; 2.0 plays it twice as fast, so the
+    /// clip occupies half as much timeline as its source span, and 0.5 half as fast, so it
+    /// occupies twice as much. Must be positive; ProjectValidation rejects anything else.
+    double speed = kUnitSpeed;
+    /// Animated properties. Empty for an unanimated clip, which is every clip that predates
+    /// this and behaves exactly as it did.
+    std::vector<KeyframeTrack> keyframes;
     std::optional<TextStyle>  textStyle;     ///< Present iff this is a text clip.
     std::optional<std::string> captionText;  ///< Present iff this is a caption cue.
 
-    /// Duration occupied on the timeline: sourceOut - sourceIn.
-    [[nodiscard]] Duration duration() const noexcept { return sourceOut - sourceIn; }
+    /// Duration occupied on the timeline: the source span rescaled by `speed`.
+    ///
+    /// Every reader of a clip's length goes through here, which is why speed did not have to be
+    /// threaded through the edit commands, the overlap rules, the ripple operations or the UI: they
+    /// ask how long the clip is and get an answer that already accounts for it. Only code
+    /// converting a timeline instant into a source instant needs to know speed by name.
+    [[nodiscard]] Duration duration() const noexcept {
+        return timelineLengthForSource(sourceOut - sourceIn, speed);
+    }
 
     /// End position on the timeline: timelineStart + duration().
     [[nodiscard]] Duration timelineEnd() const noexcept { return timelineStart + duration(); }

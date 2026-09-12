@@ -145,6 +145,7 @@ constexpr std::string_view kDeleteClip    = "timeline.delete_clip";
 constexpr std::string_view kMoveClip      = "timeline.move_clip";
 constexpr std::string_view kSetClipProperties = "timeline.set_clip_properties";
 constexpr std::string_view kApplyLayout = "timeline.apply_layout";
+constexpr std::string_view kSetKeyframes = "timeline.set_keyframes";
 constexpr std::string_view kTrimClip      = "timeline.trim_clip";
 constexpr std::string_view kSplitClip     = "timeline.split_clip";
 constexpr std::string_view kReorderClips  = "timeline.reorder_clips";
@@ -888,6 +889,23 @@ struct Invocation {
                       Duration::fromMilliseconds(2 * kClipGapMs).nanoseconds()));
         return Invocation{name, std::move(args)};
     }
+    if (name == kSetKeyframes) {
+        // Two keyframes on a drawn property, so the generated call exercises a real animation
+        // rather than the empty-list clear.
+        args.set("clipId", Json(anyClip.id.toString()));
+        args.set("property", Json(drawEnumValue(registry, kSetKeyframes, "property")));
+        Json points = Json::array();
+        Json first = Json::object();
+        first.set("timeNs", Json(static_cast<std::int64_t>(0)));
+        first.set("value", Json(static_cast<double>(drawIndex(101)) / 100.0));
+        points.push_back(std::move(first));
+        Json second = Json::object();
+        second.set("timeNs", Json(Duration::fromMilliseconds(kClipLengthMs).nanoseconds()));
+        second.set("value", Json(static_cast<double>(drawIndex(101)) / 100.0));
+        points.push_back(std::move(second));
+        args.set("keyframes", std::move(points));
+        return Invocation{name, std::move(args)};
+    }
     if (name == kApplyLayout) {
         // One clip is enough for the arrangement to be a legal edit, and it keeps the generator
         // independent of how many clips the drawn project happens to hold.
@@ -903,6 +921,11 @@ struct Invocation {
         args.set("clipId", Json(anyClip.id.toString()));
         args.set("opacity", Json(static_cast<double>(drawIndex(101)) / 100.0));
         args.set("gain", Json(static_cast<double>(drawIndex(201)) / 100.0));
+        // Only speeds >= 1.0, which SHORTEN the clip. A slower speed lengthens it and is
+        // legitimately refused when the clip has a neighbour to run into, and this property
+        // asserts the shape of a SUCCESSFUL call -- so the invocation it draws has to be one
+        // that always applies. That refusal is covered directly in clip_speed_test.cpp.
+        args.set("speed", Json(static_cast<double>(100 + drawIndex(301)) / 100.0));
         return Invocation{name, std::move(args)};
     }
     if (name == kSplitClip) {

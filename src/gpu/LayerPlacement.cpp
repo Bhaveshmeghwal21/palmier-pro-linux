@@ -137,13 +137,31 @@ std::vector<LayerPlacement> layerPlacements(const std::vector<PlacedLayer>& laye
         const Clip* clip = layers[i].clip;
         if (clip == nullptr) continue;
 
+        // Keyframes override a static value where the property carries any, and answer the static
+        // value where it does not -- so an unanimated clip takes exactly the path it took before
+        // keyframes existed. Skipped wholesale for the common unanimated case.
+        double opacity = clip->opacity;
+        Transform transform = clip->transform;
+        if (hasAnyKeyframes(clip->keyframes)) {
+            opacity = evaluateProperty(clip->keyframes, AnimatableProperty::Opacity, position,
+                                       clip->opacity);
+            transform.centerX = evaluateProperty(clip->keyframes, AnimatableProperty::CenterX,
+                                                 position, clip->transform.centerX);
+            transform.centerY = evaluateProperty(clip->keyframes, AnimatableProperty::CenterY,
+                                                 position, clip->transform.centerY);
+            transform.scale = evaluateProperty(clip->keyframes, AnimatableProperty::Scale, position,
+                                               clip->transform.scale);
+            transform.rotationDegrees =
+                evaluateProperty(clip->keyframes, AnimatableProperty::RotationDegrees, position,
+                                 clip->transform.rotationDegrees);
+        }
+
         // A clip's own edge fades multiply its opacity. They are independent of any transition:
         // a transition belongs to the boundary between two clips, a fade to one clip's own edges,
         // and a clip may carry both.
-        placements[i].opacity =
-            clip->opacity * fadeCoverage(clip->timelineStart, clip->timelineEnd(), clip->fadeIn,
-                                         clip->fadeOut, position);
-        placements[i].transform = clip->transform;
+        placements[i].opacity = opacity * fadeCoverage(clip->timelineStart, clip->timelineEnd(),
+                                                       clip->fadeIn, clip->fadeOut, position);
+        placements[i].transform = transform;
 
         const std::optional<double> progress = transitionProgress(*clip, position);
         if (!progress.has_value()) continue;

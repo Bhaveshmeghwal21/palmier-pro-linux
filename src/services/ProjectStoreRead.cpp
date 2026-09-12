@@ -223,6 +223,45 @@ Clip readClip(const JsonValue& v) {
     if (const JsonValue* f = v.find("fadeOut"); f != nullptr && !f->isNull()) {
         clip.fadeOut = Duration::fromNanoseconds(parseInt64(*f, "fadeOut"));
     }
+    // Schema 1.7: absent in every 1.0-1.6 document, which all ran at unit speed.
+    if (const JsonValue* s = v.find("speed"); s != nullptr && !s->isNull()) {
+        clip.speed = parseDouble(*s, "speed");
+    }
+
+    // Schema 1.8: absent in every earlier document, which were all unanimated. An unknown
+    // property or interpolation name is REFUSED rather than skipped: dropping an animation
+    // the editor cannot represent would silently change how the edit plays, which is the
+    // same reason an unrecognised effect kind is refused.
+    if (const JsonValue* tracks = v.find("keyframes"); tracks != nullptr && !tracks->isNull()) {
+        requireArray(*tracks, "keyframes");
+        for (const JsonValue& entry : tracks->array) {
+            requireObject(entry, "a keyframe track");
+            KeyframeTrack track;
+            const std::string propertyName = requireString(entry, "property");
+            std::optional<AnimatableProperty> property = parseAnimatableProperty(propertyName);
+            if (!property) {
+                fail("keyframe track names an unknown property '" + propertyName + "'");
+            }
+            track.property = *property;
+            const JsonValue& points = requireMember(entry, "points");
+            requireArray(points, "a keyframe track's points");
+            for (const JsonValue& point : points.array) {
+                requireObject(point, "a keyframe");
+                Keyframe frame;
+                frame.time = readDuration(point, "time");
+                frame.value = requireDouble(point, "value");
+                const std::string interpName = requireString(point, "interpolation");
+                std::optional<Interpolation> interp = parseInterpolation(interpName);
+                if (!interp) {
+                    fail("keyframe names an unknown interpolation '" + interpName + "'");
+                }
+                frame.interpolation = *interp;
+                track.keyframes.push_back(frame);
+            }
+            sortKeyframes(track.keyframes);
+            clip.keyframes.push_back(std::move(track));
+        }
+    }
 
     // Schema 1.2 (Requirement 9): absent entirely on a 1.1 document, or present
     // but null on a 1.2 document's own non-text clip — both mean "not a text

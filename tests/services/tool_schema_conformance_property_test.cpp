@@ -125,6 +125,7 @@ constexpr const char* kAddClip  = "timeline.add_clip";
 constexpr const char* kReorder  = "timeline.reorder_clips";
 constexpr const char* kReorderEffects = "timeline.reorder_effects";
 constexpr const char* kApplyLayout = "timeline.apply_layout";
+constexpr const char* kSetKeyframes = "timeline.set_keyframes";
 constexpr const char* kEditCurvePoint = "timeline.edit_curve_point";
 constexpr const char* kGenerate = "generation.generate";
 constexpr const char* kSetProjectSettings = "project.set_settings";
@@ -564,6 +565,22 @@ enum class SharedRule { None, MissingRequired, WrongTypedRequired, OutOfEnumRequ
            message.find("TimelineEngine") != std::string::npos;
 }
 
+/// True when every item of `value` is an object carrying a non-negative numeric `timeNs` and a
+/// numeric `value`, which is what timeline.set_keyframes requires of its array and what the ArgSpec
+/// vocabulary cannot state -- only that the argument IS an array.
+[[nodiscard]] bool allItemsAreKeyframeObjects(const Json& value) {
+    if (!value.isArray()) return false;
+    for (const Json& item : value.asArray()) {
+        if (!item.isObject()) return false;
+        const Json* time = item.find("timeNs");
+        const Json* magnitude = item.find("value");
+        if (time == nullptr || !time->isNumber()) return false;
+        if (magnitude == nullptr || !magnitude->isNumber()) return false;
+        if (time->asInt() < 0) return false;
+    }
+    return true;
+}
+
 [[nodiscard]] bool allItemsAreUuidStrings(const Json& value) {
     if (!value.isArray()) return false;
     for (const Json& item : value.asArray()) {
@@ -643,24 +660,31 @@ enum class SharedRule { None, MissingRequired, WrongTypedRequired, OutOfEnumRequ
     }
 
     // Class 2 — an array's item shape (only its item count is expressible).
-    if (tool.name == kReorder || tool.name == kReorderEffects || tool.name == kApplyLayout) {
-        const Json* order = args.find("order");
-        if (order != nullptr && !allItemsAreUuidStrings(*order)) {
-            return "class 2: array item shape — 'order' can only be declared an array, "
-                   "not an array of canonical UUID strings";
-        }
+    //
+    // Keyed on the ARGUMENT name, not the tool name. Gating an argument-specific check behind a
+    // tool name is redundant -- only one tool declares each of these -- and it fails silently when
+    // the check is placed under the wrong gate. That is not hypothetical: the `clipIds` check sat
+    // inside the media.set_tags gate, and media.set_tags declares only assetId and tags, so
+    // timeline.apply_layout's gap went uncovered and this property passed or failed on the luck of
+    // the draw rather than on whether the gap was documented.
+    if (const Json* order = args.find("order");
+        order != nullptr && !allItemsAreUuidStrings(*order)) {
+        return "class 2: array item shape — 'order' can only be declared an array, "
+               "not an array of canonical UUID strings";
     }
-    if (tool.name == kMediaSetTags) {
-        const Json* clipIds = args.find("clipIds");
-        if (clipIds != nullptr && !allItemsAreUuidStrings(*clipIds)) {
-            return "class 2: array item shape - 'clipIds' can only be declared an array with a "
-                   "minimum item count, not an array of canonical UUID strings";
-        }
-        const Json* tags = args.find("tags");
-        if (tags != nullptr && !allItemsAreStrings(*tags)) {
-            return "class 2: array item shape — 'tags' can only be declared an array, "
-                   "not an array of strings";
-        }
+    if (const Json* clipIds = args.find("clipIds");
+        clipIds != nullptr && !allItemsAreUuidStrings(*clipIds)) {
+        return "class 2: array item shape - 'clipIds' can only be declared an array with a "
+               "minimum item count, not an array of canonical UUID strings";
+    }
+    if (const Json* keyframes = args.find("keyframes");
+        keyframes != nullptr && !allItemsAreKeyframeObjects(*keyframes)) {
+        return "class 2: array item shape - 'keyframes' can only be declared an array, not an "
+               "array of objects each carrying a numeric timeNs and a numeric value";
+    }
+    if (const Json* tags = args.find("tags"); tags != nullptr && !allItemsAreStrings(*tags)) {
+        return "class 2: array item shape — 'tags' can only be declared an array, "
+               "not an array of strings";
     }
 
     // Class 3 — an object's member VALUE types.

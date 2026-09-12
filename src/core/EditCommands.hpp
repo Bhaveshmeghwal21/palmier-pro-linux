@@ -452,13 +452,14 @@ public:
         std::optional<bool> flipVertical;
         std::optional<Duration> fadeIn;
         std::optional<Duration> fadeOut;
+        std::optional<double> speed;
 
         /// True when at least one field is present.
         [[nodiscard]] bool any() const noexcept {
             return opacity.has_value() || gain.has_value() || centerX.has_value() ||
                    centerY.has_value() || scale.has_value() || rotationDegrees.has_value() ||
                    flipHorizontal.has_value() || flipVertical.has_value() || fadeIn.has_value() ||
-                   fadeOut.has_value();
+                   fadeOut.has_value() || speed.has_value();
         }
     };
 
@@ -482,7 +483,47 @@ private:
     Transform priorTransform_{};
     Duration priorFadeIn_{Duration::zero()};
     Duration priorFadeOut_{Duration::zero()};
+    double priorSpeed_{kUnitSpeed};
     bool captured_{false};  // set on apply so revert can refuse without one
+};
+
+// ---------------------------------------------------------------------------
+// SetKeyframesCommand — replace one property's animation on one clip.
+// ---------------------------------------------------------------------------
+//
+// Replaces the whole keyframe list for a single property, rather than adding or moving individual
+// keyframes. That makes the operation idempotent — sending the same list twice leaves the same
+// animation — and it means a caller never has to reason about the identity of a keyframe it did not
+// create. An empty list removes the property's animation, returning it to the clip's static value,
+// which is the only way back and so deserves a spelling.
+//
+// The list is sorted on the way in and keyframes sharing an instant collapse to the last given,
+// because a property cannot hold two values at one moment and refusing the edit would be a worse
+// answer than honouring the most recent one.
+class SetKeyframesCommand final : public EditCommand {
+public:
+    SetKeyframesCommand(ClipId clipId, AnimatableProperty property,
+                        std::vector<Keyframe> keyframes);
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "SetKeyframes"; }
+    [[nodiscard]] Result<void> apply(Project& project) override;
+    [[nodiscard]] Result<void> revert(Project& project) override;
+
+    /// The target clip.
+    [[nodiscard]] ClipId clipId() const noexcept { return clipId_; }
+
+    /// The property whose animation this command installs.
+    [[nodiscard]] AnimatableProperty property() const noexcept { return property_; }
+
+    /// The keyframes this command installs, sorted and deduplicated.
+    [[nodiscard]] const std::vector<Keyframe>& keyframes() const noexcept { return keyframes_; }
+
+private:
+    ClipId clipId_;
+    AnimatableProperty property_;
+    std::vector<Keyframe> keyframes_;
+    std::vector<KeyframeTrack> prior_;  // the clip's whole track list, for an exact revert
+    bool captured_{false};
 };
 
 // ---------------------------------------------------------------------------

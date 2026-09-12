@@ -307,8 +307,8 @@ std::string withDeclaredVersion(const Project& p, const std::string& version) {
 TEST(ProjectStore, WritesTheCurrentSchemaVersion) {
     // Schema 1.5 is what this build writes (monitoring-and-grading task 7; the addition
     // over 1.4 is Effect::resourcePath).
-    EXPECT_EQ(SchemaVersion::current(), SchemaVersion(1, 6));
-    EXPECT_NE(serializeProject(makeSampleProject()).find("\"version\": \"1.6\""),
+    EXPECT_EQ(SchemaVersion::current(), SchemaVersion(1, 8));
+    EXPECT_NE(serializeProject(makeSampleProject()).find("\"version\": \"1.8\""),
               std::string::npos);
 }
 

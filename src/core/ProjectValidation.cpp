@@ -36,6 +36,16 @@ Result<void> validateClip(const Clip& clip) {
                           std::to_string(clip.opacity));
     }
 
+    // speed must be a usable playback rate. Rejected rather than clamped because
+    // Clip::duration() divides by it: a zero or negative speed would give the clip a zero or
+    // negative length, which every track rule below assumes cannot happen, and scaleDuration
+    // answers zero for a bad factor, so a typo would produce a silently empty clip.
+    if (!isUsableSpeed(clip.speed)) {
+        return makeError(ErrorCode::InvalidArgument, "clip " + clip.id.toString() +
+                                                         ": speed must be positive, got " +
+                                                         std::to_string(clip.speed));
+    }
+
     // gain must be non-negative.
     if (clip.gain < 0.0) {
         return outOfRange("Clip " + clipLabel(clip) +

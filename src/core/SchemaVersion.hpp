@@ -10,7 +10,22 @@
 // supports a stored version iff the major numbers match and the reader's minor is
 // >= the stored minor.
 //
-// The current version is 1.6. Its addition over 1.5 is Clip::transform (where the
+// The current version is 1.8. Its addition over 1.7 is Clip::keyframes: animated opacity,
+// gain and transform. A clip carrying no "keyframes" key -- every 1.0-1.7 document -- reads
+// unanimated, which is exactly what those documents were. Unlike every earlier addition, an
+// unrecognised property or interpolation NAME inside a keyframe track is refused rather than
+// ignored: dropping an animation changes how the edit plays, which is the same reason an
+// unrecognised effect kind is refused rather than skipped.
+//
+// Version 1.7's addition over 1.6 is Clip::speed, the clip's playback
+// rate. A clip carrying no "speed" key -- every 1.0-1.6 document -- reads at 1.0, which is
+// exactly the behaviour those documents were written under, and a 1.6 build reads a 1.7
+// document by ignoring the key, which plays the clip at its source rate and so changes how
+// long it occupies the timeline. That is a visible difference rather than a silent one, and
+// it follows the extra-key rule for the same reason the transform did: degrading how a clip
+// plays is preferable to refusing the document outright.
+//
+// Version 1.6's addition over 1.5 is Clip::transform (where the
 // picture sits on the canvas: centre, scale, rotation and the two mirror flags) and
 // Clip::fadeIn / Clip::fadeOut. A clip carrying none of those keys -- every 1.0-1.5
 // document -- reads with the defaults, which are precisely the behaviour those documents
@@ -81,7 +96,7 @@ struct SchemaVersion {
         : major(major_), minor(minor_) {}
 
     /// The schema version this build writes and can fully round-trip.
-    [[nodiscard]] static constexpr SchemaVersion current() noexcept { return SchemaVersion{1, 6}; }
+    [[nodiscard]] static constexpr SchemaVersion current() noexcept { return SchemaVersion{1, 8}; }
 
     /// Can a reader at `reader` load data written at `stored`?
     /// Same major, and the reader is at least as new (minor) as the data.

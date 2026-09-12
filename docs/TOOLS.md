@@ -337,6 +337,7 @@ Change a clip's opacity or audio gain after it has been created.
 | `flipVertical` | boolean | no | mirror top to bottom |
 | `fadeInNs` | integer | no | >= 0; ramp up over this long at the clip's leading edge |
 | `fadeOutNs` | integer | no | >= 0; ramp down over this long at the trailing edge |
+| `speed` | number | no | 0.01 .. 100.0; playback rate, 2.0 plays twice as fast |
 
 Result: `clipId` (string), `opacity` (number), `gain` (number), *(command result)*.
 
@@ -351,6 +352,12 @@ non-uniform stretch, whereas a single factor cannot distort a source by accident
 split-screen half is expressed here by cropping the source with `crop_transform` and moving
 what remains with `centerX`.
 
+**Speed.** `speed` rescales how much timeline the clip occupies for the same span of source: at
+2.0 it plays twice as fast and is half as long, at 0.5 half as fast and twice as long. Its
+audio changes with it, pitch included, the way a tape played faster does; there is no pitch
+correction. Trimming, splitting and rippling all keep working in their own space, so a split
+one timeline second into a clip at speed 2 cuts the source two seconds in.
+
 **Fades.** `fadeInNs` and `fadeOutNs` ramp a clip's own edges, attenuating both its picture
 and its audio by the identical curve, computed from one function so the two cannot drift
 apart. They are independent of `timeline.add_transition`: a transition belongs to the boundary
@@ -363,6 +370,7 @@ Both properties can also be supplied to `timeline.add_clip`. This tool exists be
 could previously *only* be supplied there, which made them write-once: adjusting a composite's
 blend or a music bed's level meant deleting the clip and adding it again, losing its identifier
 along with any effects, transition or text style attached to it.
+
 
 ## `timeline.apply_layout`
 
@@ -389,6 +397,35 @@ Every layout positions and scales only, so each participant keeps its aspect rat
 letterboxed within its share of the canvas. A full-bleed split screen, where each half fills its
 side edge to edge, additionally needs the source cropped with a `crop_transform` effect: scaling
 is uniform and cannot stretch a 16:9 source into a half-width box.
+
+## `timeline.set_keyframes`
+
+Animate one of a clip's properties over the timeline.
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `clipId` | string *uuid* | **yes** | |
+| `property` | string | **yes** | `opacity`, `gain`, `centerX`, `centerY`, `scale`, `rotationDegrees` |
+| `keyframes` | array | **yes** | objects, each with `timeNs` (integer >= 0) and `value` (number), plus an optional `interpolation` of `linear` or `smooth` |
+
+Result: `clipId` (string), `property` (string), `keyframeCount` (integer), *(command result)*.
+
+Replaces the named property's whole keyframe list, so sending the same list twice leaves the same
+animation and a caller never has to reason about the identity of a keyframe it did not create. **An
+empty array clears the animation**, returning the property to the clip's static value, which is the
+only way back.
+
+`timeNs` is a **timeline** position, not an offset into the clip, so it is independent of the clip's
+speed: changing a clip's speed does not redistribute its keyframes. Keyframes given out of order are
+sorted, and two sharing an instant collapse to the last given, because a property cannot hold two
+values at one moment.
+
+Outside the keyframed span the nearest value holds — before the first keyframe the first value,
+after the last the last — so a property never falls to an implied zero beyond the keyframes you set.
+
+A property with no keyframes uses the clip's static value from `timeline.set_clip_properties`, so an
+unanimated clip behaves exactly as it did before this tool existed. Keyframed `opacity` multiplies
+with any edge fade and any transition rather than replacing them.
 
 ## `timeline.trim_clip`
 

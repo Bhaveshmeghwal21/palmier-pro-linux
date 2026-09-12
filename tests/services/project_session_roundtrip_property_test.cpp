@@ -312,6 +312,14 @@ Project drawProject(const Shape& shape) {
             clip.sourceIn = Duration::fromMilliseconds(sourceInMs);
             clip.sourceOut = Duration::fromMilliseconds(sourceInMs + lengthMs);
 
+            // Schema 1.7: the playback rate. Drawn HERE, before the clip is positioned,
+            // because duration() is the source span divided by speed -- so the layout below
+            // and the transition-overlap clamp both have to see it. Drawing it after the
+            // layout silently re-lengthened every clip into its neighbour. Drawn from an
+            // integer range so the decimal round-trips exactly and an inequality means the
+            // store lost the field rather than rounded it.
+            clip.speed = static_cast<double>(*rc::gen::inRange(250, 4'001)) / 1'000.0;
+
             if (transitionsRemaining > 0 && *rc::gen::arbitrary<bool>()) {
                 --transitionsRemaining;
                 Transition transition;
@@ -330,7 +338,9 @@ Project drawProject(const Shape& shape) {
                 const Duration previous = track.clips.back().duration();
                 std::int64_t overlapMs = clip.transitionIn->duration.milliseconds();
                 const std::int64_t previousMs = previous.milliseconds();
-                const std::int64_t currentMs = lengthMs;
+                // duration(), not lengthMs: at non-unit speed the clip's TIMELINE length is
+                // not its source length, and this clamp is in timeline milliseconds.
+                const std::int64_t currentMs = clip.duration().milliseconds();
                 if (overlapMs > previousMs - 1) {
                     overlapMs = previousMs - 1;
                 }
@@ -369,6 +379,21 @@ Project drawProject(const Shape& shape) {
             clip.fadeIn = Duration::fromMilliseconds(*rc::gen::inRange(0, 2'001));
             clip.fadeOut = Duration::fromMilliseconds(*rc::gen::inRange(0, 2'001));
 
+            // Schema 1.8: any animated properties. Keyframe times are timeline positions and
+            // do not affect the clip's length, so unlike speed these can be drawn here.
+            if (*rc::gen::arbitrary<bool>()) {
+                KeyframeTrack track;
+                track.property = AnimatableProperty::Opacity;
+                track.keyframes.push_back(Keyframe{
+                    Duration::zero(), static_cast<double>(*rc::gen::inRange(0, 1'001)) / 1'000.0,
+                    Interpolation::Linear});
+                track.keyframes.push_back(
+                    Keyframe{Duration::fromMilliseconds(500),
+                             static_cast<double>(*rc::gen::inRange(0, 1'001)) / 1'000.0,
+                             Interpolation::Smooth});
+                clip.keyframes.push_back(std::move(track));
+            }
+
             track.clips.push_back(std::move(clip));
         }
 
@@ -396,6 +421,8 @@ void assertSameClip(const Clip& a, const Clip& b) {
     RC_ASSERT(a.transform == b.transform);
     RC_ASSERT(a.fadeIn.ticks() == b.fadeIn.ticks());
     RC_ASSERT(a.fadeOut.ticks() == b.fadeOut.ticks());
+    RC_ASSERT(a.speed == b.speed);
+    RC_ASSERT(a.keyframes == b.keyframes);
 
     RC_ASSERT(a.effects.size() == b.effects.size());
     for (std::size_t i = 0; i < a.effects.size(); ++i) {
@@ -560,9 +587,14 @@ std::vector<std::pair<std::size_t, std::size_t>> addressesWhere(
 }
 
 bool isSplittable(const Track& track, std::size_t index) {
-    const Duration start = track.clips[index].timelineStart;
-    const Duration point = splitPointFor(track, index);
-    return point > start && point < track.clips[index].timelineEnd();
+    // Ask the command itself rather than re-deriving its rule. With speed in play the legality of a
+    // split depends on how the timeline point maps into source ticks and back again, and a predicate
+    // that reimplements that arithmetic is a second implementation free to drift from the first --
+    // which is exactly how this generator came to draw splits the command refuses.
+    Project probe;
+    probe.tracks.push_back(track);
+    SplitClipCommand attempt(track.clips[index].id, splitPointFor(track, index));
+    return attempt.apply(probe).isOk();
 }
 
 Duration trackEnd(const Track& track) {

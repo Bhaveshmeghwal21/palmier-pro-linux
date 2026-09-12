@@ -78,6 +78,7 @@ inline constexpr const char* kDeleteClip = "timeline.delete_clip";
 inline constexpr const char* kMoveClip = "timeline.move_clip";
 inline constexpr const char* kSetClipProperties = "timeline.set_clip_properties";
 inline constexpr const char* kApplyLayout = "timeline.apply_layout";
+inline constexpr const char* kSetKeyframes = "timeline.set_keyframes";
 inline constexpr const char* kTrimClip = "timeline.trim_clip";
 inline constexpr const char* kSplitClip = "timeline.split_clip";
 inline constexpr const char* kReorderClips = "timeline.reorder_clips";
@@ -174,6 +175,13 @@ const std::vector<std::string>& transitionKindValues();
 /// reason as transitionKindValues().
 const std::vector<std::string>& layoutKindValues();
 
+/// The accepted `property` values of `timeline.set_keyframes`, derived from the animatable
+/// property set itself so the published list and the parser's accepted set cannot diverge.
+const std::vector<std::string>& animatablePropertyValues();
+
+/// The accepted `interpolation` values of a keyframe.
+const std::vector<std::string>& interpolationValues();
+
 std::optional<TransitionKind> parseTransitionKind(std::string_view s);
 
 /// The LayoutKind named by `s`, or nullopt when it names none.
@@ -253,6 +261,7 @@ Tool makeDeleteClipTool(ProjectSession* session);
 Tool makeMoveClipTool(ProjectSession* session);
 Tool makeSetClipPropertiesTool(ProjectSession* session);
 Tool makeApplyLayoutTool(ProjectSession* session);
+Tool makeSetKeyframesTool(ProjectSession* session);
 Tool makeTrimClipTool(ProjectSession* session);
 Tool makeRippleDeleteTool(ProjectSession* session);
 Tool makeRippleTrimTool(ProjectSession* session);

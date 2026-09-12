@@ -11,6 +11,43 @@ task's completion commit, its CI run and the suite size at that point.
 
 ## [Unreleased]
 
+### Added
+
+- **Clip speed.** A clip now carries a playback rate, so footage can be sped up or slowed down
+  instead of only played at its own pace. `timeline.set_clip_properties` sets it. The change stays
+  contained because every reader of a clip's length goes through `Clip::duration()`, which rescales:
+  the overlap rules, the ripple operations, the compositor's clip lookup and the UI all get the
+  right length without knowing speed exists. Only three places convert a timeline instant into a
+  source instant and so need it by name -- the video frame provider, the audio mix's source window
+  and `SplitClipCommand`, whose comment previously stated outright that the two offsets coincide
+  "because the model has no speed change".
+
+  Audio changes with the picture, pitch included, the way a tape played faster does. That needed no
+  new signal processing: the audio graph already resamples every source from its own declared rate
+  to the output rate, so declaring a clip's input at `rate * speed` makes the existing resampler do
+  the work.
+
+- **Keyframes.** `timeline.set_keyframes` animates a clip's `opacity`, `gain`, `centerX`, `centerY`,
+  `scale` or `rotationDegrees` over the timeline, with linear or eased interpolation. Until now
+  every per-clip property was constant for the clip's whole length, so animation had to be faked by
+  cutting a clip into pieces and giving each a different constant, which loses the relationship
+  between them.
+
+  A property with no keyframes answers the clip's static value, and an empty track reports "not
+  animated" rather than zero, so an unanimated clip renders exactly as it did before and the feature
+  is additive. Outside the keyframed span the nearest value holds, so a property never falls to an
+  implied zero past the last keyframe. The animatable set is closed rather than free-form because
+  each entry has to be read at render time, and a property nothing evaluates would be an animation
+  that silently does nothing.
+
+### Changed
+
+- **Project schema 1.8**, adding `Clip::speed` (1.7) and `Clip::keyframes` (1.8). Every earlier
+  document reads at unit speed and unanimated, which is exactly what those documents were. Unlike
+  every earlier addition, an unrecognised property or interpolation name inside a keyframe track is
+  refused rather than ignored: dropping an animation changes how the edit plays, which is the same
+  reason an unrecognised effect kind is refused.
+
 ### Fixed
 
 - **The upstream parity report rested on an inference it did not need to make.** Its provenance

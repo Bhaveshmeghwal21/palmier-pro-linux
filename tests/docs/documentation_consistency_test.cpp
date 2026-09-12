@@ -437,6 +437,22 @@ private:
     clipProps.set("gain", services::Json(0.75));
     observer.run("timeline.set_clip_properties", clipProps);
 
+    // Two keyframes so the rendered keyframeCount is a number a reader can check.
+    services::Json keyframes = object();
+    keyframes.set("clipId", secondClip);
+    keyframes.set("property", std::string{"opacity"});
+    services::Json points = services::Json::array();
+    services::Json firstPoint = object();
+    firstPoint.set("timeNs", static_cast<std::int64_t>(0));
+    firstPoint.set("value", services::Json(0.0));
+    points.push_back(std::move(firstPoint));
+    services::Json secondPoint = object();
+    secondPoint.set("timeNs", 2 * kSecond);
+    secondPoint.set("value", services::Json(1.0));
+    points.push_back(std::move(secondPoint));
+    keyframes.set("keyframes", std::move(points));
+    observer.run("timeline.set_keyframes", keyframes);
+
     // Two clips so the arrangement actually places something, and the rendered clipCount is
     // observed.
     services::Json layout = object();

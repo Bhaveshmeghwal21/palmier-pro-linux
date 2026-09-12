@@ -193,6 +193,12 @@ Result<void> TrimClipCommand::apply(Project& project) {
     if (!minDuration.isPositive()) {
         minDuration = Duration::fromNanoseconds(1);
     }
+    // The minimum is a SOURCE length, and one timeline frame costs `speed` frames of source, so
+    // the bound has to be scaled or a clip at speed 2 could be trimmed to half a timeline frame.
+    minDuration = sourceDeltaForTimeline(minDuration, clip.speed);
+    if (!minDuration.isPositive()) {
+        minDuration = Duration::fromNanoseconds(1);
+    }
     if (sourceDuration_ < minDuration) {
         return err(failedPrecondition(
             "TrimClipCommand: source duration is shorter than the one-frame minimum"));
@@ -269,9 +275,23 @@ Result<void> SplitClipCommand::apply(Project& project) {
             "SplitClipCommand: playhead is not within the clip; nothing to split"));
     }
 
-    // Offset from the clip's leading edge, in both timeline and source time
-    // (the model has no speed change, so they coincide).
-    const Duration offset = playhead_ - original.timelineStart;
+    // Offset from the clip's leading edge. The timeline offset and the source offset differ by
+    // the clip's speed: a clip at speed 2 consumes two seconds of source per second of timeline,
+    // so a split one second in cuts the source two seconds in.
+    const Duration timelineOffset = playhead_ - original.timelineStart;
+    const Duration offset = sourceDeltaForTimeline(timelineOffset, original.speed);
+
+    // The playhead check above is in TIMELINE space; the cut happens in SOURCE space. At unit
+    // speed those are the same number, so one check covered both. Below unit speed the clip
+    // occupies more timeline than the source it is drawn from, so several timeline ticks map
+    // to a single source tick and a playhead strictly inside the clip can still land on a
+    // source offset of zero. Refused rather than applied: either half would carry no source at
+    // all, which is a clip that cannot be decoded, trimmed or rendered.
+    if (offset <= Duration::zero() || offset >= (original.sourceOut - original.sourceIn)) {
+        return err(failedPrecondition(
+            "SplitClipCommand: at speed " + std::to_string(original.speed) +
+            " the playhead maps to no interior source position; nothing to split"));
+    }
 
     // Fix the right half's id on the first apply so redo reproduces it exactly.
     if (!rightId_) {
@@ -284,11 +304,17 @@ Result<void> SplitClipCommand::apply(Project& project) {
 
     // Right half: fresh id, starts at the playhead, carries the remainder; an
     // interior cut is contiguous so it has no incoming transition.
+    // Starts where the left half actually ENDS, not at the playhead. The left half's length
+    // comes from its source span rescaled by speed, and the round trip timeline -> source ->
+    // timeline can move by a tick, so at any speed but 1.0 the playhead is not necessarily the
+    // instant the left half stops. Deriving the start from the left half makes the two meet
+    // exactly whatever the rounding did. At unit speed this IS the playhead, so nothing about
+    // the existing behaviour changes.
     Clip right = original;
     right.id = *rightId_;
     right.sourceIn = original.sourceIn + offset;
     right.sourceOut = original.sourceOut;
-    right.timelineStart = playhead_;
+    right.timelineStart = left.timelineEnd();
     right.transitionIn = std::nullopt;
 
     // Capture for revert, then replace the original with the two halves.
@@ -296,8 +322,21 @@ Result<void> SplitClipCommand::apply(Project& project) {
     index_ = loc->index;
     original_ = original;
 
+    const Clip previous = track->clips[loc->index];
     track->clips[loc->index] = left;
     track->clips.insert(track->clips.begin() + static_cast<std::ptrdiff_t>(loc->index) + 1, right);
+
+    // The halves meet each other exactly, but their COMBINED length can still differ from the
+    // original clip's by a tick, because each end was rounded independently. The clip after
+    // them is entitled not to be run into, so the same guarantee MoveClipCommand gives applies
+    // here: either the track is left valid, or the edit does not happen at all.
+    if (!trackOrderedAndNonOverlapping(*track)) {
+        track->clips.erase(track->clips.begin() + static_cast<std::ptrdiff_t>(loc->index) + 1);
+        track->clips[loc->index] = previous;
+        original_.reset();
+        return err(failedPrecondition(
+            "SplitClipCommand: the halves would not fit where the clip was; nothing to split"));
+    }
     return ok();
 }
 

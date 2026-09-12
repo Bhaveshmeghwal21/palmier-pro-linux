@@ -120,6 +120,7 @@ Result<void> SetClipPropertiesCommand::apply(Project& project) {
     priorTransform_ = clip.transform;
     priorFadeIn_ = clip.fadeIn;
     priorFadeOut_ = clip.fadeOut;
+    priorSpeed_ = clip.speed;
     captured_ = true;
 
     if (properties_.opacity.has_value()) clip.opacity = *properties_.opacity;
@@ -138,6 +139,28 @@ Result<void> SetClipPropertiesCommand::apply(Project& project) {
     }
     if (properties_.fadeIn.has_value()) clip.fadeIn = *properties_.fadeIn;
     if (properties_.fadeOut.has_value()) clip.fadeOut = *properties_.fadeOut;
+    if (properties_.speed.has_value()) clip.speed = *properties_.speed;
+
+    // A slower speed makes the clip LONGER -- duration() is the source span divided by speed -- so
+    // it can push the clip past the one after it. Refused rather than applied, for the same reason
+    // MoveClipCommand refuses an overlapping drop: a successful tool call must not leave a timeline
+    // whose clips overlap outside a transition region. Making room first, or rippling, is the
+    // caller's decision and not something to do as a side effect of setting a property.
+    //
+    // Only speed needs the check. Every other property here leaves the clip's length alone.
+    if (properties_.speed.has_value() && !trackOrderedAndNonOverlapping(*loc->track)) {
+        clip.opacity = priorOpacity_;
+        clip.gain = priorGain_;
+        clip.transform = priorTransform_;
+        clip.fadeIn = priorFadeIn_;
+        clip.fadeOut = priorFadeOut_;
+        clip.speed = priorSpeed_;
+        captured_ = false;  // the apply did not take, so a later revert must be refused
+        return err(failedPrecondition("SetClipProperties: speed " +
+                                      std::to_string(*properties_.speed) + " would lengthen clip " +
+                                      idLabel(clipId_) +
+                                      " past the next clip on the track; make room first"));
+    }
     return ok();
 }
 
@@ -155,6 +178,52 @@ Result<void> SetClipPropertiesCommand::revert(Project& project) {
     clip.transform = priorTransform_;
     clip.fadeIn = priorFadeIn_;
     clip.fadeOut = priorFadeOut_;
+    clip.speed = priorSpeed_;
+    return ok();
+}
+
+// ===========================================================================
+// SetKeyframesCommand
+// ===========================================================================
+
+SetKeyframesCommand::SetKeyframesCommand(ClipId clipId, AnimatableProperty property,
+                                         std::vector<Keyframe> keyframes)
+    : clipId_(clipId), property_(property), keyframes_(std::move(keyframes)) {
+    sortKeyframes(keyframes_);
+}
+
+Result<void> SetKeyframesCommand::apply(Project& project) {
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("SetKeyframes: clip " + idLabel(clipId_) + " not found"));
+    }
+    Clip& clip = loc->track->clips[loc->index];
+
+    // The whole track list is captured, not just this property's track, so revert restores the
+    // clip's animation exactly whether this command added a track, replaced one or removed one.
+    prior_ = clip.keyframes;
+    captured_ = true;
+
+    std::erase_if(clip.keyframes,
+                  [this](const KeyframeTrack& track) { return track.property == property_; });
+    if (!keyframes_.empty()) {
+        KeyframeTrack track;
+        track.property = property_;
+        track.keyframes = keyframes_;
+        clip.keyframes.push_back(std::move(track));
+    }
+    return ok();
+}
+
+Result<void> SetKeyframesCommand::revert(Project& project) {
+    if (!captured_) {
+        return err(failedPrecondition("SetKeyframes: revert before a successful apply"));
+    }
+    std::optional<ClipLocation> loc = findClip(project, clipId_);
+    if (!loc) {
+        return err(notFound("SetKeyframes: clip " + idLabel(clipId_) + " not found"));
+    }
+    loc->track->clips[loc->index].keyframes = prior_;
     return ok();
 }
 

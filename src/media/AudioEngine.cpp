@@ -11,6 +11,7 @@
 #include "media/AudioEngine.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 #include "core/Error.hpp"
@@ -250,7 +251,17 @@ Result<AudioBuffer> AudioEngine::mixWindow(const Project* project, Duration from
                 contribution.clipId = clip.id;
                 contribution.assetId = clip.assetRef.assetId;
                 contribution.assetPath = clip.assetRef.sourcePath;
-                contribution.gain = clip.gain >= 0.0 ? clip.gain : 0.0;
+                // Keyframed gain is evaluated at the middle of the requested window, the same
+                // instant the fade below uses, so the two agree about when "now" is.
+                const Duration windowMid =
+                    Duration::fromNanoseconds((from.nanoseconds() + to.nanoseconds()) / 2);
+                const double staticGain = clip.gain >= 0.0 ? clip.gain : 0.0;
+                const double animatedGain =
+                    hasAnyKeyframes(clip.keyframes)
+                        ? evaluateProperty(clip.keyframes, AnimatableProperty::Gain, windowMid,
+                                           staticGain)
+                        : staticGain;
+                contribution.gain = animatedGain >= 0.0 ? animatedGain : 0.0;
 
                 // A clip's edge fades attenuate its audio by exactly the curve they attenuate
                 // its picture by, computed from the one function in core/ClipGeometry.hpp — a cut
@@ -261,10 +272,8 @@ Result<AudioBuffer> AudioEngine::mixWindow(const Project* project, Duration from
                 // video frame interval at a time, so this already yields a per-frame ramp, which
                 // is the same granularity the video fade has. Evaluated at the middle of the
                 // requested span so a block is attenuated by its average rather than its edge.
-                const Duration midpoint =
-                    Duration::fromNanoseconds((from.nanoseconds() + to.nanoseconds()) / 2);
                 contribution.gain *= fadeCoverage(clip.timelineStart, clip.timelineEnd(),
-                                                  clip.fadeIn, clip.fadeOut, midpoint);
+                                                  clip.fadeIn, clip.fadeOut, windowMid);
 
                 // Requirement 6.9: once a clip's audio decode has failed, the rest
                 // of its timeline range is silence.
@@ -307,14 +316,32 @@ Result<AudioBuffer> AudioEngine::mixWindow(const Project* project, Duration from
                 // window at the source's own rate: leading and trailing silence
                 // place the clip's samples where they belong inside the window, and
                 // AudioGraph then resamples the whole window to the output rate.
-                const std::size_t inFrames =
-                    static_cast<std::size_t>(durationToFrames(span, entry.sampleRate));
-                AudioBuffer input(entry.sampleRate, entry.channels, inFrames);
-                const std::size_t destOffset = static_cast<std::size_t>(
-                    durationToFrames(overlapFrom - from, entry.sampleRate));
+                //
+                // A clip at speed S covers S times as much source as timeline, so the buffer holds
+                // S times as many frames and is DECLARED at rate*S below. The graph's existing
+                // per-source resampler then converts rate*S down to the output rate, which is
+                // exactly a tape-style speed change -- faster and higher pitched, or slower and
+                // lower. No new signal processing: the resampler was already there to reconcile
+                // heterogeneous source rates.
+                const double speed = isUsableSpeed(clip.speed) ? clip.speed : kUnitSpeed;
+                // ONE rate, used both to label the buffer and to register the source. The graph
+                // checks that a rendered buffer's own declared rate matches the rate its source was
+                // registered at, so labelling only one of the two is a format mismatch it correctly
+                // refuses. fillFromSource does its frame arithmetic from entry.sampleRate, not from
+                // the buffer's label, so the samples themselves are unaffected by the relabelling.
+                const int scaled =
+                    static_cast<int>(std::llround(static_cast<double>(entry.sampleRate) * speed));
+                const int mixRate = scaled > 0 ? scaled : entry.sampleRate;
+                const std::size_t inFrames = static_cast<std::size_t>(
+                    durationToFrames(sourceDeltaForTimeline(span, speed), entry.sampleRate));
+                AudioBuffer input(mixRate, entry.channels, inFrames);
+                const std::size_t destOffset = static_cast<std::size_t>(durationToFrames(
+                    sourceDeltaForTimeline(overlapFrom - from, speed), entry.sampleRate));
 
-                const Duration srcFrom = clip.sourceIn + (overlapFrom - clip.timelineStart);
-                const Duration srcTo = srcFrom + (overlapTo - overlapFrom);
+                const Duration srcFrom =
+                    clip.sourceIn + sourceDeltaForTimeline(overlapFrom - clip.timelineStart, speed);
+                const Duration srcTo =
+                    srcFrom + sourceDeltaForTimeline(overlapTo - overlapFrom, speed);
 
                 auto filled = fillFromSource(entry, srcFrom, srcTo, destOffset, input);
                 if (filled.isError()) {
@@ -332,7 +359,7 @@ Result<AudioBuffer> AudioEngine::mixWindow(const Project* project, Duration from
                     contribution.decodedFrames = filled.value();
                 }
 
-                auto source = graph.addSource(entry.sampleRate, entry.channels, contribution.gain);
+                auto source = graph.addSource(mixRate, entry.channels, contribution.gain);
                 if (source.isError()) {
                     return err<AudioBuffer>(std::move(source).error());
                 }

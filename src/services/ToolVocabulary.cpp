@@ -131,6 +131,24 @@ const std::vector<std::string>& layoutKindValues() {
     return values;
 }
 
+const std::vector<std::string>& animatablePropertyValues() {
+    // Built from allAnimatableProperties() rather than written out, so a property added to the
+    // model appears here automatically instead of being advertised nowhere.
+    static const std::vector<std::string> values = [] {
+        std::vector<std::string> names;
+        for (const AnimatableProperty property : allAnimatableProperties()) {
+            names.emplace_back(animatablePropertyName(property));
+        }
+        return names;
+    }();
+    return values;
+}
+
+const std::vector<std::string>& interpolationValues() {
+    static const std::vector<std::string> values = {"linear", "smooth"};
+    return values;
+}
+
 std::optional<LayoutKind> parseLayoutKind(std::string_view s) {
     if (s == "side_by_side") return LayoutKind::SideBySide;
     if (s == "picture_in_picture") return LayoutKind::PictureInPicture;

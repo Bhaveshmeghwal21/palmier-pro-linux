@@ -11,7 +11,7 @@
 // place in the playback pipeline that knows about *timelines*:
 //
 //   1. **Mapping.** A request for `(clip, timelinePosition)` becomes the source
-//      position `sourceIn + (timelinePosition - timelineStart)`. A position
+//      position `sourceIn + (timelinePosition - timelineStart) * speed`. A position
 //      outside `[timelineStart, timelineEnd)` is an error, not a clamp — the
 //      compositor only asks about clips it gathered as visible, so an
 //      out-of-range request is a caller bug and silently clamping it would
@@ -70,7 +70,8 @@ namespace palmier::media {
 /// playback transport and the export planner reason about the same arithmetic.
 [[nodiscard]] constexpr Duration clipSourcePosition(const Clip& clip,
                                                     Duration timelinePosition) noexcept {
-    return clip.sourceIn + (timelinePosition - clip.timelineStart);
+    return clip.sourceIn +
+           sourceDeltaForTimeline(timelinePosition - clip.timelineStart, clip.speed);
 }
 
 /// Configuration of a DecoderClipFrameProvider. Declared at namespace scope (and

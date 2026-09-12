@@ -136,6 +136,31 @@ void writeClip(JsonWriter& w, const Clip& clip) {
     w.endObject();
     writeDuration(w, "fadeIn", clip.fadeIn);
     writeDuration(w, "fadeOut", clip.fadeOut);
+    // Schema 1.7.
+    w.key("speed");
+    w.valueDouble(clip.speed);
+    // Schema 1.8: animated properties. Written always, empty for an unanimated clip.
+    w.key("keyframes");
+    w.beginArray();
+    for (const KeyframeTrack& track : clip.keyframes) {
+        w.beginObject();
+        w.key("property");
+        w.valueString(std::string{animatablePropertyName(track.property)});
+        w.key("points");
+        w.beginArray();
+        for (const Keyframe& point : track.keyframes) {
+            w.beginObject();
+            writeDuration(w, "time", point.time);
+            w.key("value");
+            w.valueDouble(point.value);
+            w.key("interpolation");
+            w.valueString(std::string{interpolationName(point.interpolation)});
+            w.endObject();
+        }
+        w.endArray();
+        w.endObject();
+    }
+    w.endArray();
     // Schema 1.2 (Requirement 9). Present iff this is a text clip.
     w.key("textStyle");
     if (clip.textStyle.has_value()) {

@@ -70,6 +70,47 @@ struct Transform {
     [[nodiscard]] friend bool operator==(const Transform&, const Transform&) = default;
 };
 
+/// `d` scaled by `factor`, rounded to the nearest tick.
+///
+/// `constexpr` because clipSourcePosition is, and a non-positive or non-finite factor yields zero
+/// rather than a negative or nonsensical duration: the callers all treat a bad factor as "this clip
+/// contributes nothing" and none of them can usefully report an error from where they sit.
+[[nodiscard]] constexpr Duration scaleDuration(Duration d, double factor) noexcept {
+    if (!(factor > 0.0)) return Duration::zero();  // false for NaN too
+    const double scaled = static_cast<double>(d.ticks()) * factor;
+    // Round half away from zero without std::llround, which is not constexpr.
+    const double rounded = scaled >= 0.0 ? scaled + 0.5 : scaled - 0.5;
+    return Duration::fromNanoseconds(static_cast<std::int64_t>(rounded));
+}
+
+/// The default playback rate: one unit of source per unit of timeline.
+inline constexpr double kUnitSpeed = 1.0;
+
+/// True when `speed` is a usable playback rate.
+///
+/// Rejects zero, negatives and NaN. There is no upper bound here: how fast a clip may run is a
+/// question about the source's length and the timeline's frame rate, which this cannot see.
+[[nodiscard]] constexpr bool isUsableSpeed(double speed) noexcept {
+    return speed > 0.0 && speed < 1.0e9;
+}
+
+/// How much SOURCE a clip at `speed` consumes over `timelineDelta` of timeline.
+///
+/// The whole of the speed feature is this identity and its inverse: a clip at speed 2 consumes two
+/// seconds of source per second of timeline, so it plays twice as fast and occupies half as much
+/// timeline as its source span.
+[[nodiscard]] constexpr Duration sourceDeltaForTimeline(Duration timelineDelta,
+                                                        double speed) noexcept {
+    return scaleDuration(timelineDelta, speed);
+}
+
+/// How much TIMELINE a clip at `speed` occupies for `sourceSpan` of source. The inverse of
+/// sourceDeltaForTimeline.
+[[nodiscard]] constexpr Duration timelineLengthForSource(Duration sourceSpan,
+                                                         double speed) noexcept {
+    return isUsableSpeed(speed) ? scaleDuration(sourceSpan, 1.0 / speed) : sourceSpan;
+}
+
 /// A named arrangement of several clips on the canvas.
 enum class LayoutKind {
     /// Every clip at half size in a row across the middle.
