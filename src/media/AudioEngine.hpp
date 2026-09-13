@@ -306,7 +306,24 @@ public:
     [[nodiscard]] const IAudioSink& sink() const noexcept { return *active_; }
 
     /// The name of the sink in use ("null", "pipewire", ...).
+    ///
+    /// This is the ACTIVE sink, which before start() is the null fallback whatever sink was
+    /// injected -- see preferredSinkName() for the one that will be used, and the constructor for
+    /// why the fallback is active from construction.
     [[nodiscard]] std::string_view sinkName() const noexcept { return active_->name(); }
+
+    /// The name of the sink this engine will use once started: the one it was constructed with,
+    /// or "null" when it was constructed without one.
+    ///
+    /// Deliberately distinct from sinkName(). Before start() the active sink is the null fallback
+    /// so that clock reads are well defined before any device has been opened, which leaves
+    /// sinkName() unable to answer "was this engine handed the sink selection chose?". That is
+    /// precisely the question a composition test needs to ask, and nothing could observe it until
+    /// this existed -- so the test asked it through sinkName() instead, and consequently passed
+    /// only on a host with no audio device, where selection lands on null anyway.
+    [[nodiscard]] std::string_view preferredSinkName() const noexcept {
+        return preferred_ ? preferred_->name() : fallback_->name();
+    }
 
     [[nodiscard]] std::size_t quantumFrames() const noexcept { return options_.quantumFrames; }
 

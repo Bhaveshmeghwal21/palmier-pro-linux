@@ -31,8 +31,13 @@
 #include <utility>
 #include <vector>
 
+#include "core/Duration.hpp"
 #include "core/Error.hpp"
+#include "core/Project.hpp"
 #include "media/AlsaAudioSink.hpp"
+#include "media/AudioEngine.hpp"
+#include "media/DecoderTeardownQueue.hpp"
+#include "media/MediaDecoder.hpp"
 #include "media/AudioSink.hpp"
 #include "media/AudioSinkSelector.hpp"
 #include "media/PipeWireAudioSink.hpp"
@@ -434,6 +439,58 @@ TEST(AudioSinkBackends, SelectionOnThisHostAlwaysYieldsAUsableSink) {
     EXPECT_TRUE(selection.sink->submit(quantum).isOk());
     EXPECT_LE(selection.sink->playedFrames(), selection.sink->submittedFrames());
     selection.sink->stop();
+}
+
+// ---------------------------------------------------------------------------
+// Which sink the ENGINE uses, as distinct from which one selection chose
+// ---------------------------------------------------------------------------
+//
+// Before start() these are deliberately different: the injected sink is only promoted once a device
+// has actually been opened, and until then the null fallback is active so a clock read is well
+// defined. Conflating the two hid a defect for the whole life of the composition test, which asserted
+// that a freshly composed engine reports the selected sink -- true only when selection landed on null
+// anyway, i.e. on a machine with no audio device. That is every hosted runner, so CI stayed green
+// while the test failed on any host with working audio.
+//
+// Pinned here with an injected sink so both branches are covered on every host, rather than depending
+// on whether the machine running the suite happens to have a sound card.
+
+TEST(AudioEnginePreferredSink, ReportsTheInjectedSinkAsPreferredAndTheFallbackAsInUse) {
+    Project project;
+    DecoderTeardownQueue teardown;
+    AudioEngine engine{[&project] { return &project; }, std::make_unique<FakeSink>("alsa", true),
+                       teardown, DecodeBackendFactory{}};
+
+    // What it will use once started, which is what "the engine got the selected sink" means.
+    EXPECT_EQ(std::string(engine.preferredSinkName()), "alsa");
+    // What is in use until then, so a position read before any open is still defined.
+    EXPECT_EQ(std::string(engine.sinkName()), "null");
+    EXPECT_FALSE(engine.running());
+}
+
+TEST(AudioEnginePreferredSink, AnEngineBuiltWithNoSinkReportsNullForBoth) {
+    Project project;
+    DecoderTeardownQueue teardown;
+    AudioEngine engine{[&project] { return &project; }, nullptr, teardown, DecodeBackendFactory{}};
+
+    EXPECT_EQ(std::string(engine.preferredSinkName()), "null");
+    EXPECT_EQ(std::string(engine.sinkName()), "null");
+}
+
+TEST(AudioEnginePreferredSink, ADeviceThatRefusesToOpenStillNamesItselfAsThePreferredSink) {
+    // Requirement 6.7's path: the open fails, audio is suppressed, the null sink keeps the clock
+    // advancing. The engine still remembers which device it was asked for, which is what a notice or
+    // a health check needs in order to name it.
+    Project project;
+    DecoderTeardownQueue teardown;
+    AudioEngine engine{[&project] { return &project; }, std::make_unique<FakeSink>("alsa", false),
+                       teardown, DecodeBackendFactory{}};
+
+    ASSERT_TRUE(engine.start(Duration::zero()).isOk());  // an unopenable device is not an error
+    EXPECT_FALSE(engine.outputAvailable());
+    EXPECT_EQ(std::string(engine.preferredSinkName()), "alsa");
+    EXPECT_EQ(std::string(engine.sinkName()), "null");
+    engine.stop();
 }
 
 } // namespace palmier::media

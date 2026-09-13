@@ -175,7 +175,16 @@ TEST(ApplicationComposition, ComposesOneAudioEngineWhoseSinkIsTheMasterClock) {
     const std::string sinkName = composition.audioSinkName();
     EXPECT_TRUE(sinkName == "pipewire" || sinkName == "alsa" || sinkName == "null")
         << "unexpected sink name: " << sinkName;
-    EXPECT_EQ(std::string(composition.audioEngine().sinkName()), sinkName);
+    // The engine was handed the sink selection chose. Asked through preferredSinkName(), not
+    // sinkName(): the two differ by design before start(), because the ACTIVE sink is the null
+    // fallback until a device is actually opened. Asserting it through sinkName() passed only on a
+    // host with no audio device -- where selection also lands on null -- and failed on any host
+    // with a working one, so CI never saw it.
+    EXPECT_EQ(std::string(composition.audioEngine().preferredSinkName()), sinkName);
+
+    // And that design, pinned here rather than left as a trap: nothing has been started, so the
+    // sink in use is the null fallback regardless of what selection found.
+    EXPECT_EQ(std::string(composition.audioEngine().sinkName()), "null");
 
     // The Requirement 6.7 notice is present exactly when no real device was opened,
     // and it never appears alongside a real device.
