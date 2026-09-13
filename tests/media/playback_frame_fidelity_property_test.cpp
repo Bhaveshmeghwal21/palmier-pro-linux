@@ -10,7 +10,8 @@
 
 namespace palmier::media {
 
-using namespace palmier::media::testsupport_playbackframefidelitypropertytest;  // NOLINT(google-build-using-namespace)
+using namespace palmier::media::
+    testsupport_playbackframefidelitypropertytest;  // NOLINT(google-build-using-namespace)
 
 TEST(DecoderClipFrameProvider, NonZeroSourceInSelectsTheMappedSourceFrame) {
     Fixture              fx;

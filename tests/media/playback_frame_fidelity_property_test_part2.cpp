@@ -10,7 +10,8 @@
 
 namespace palmier::media {
 
-using namespace palmier::media::testsupport_playbackframefidelitypropertytest;  // NOLINT(google-build-using-namespace)
+using namespace palmier::media::
+    testsupport_playbackframefidelitypropertytest;  // NOLINT(google-build-using-namespace)
 
 // ---------------------------------------------------------------------------
 // Property 20
@@ -23,8 +24,7 @@ using namespace palmier::media::testsupport_playbackframefidelitypropertytest;  
 // clip frame provider returns for that clip's corresponding source position.
 //
 // **Validates: Requirements 5.1**
-RC_GTEST_PROP(PlaybackFrameFidelityProperty,
-              Property20PresentedFramesMatchTheDecodedSourceFrames,
+RC_GTEST_PROP(PlaybackFrameFidelityProperty, Property20PresentedFramesMatchTheDecodedSourceFrames,
               ()) {
     // --- generators ---------------------------------------------------------
     // Distinct assets on the timeline. More than the decoder cache holds is the
@@ -33,7 +33,7 @@ RC_GTEST_PROP(PlaybackFrameFidelityProperty,
 
     // Source geometry. Kept small so 100+ cases stay quick; the 1920x1080 end of
     // the documented range is covered by a unit test below.
-    const std::uint32_t width  = static_cast<std::uint32_t>(*rc::gen::inRange(16, 65));
+    const std::uint32_t width = static_cast<std::uint32_t>(*rc::gen::inRange(16, 65));
     const std::uint32_t height = static_cast<std::uint32_t>(*rc::gen::inRange(16, 49));
 
     // Decoder residency and prefetch depth: eviction pressure and worker
@@ -46,8 +46,7 @@ RC_GTEST_PROP(PlaybackFrameFidelityProperty,
     const int clipCount = *rc::gen::inRange(1, 5);
 
     const auto pattern = *rc::gen::element(AccessPattern::Sequential, AccessPattern::ForwardSeek,
-                                           AccessPattern::BackwardSeek,
-                                           AccessPattern::Interleaved);
+                                           AccessPattern::BackwardSeek, AccessPattern::Interleaved);
 
     // --- the synthetic library ----------------------------------------------
     std::vector<SyntheticAsset> assets;
@@ -55,13 +54,13 @@ RC_GTEST_PROP(PlaybackFrameFidelityProperty,
     for (int a = 0; a < assetCount; ++a) {
         SyntheticAsset asset;
         // Uuid::generateV4() — never drawn byte-wise, so no nil/duplicate ids.
-        asset.assetId    = Uuid::generateV4();
-        asset.path       = "synthetic://asset-" + std::to_string(a) + "-" + asset.assetId.toString();
-        asset.width      = width;
-        asset.height     = height;
-        asset.rate       = rateFor(*rc::gen::inRange(0, 4));
+        asset.assetId = Uuid::generateV4();
+        asset.path = "synthetic://asset-" + std::to_string(a) + "-" + asset.assetId.toString();
+        asset.width = width;
+        asset.height = height;
+        asset.rate = rateFor(*rc::gen::inRange(0, 4));
         asset.frameCount = *rc::gen::inRange(6, 25);
-        asset.salt       = static_cast<std::uint32_t>(*rc::gen::inRange(0, 256));
+        asset.salt = static_cast<std::uint32_t>(*rc::gen::inRange(0, 256));
         assets.push_back(asset);
     }
 
@@ -70,34 +69,33 @@ RC_GTEST_PROP(PlaybackFrameFidelityProperty,
     placed.reserve(static_cast<std::size_t>(clipCount));
     Duration cursor = Duration::zero();
     for (int c = 0; c < clipCount; ++c) {
-        const int             assetIndex = c % assetCount;
-        const SyntheticAsset& asset      = assets[static_cast<std::size_t>(assetIndex)];
-        const Duration        step       = asset.frameStep();
+        const int assetIndex = c % assetCount;
+        const SyntheticAsset& asset = assets[static_cast<std::size_t>(assetIndex)];
+        const Duration step = asset.frameStep();
 
         // A non-zero sourceIn is the case the mapping most easily gets wrong.
-        const int maxIn         = asset.frameCount / 2;
+        const int maxIn = asset.frameCount / 2;
         const int sourceInFrame = maxIn > 0 ? *rc::gen::inRange(0, maxIn + 1) : 0;
-        const int available     = asset.frameCount - sourceInFrame;
-        const int lengthFrames  = *rc::gen::inRange(1, available + 1);
+        const int available = asset.frameCount - sourceInFrame;
+        const int lengthFrames = *rc::gen::inRange(1, available + 1);
 
         // Clips are laid end to end on one video track, so exactly one clip is
         // visible at any position and the composited output is that clip's frame.
         Clip clip;
-        clip.id            = Uuid::generateV4();
-        clip.assetRef      = MediaAssetRef{asset.assetId, asset.path};
+        clip.id = Uuid::generateV4();
+        clip.assetRef = MediaAssetRef{asset.assetId, asset.path};
         clip.timelineStart = cursor;
-        clip.sourceIn      = step * static_cast<std::int64_t>(sourceInFrame);
-        clip.sourceOut     = step * static_cast<std::int64_t>(sourceInFrame + lengthFrames);
-        clip.opacity       = 1.0;
-        cursor             = clip.timelineEnd();
+        clip.sourceIn = step * static_cast<std::int64_t>(sourceInFrame);
+        clip.sourceOut = step * static_cast<std::int64_t>(sourceInFrame + lengthFrames);
+        clip.opacity = 1.0;
+        cursor = clip.timelineEnd();
 
         placed.push_back(PlacedClip{clip, assetIndex, sourceInFrame, lengthFrames, step});
     }
 
     const std::uint32_t canvasW = width;
     const std::uint32_t canvasH = height;
-    const Project       project =
-        projectWith(placed, Resolution{canvasW, canvasH}, assets.front().rate);
+    const Project project = projectWith(placed, Resolution{canvasW, canvasH}, assets.front().rate);
 
     // --- the pipeline under test -------------------------------------------
     auto counters = std::make_shared<BackendCounters>();
@@ -105,9 +103,9 @@ RC_GTEST_PROP(PlaybackFrameFidelityProperty,
     DecoderTeardownQueue teardown;
     ClipFrameProviderOptions options;
     options.decoderCacheCapacity = cacheCapacity;
-    options.prefetchDepth        = prefetchDepth;
-    options.prefs                = softwarePrefs();
-    options.pool.workerCount     = 2; // the design's N = 2
+    options.prefetchDepth = prefetchDepth;
+    options.prefs = softwarePrefs();
+    options.pool.workerCount = 2;  // the design's N = 2
     options.pool.clipQueueCapacity = 3;
 
     DecoderClipFrameProvider provider(teardown, syntheticFactory(assets, counters), options);
@@ -154,7 +152,7 @@ RC_GTEST_PROP(PlaybackFrameFidelityProperty,
 
     // --- act + assert -------------------------------------------------------
     for (const auto& [clipIndex, offset] : requests) {
-        const PlacedClip&     p     = placed[clipIndex];
+        const PlacedClip& p = placed[clipIndex];
         const SyntheticAsset& asset = assets[static_cast<std::size_t>(p.assetIndex)];
 
         const Duration position = p.clip.timelineStart + p.step * static_cast<std::int64_t>(offset);
@@ -188,24 +186,24 @@ RC_GTEST_PROP(PlaybackFrameFidelityProperty,
 
     // Every decoder retired so far reached the teardown queue, and the queue
     // drains to empty — the eviction path never leaked a decoder.
-    RC_ASSERT(provider.pool().drainFor(std::chrono::duration_cast<std::chrono::milliseconds>(
-        kWaitCeiling)));
-    RC_ASSERT(teardown.drainFor(
+    RC_ASSERT(provider.pool().drainFor(
         std::chrono::duration_cast<std::chrono::milliseconds>(kWaitCeiling)));
+    RC_ASSERT(
+        teardown.drainFor(std::chrono::duration_cast<std::chrono::milliseconds>(kWaitCeiling)));
     RC_ASSERT(teardown.acceptedCount() >= provider.stats().evictions);
 }
 TEST(DecodeWorkerPool, PrefetchedFramesSatisfyLaterRequestsAndTheQueueIsBounded) {
-    Fixture              fx(16, 16, /*frameCount=*/16);
+    Fixture fx(16, 16, /*frameCount=*/16);
     DecoderTeardownQueue teardown;
 
     DecodeWorkerPoolOptions poolOptions;
-    poolOptions.workerCount       = 2;
+    poolOptions.workerCount = 2;
     poolOptions.clipQueueCapacity = 2;
     DecodeWorkerPool pool(teardown, poolOptions);
     EXPECT_EQ(pool.workerCount(), 2u);
 
-    ASSERT_TRUE(pool.activateAsset(fx.asset.assetId, fx.asset.path, softwarePrefs(), fx.factory())
-                    .isOk());
+    ASSERT_TRUE(
+        pool.activateAsset(fx.asset.assetId, fx.asset.path, softwarePrefs(), fx.factory()).isOk());
 
     const ClipId clipId = Uuid::generateV4();
     const Duration step = fx.step();
@@ -217,8 +215,8 @@ TEST(DecodeWorkerPool, PrefetchedFramesSatisfyLaterRequestsAndTheQueueIsBounded)
 
     // The queued frames are the right ones, in order.
     for (int index = 0; index < 2; ++index) {
-        auto frame = pool.decodeFor(fx.asset.assetId, clipId,
-                                    step * static_cast<std::int64_t>(index), step);
+        auto frame =
+            pool.decodeFor(fx.asset.assetId, clipId, step * static_cast<std::int64_t>(index), step);
         ASSERT_TRUE(frame.isOk()) << frame.error().toString();
         EXPECT_TRUE(framesEqual(frame.value().image, syntheticPixels(fx.asset, index)));
     }
@@ -231,23 +229,23 @@ TEST(DecodeWorkerPool, PrefetchedFramesSatisfyLaterRequestsAndTheQueueIsBounded)
 
     pool.retireAsset(fx.asset.assetId);
     EXPECT_EQ(pool.activeAssetCount(), 0u);
-    ASSERT_TRUE(teardown.drainFor(std::chrono::duration_cast<std::chrono::milliseconds>(
-        kWaitCeiling)));
+    ASSERT_TRUE(
+        teardown.drainFor(std::chrono::duration_cast<std::chrono::milliseconds>(kWaitCeiling)));
 }
 TEST(DecodeWorkerPool, ToSourceFrameRejectsUnusableDecodedFrames) {
     EXPECT_TRUE(toSourceFrame(DecodedFrame::endOfStream()).isError());
 
     // A CPU frame whose buffer is shorter than its declared geometry.
-    DecodedFrame short_ = DecodedFrame::cpu(Duration::zero(),
-                                            gpu::FrameDesc{4, 4, gpu::FrameFormat::RGBA8},
-                                            std::vector<std::byte>(8, std::byte{0}));
+    DecodedFrame short_ =
+        DecodedFrame::cpu(Duration::zero(), gpu::FrameDesc{4, 4, gpu::FrameFormat::RGBA8},
+                          std::vector<std::byte>(8, std::byte{0}));
     EXPECT_TRUE(toSourceFrame(short_).isError());
 
     // A well-formed CPU frame converts to an equally-sized source frame.
-    DecodedFrame good = DecodedFrame::cpu(Duration::zero(),
-                                          gpu::FrameDesc{4, 4, gpu::FrameFormat::RGBA8},
-                                          std::vector<std::byte>(4u * 4u * 4u, std::byte{0x7F}));
-    auto         converted = toSourceFrame(good);
+    DecodedFrame good =
+        DecodedFrame::cpu(Duration::zero(), gpu::FrameDesc{4, 4, gpu::FrameFormat::RGBA8},
+                          std::vector<std::byte>(4u * 4u * 4u, std::byte{0x7F}));
+    auto converted = toSourceFrame(good);
     ASSERT_TRUE(converted.isOk());
     EXPECT_EQ(converted.value().width, 4u);
     EXPECT_EQ(converted.value().height, 4u);

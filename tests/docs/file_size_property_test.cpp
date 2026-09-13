@@ -56,16 +56,12 @@ const std::map<std::string, std::size_t>& allowlist() {
         {"tests/docs/documentation_consistency_property_test.cpp", 1968},
         {"tests/services/mcp_protocol_property_test.cpp", 1883},
         {"tests/ui/shell_unit_test.cpp", 1846},
-        {"tests/services/export_coordinator_property_test.cpp", 1622},
         {"tests/docs/suite_hygiene_property_test.cpp", 1441},
         {"tests/services/offline_mode_availability_test.cpp", 1414},
+        {"tests/services/generative_atomicity_property_test.cpp", 1191},
         {"tests/services/generative_lifecycle_property_test.cpp", 1293},
         {"tests/services/offline_interpreter_property_test.cpp", 1127},
         {"tests/support/ReportParser.cpp", 1202},
-        {"tests/services/generative_atomicity_property_test.cpp", 1191},
-        {"tests/docs/documentation_consistency_test.cpp", 1190},
-        {"tests/docs/parity_report_property_test.cpp", 1053},
-        {"tests/services/remote_access_gate_property_test.cpp", 1019},
     };
     return pinned;
 }

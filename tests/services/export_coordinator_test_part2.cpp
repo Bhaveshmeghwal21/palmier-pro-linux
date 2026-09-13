@@ -11,7 +11,8 @@
 namespace palmier::services {
 namespace {
 
-using namespace palmier::services::testsupport_exportcoordinatortest;  // NOLINT(google-build-using-namespace)
+using namespace palmier::services::
+    testsupport_exportcoordinatortest;  // NOLINT(google-build-using-namespace)
 
 TEST_F(ExportCoordinatorTest, AVideoOnlyRequestConfiguresNoAudioStream) {
     BackendScript script;
@@ -40,7 +41,7 @@ TEST_F(ExportCoordinatorTest, TheExportRunsOnASnapshotSoALaterEditCannotChangeIt
     makeCoordinator(&script);
 
     ASSERT_TRUE(coordinator_->begin(request(out)).isOk());
-    seedTimeline(40); // a much longer timeline, applied to the LIVE session.
+    seedTimeline(40);  // a much longer timeline, applied to the LIVE session.
     ASSERT_GT(runToCompletion(), 0u);
 
     ASSERT_TRUE(coordinator_->lastOutcome().has_value());
@@ -54,7 +55,7 @@ TEST_F(ExportCoordinatorTest, UsesTheEncoderSelectorForASoftwareSelection) {
     makeCoordinator(&script);
 
     ExportRequest2 r = request(out);
-    r.preferHardware = false; // software was asked for: not a fallback.
+    r.preferHardware = false;  // software was asked for: not a fallback.
     ASSERT_TRUE(coordinator_->begin(r).isOk());
     ASSERT_GT(runToCompletion(), 0u);
 
@@ -74,7 +75,7 @@ TEST_F(ExportCoordinatorTest, UsesTheEncoderSelectorForASoftwareSelection) {
     EXPECT_EQ(selection.selection.parameters().resolution.width, kRes.width);
     EXPECT_EQ(selection.selection.parameters().resolution.height, kRes.height);
     EXPECT_EQ(selection.selection.parameters().bitrateBitsPerSecond, r.bitrateKbps * 1000);
-    EXPECT_EQ(selection.probe, media::ProbeOutcome::NotRun); // no probe cost with no hardware.
+    EXPECT_EQ(selection.probe, media::ProbeOutcome::NotRun);  // no probe cost with no hardware.
 }
 // ===========================================================================
 // Progress: monotonic, bounded, and at most one second apart (Requirement 7.3)
@@ -89,8 +90,8 @@ TEST_F(ExportCoordinatorTest, ProgressIsMonotonicBoundedAndDeliveredOnTheCalling
     // due — the cadence is exercised without a single sleep.
     ExportCoordinator::Options opts = options(&script);
     script.hookOnFrame = -1;
-    coordinator_ = std::make_unique<ExportCoordinator>(session_, *context_, teardown_,
-                                                       std::move(opts));
+    coordinator_ =
+        std::make_unique<ExportCoordinator>(session_, *context_, teardown_, std::move(opts));
 
     std::vector<ExportProgressReport> seen;
     std::thread::id deliveringThread{};
@@ -128,12 +129,11 @@ TEST_F(ExportCoordinatorTest, AStoppedClockStillDeliversTheZeroAndHundredPercent
     makeCoordinator(&script);
 
     std::vector<int> percents;
-    ASSERT_TRUE(coordinator_
-                    ->begin(request(out),
-                            [&percents](const ExportProgressReport& r) {
-                                percents.push_back(r.percent);
-                            })
-                    .isOk());
+    ASSERT_TRUE(
+        coordinator_
+            ->begin(request(out),
+                    [&percents](const ExportProgressReport& r) { percents.push_back(r.percent); })
+            .isOk());
     ASSERT_GT(runToCompletion(), 0u);
 
     ASSERT_GE(percents.size(), 2u);
@@ -161,7 +161,7 @@ TEST_F(ExportCoordinatorTest, CancelWithNoRunningExportIsHarmless) {
     BackendScript script;
     script.outputPath = scratchPath("cancel_idle");
     makeCoordinator(&script);
-    coordinator_->cancel(); // no worker exists.
+    coordinator_->cancel();  // no worker exists.
     EXPECT_FALSE(coordinator_->running());
     EXPECT_FALSE(coordinator_->lastOutcome().has_value());
 }
@@ -170,7 +170,7 @@ TEST_F(ExportCoordinatorTest, AnAudioFailureIdentifiesTheAudioStageAndLeavesNoFi
     const std::filesystem::path out = scratchPath("audio_failure");
     script.outputPath = out;
     makeCoordinator(&script);
-    script.failAudioOnBlock = 1; // the second interval's audio fails.
+    script.failAudioOnBlock = 1;  // the second interval's audio fails.
 
     ASSERT_TRUE(coordinator_->begin(request(out)).isOk());
     ASSERT_GT(runToCompletion(), 0u);
@@ -210,8 +210,8 @@ TEST_F(ExportCoordinatorTest, AFirstFrameHardwareFailureIsNotCalledMidExport) {
     opts.caps = nvidiaCaps();
     opts.availability = allVendorsCompiledIn();
     opts.selector.probe = [](gpu::CodecId, const gpu::GpuCaps&) { return true; };
-    opts.selector.awaiter = [](const media::CapabilityProbe&, gpu::CodecId,
-                               const gpu::GpuCaps&, std::chrono::milliseconds) {
+    opts.selector.awaiter = [](const media::CapabilityProbe&, gpu::CodecId, const gpu::GpuCaps&,
+                               std::chrono::milliseconds) {
         return media::ProbeOutcome::Supported;
     };
     coordinator_ =
@@ -254,12 +254,11 @@ TEST_F(ExportCoordinatorTest, ASecondConcurrentRequestIsRejectedWithoutDisturbin
     };
 
     std::vector<ExportProgressReport> firstProgress;
-    ASSERT_TRUE(coordinator_
-                    ->begin(request(out),
-                            [&firstProgress](const ExportProgressReport& r) {
-                                firstProgress.push_back(r);
-                            })
-                    .isOk());
+    ASSERT_TRUE(
+        coordinator_
+            ->begin(request(out),
+                    [&firstProgress](const ExportProgressReport& r) { firstProgress.push_back(r); })
+            .isOk());
 
     // The worker is now parked inside the first frame.
     ASSERT_EQ(hasReached.wait_for(kWaitBudget), std::future_status::ready);
@@ -341,9 +340,9 @@ TEST_F(ExportCoordinatorTest, TwoExportsCanRunOneAfterTheOther) {
 /// coordinator's own constants — the declarations are in two files (the tool
 /// surface depends only on Palmier::core) and this is what stops them drifting.
 TEST(ExportToolSchema, MatchesTheCoordinatorRanges) {
-    ProjectSession     session;
+    ProjectSession session;
     const ToolRegistry registry = buildDefaultToolRegistry(session);
-    const Tool*        tool = registry.find("timeline.export");
+    const Tool* tool = registry.find("timeline.export");
     ASSERT_NE(tool, nullptr);
 
     const ArgSpec* width = tool->schema.find("width");
@@ -383,13 +382,13 @@ TEST(ExportToolSchema, MatchesTheCoordinatorRanges) {
     }
 }
 TEST_F(ExportCoordinatorTest, ExportToolReportsEveryFieldRequirement72Names) {
-    BackendScript               script;
+    BackendScript script;
     const std::filesystem::path out = scratchPath("tool_success");
     script.outputPath = out;
     makeCoordinator(&script);
 
     const Tool::Handler handler = makeExportToolHandler(*coordinator_, session_);
-    Json                args = Json::object();
+    Json args = Json::object();
     args.set("outputPath", out.string());
     args.set("format", std::string("mp4"));
     args.set("width", static_cast<std::int64_t>(kRes.width));
@@ -428,7 +427,7 @@ TEST_F(ExportCoordinatorTest, ExportToolReportsEveryFieldRequirement72Names) {
     EXPECT_FALSE(readAllBytes(out).empty());
 }
 TEST_F(ExportCoordinatorTest, ExportToolMatchesTheDialogForTheSameRequest) {
-    BackendScript               script;
+    BackendScript script;
     const std::filesystem::path viaDialog = scratchPath("tool_vs_dialog_a");
     script.outputPath = viaDialog;
     makeCoordinator(&script);
@@ -446,7 +445,7 @@ TEST_F(ExportCoordinatorTest, ExportToolMatchesTheDialogForTheSameRequest) {
         script.outputPath = viaTool;
     }
     const Tool::Handler handler = makeExportToolHandler(*coordinator_, session_);
-    Json                args = Json::object();
+    Json args = Json::object();
     args.set("outputPath", viaTool.string());
     args.set("format", std::string("mp4"));
     args.set("width", static_cast<std::int64_t>(kRes.width));
@@ -463,9 +462,9 @@ TEST_F(ExportCoordinatorTest, ExportToolMatchesTheDialogForTheSameRequest) {
     // Every outcome field but the path is equal: the two callers really did run the
     // same export through the same coordinator.
     const Json expected = exportOutcomeToJson(dialogOutcome);
-    for (const char* field : {"framesEncoded", "plannedFrames", "encoderName",
-                              "usedHardwareEncode", "usedSoftwareFallback", "containsAudio",
-                              "audioFrames", "durationNs", "projectModified"}) {
+    for (const char* field : {"framesEncoded", "plannedFrames", "encoderName", "usedHardwareEncode",
+                              "usedSoftwareFallback", "containsAudio", "audioFrames", "durationNs",
+                              "projectModified"}) {
         ASSERT_EQ(expected.contains(field), toolResult.value().contains(field)) << field;
         if (expected.contains(field)) {
             EXPECT_EQ(expected.find(field)->dump(), toolResult.value().find(field)->dump())
@@ -475,7 +474,7 @@ TEST_F(ExportCoordinatorTest, ExportToolMatchesTheDialogForTheSameRequest) {
     EXPECT_NE(expected.stringOr("outputPath"), toolResult.value().stringOr("outputPath"));
 }
 TEST_F(ExportCoordinatorTest, ExportToolRunsThroughTheSharedToolRegistry) {
-    BackendScript               script;
+    BackendScript script;
     const std::filesystem::path out = scratchPath("tool_registry");
     script.outputPath = out;
     makeCoordinator(&script);
@@ -537,7 +536,7 @@ TEST_F(ExportCoordinatorTest, WritesAnSrtSidecarNextToTheVideoWhenTheProjectHasA
     // glyph render, exactly like the video frameProvider above stands in for a
     // real decode.
     opts.textRasterizer = [](const TextStyle&, std::uint32_t w,
-                            std::uint32_t h) -> Result<gpu::SourceFrame> {
+                             std::uint32_t h) -> Result<gpu::SourceFrame> {
         return gpu::SourceFrame::solid(w, h, gpu::RgbaColor{255, 255, 255, 255});
     };
     coordinator_ = std::make_unique<ExportCoordinator>(session_, *context_, teardown_, opts);

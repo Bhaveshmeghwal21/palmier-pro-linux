@@ -11,7 +11,8 @@
 namespace palmier::services {
 namespace {
 
-using namespace palmier::services::testsupport_agentequivalencepropertytest;  // NOLINT(google-build-using-namespace)
+using namespace palmier::services::
+    testsupport_agentequivalencepropertytest;  // NOLINT(google-build-using-namespace)
 
 // The fingerprint is the property's whole notion of "project state". A change the
 // fingerprint cannot see is a change the property cannot catch, so this proves it

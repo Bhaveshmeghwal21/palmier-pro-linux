@@ -11,7 +11,8 @@
 namespace palmier::services {
 namespace {
 
-using namespace palmier::services::testsupport_exportcoordinatortest;  // NOLINT(google-build-using-namespace)
+using namespace palmier::services::
+    testsupport_exportcoordinatortest;  // NOLINT(google-build-using-namespace)
 
 // ===========================================================================
 // validate() — rejection before anything is created (Requirements 7.9, 7.11)

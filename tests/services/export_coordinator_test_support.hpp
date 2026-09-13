@@ -28,7 +28,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
-#include <unistd.h> // getpid, for a per-process scratch directory name
+#include <unistd.h>  // getpid, for a per-process scratch directory name
 #include "core/Duration.hpp"
 #include "core/Error.hpp"
 #include "core/FrameRate.hpp"
@@ -50,10 +50,8 @@
 #include "services/ToolRegistry.hpp"
 #include "services/ToolSchema.hpp"
 
-
 namespace palmier::services {
 namespace testsupport_exportcoordinatortest {
-
 
 /// Bounded wait for every export in this file. Generous enough that a loaded host
 /// never trips it, finite so a stuck coordinator fails the test instead of hanging
@@ -113,7 +111,7 @@ public:
     }
 
 private:
-    std::mutex                            mutex_{};
+    std::mutex mutex_{};
     std::chrono::steady_clock::time_point now_{};
 };
 
@@ -139,16 +137,16 @@ struct BackendScript {
     bool failFinish{false};
     /// Called from inside encode() for this 0-based frame index, on the WORKER
     /// thread — the hook that makes cancellation deterministic.
-    int  hookOnFrame{-1};
+    int hookOnFrame{-1};
     std::function<void()> hook{};
 
     // Observations.
-    std::atomic<int>  encodeCalls{0};
-    std::atomic<int>  audioCalls{0};
-    std::atomic<int>  finishCalls{0};
+    std::atomic<int> encodeCalls{0};
+    std::atomic<int> audioCalls{0};
+    std::atomic<int> finishCalls{0};
     std::atomic<bool> created{false};
     std::atomic<bool> hadAudioSpec{false};
-    gpu::CodecRoute   route{};
+    gpu::CodecRoute route{};
     media::EncodeSpec spec{};
 };
 
@@ -215,12 +213,13 @@ public:
 
 private:
     BackendScript* script_;
-    std::ofstream  out_{};
+    std::ofstream out_{};
 };
 
 inline media::EncodeBackendFactory mockFactory(BackendScript* script) {
-    return [script](const media::EncodeSpec& spec, const gpu::CodecRoute& route)
-               -> Result<std::unique_ptr<media::IEncodeBackend>> {
+    return [script](
+               const media::EncodeSpec& spec,
+               const gpu::CodecRoute& route) -> Result<std::unique_ptr<media::IEncodeBackend>> {
         {
             std::lock_guard<std::mutex> lock(script->mutex);
             script->route = route;
@@ -228,16 +227,15 @@ inline media::EncodeBackendFactory mockFactory(BackendScript* script) {
         }
         script->created.store(true);
         script->hadAudioSpec.store(spec.audio.has_value());
-        return std::unique_ptr<media::IEncodeBackend>(
-            std::make_unique<FileWritingBackend>(script));
+        return std::unique_ptr<media::IEncodeBackend>(std::make_unique<FileWritingBackend>(script));
     };
 }
 
 /// A factory whose backend refuses to initialize — a hardware initialization
 /// failure before the first frame.
 inline media::EncodeBackendFactory failingInitFactory(std::atomic<int>* attempts) {
-    return [attempts](const media::EncodeSpec&, const gpu::CodecRoute&)
-               -> Result<std::unique_ptr<media::IEncodeBackend>> {
+    return [attempts](const media::EncodeSpec&,
+                      const gpu::CodecRoute&) -> Result<std::unique_ptr<media::IEncodeBackend>> {
         if (attempts != nullptr) attempts->fetch_add(1);
         return err<std::unique_ptr<media::IEncodeBackend>>(
             makeError(ErrorCode::Internal, "mock encoder initialization failure"));
@@ -275,16 +273,15 @@ protected:
         context_ = std::make_unique<gpu::GpuContext>(gpu::GpuContext::softwareFallback());
         // Two video clips of 4 frames each at 30 fps, plus one audio track, so the
         // timeline is non-empty and audio-bearing.
-        ASSERT_TRUE(session_.createProject("export-coordinator", FrameRate::fps30(), kRes,
-                                           defaultColorSpace())
-                        .isOk());
+        ASSERT_TRUE(
+            session_
+                .createProject("export-coordinator", FrameRate::fps30(), kRes, defaultColorSpace())
+                .isOk());
         seedTimeline(4);
         revisionBeforeExport_ = session_.revision();
     }
 
-    void TearDown() override {
-        coordinator_.reset();
-    }
+    void TearDown() override { coordinator_.reset(); }
 
     /// Give the session a timeline with `frames` frames of video and one unmuted
     /// audio clip. Built as a Project value and installed through the engine's
@@ -354,8 +351,8 @@ protected:
     }
 
     void makeCoordinator(BackendScript* script) {
-        coordinator_ = std::make_unique<ExportCoordinator>(session_, *context_, teardown_,
-                                                          options(script));
+        coordinator_ =
+            std::make_unique<ExportCoordinator>(session_, *context_, teardown_, options(script));
     }
 
     /// Run one export to completion, returning the number of delivered
@@ -367,14 +364,13 @@ protected:
         return delivered;
     }
 
-    ProjectSession                     session_{};
-    media::DecoderTeardownQueue        teardown_{};
-    std::unique_ptr<gpu::GpuContext>   context_{};
+    ProjectSession session_{};
+    media::DecoderTeardownQueue teardown_{};
+    std::unique_ptr<gpu::GpuContext> context_{};
     std::unique_ptr<ExportCoordinator> coordinator_{};
-    ManualClock                        clock_{};
-    std::uint64_t                      revisionBeforeExport_{0};
+    ManualClock clock_{};
+    std::uint64_t revisionBeforeExport_{0};
 };
-
 
 }  // namespace testsupport_exportcoordinatortest
 }  // namespace palmier::services

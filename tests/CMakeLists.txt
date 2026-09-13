@@ -2899,7 +2899,8 @@ palmier_register_test(palmier_media_export_audio_tests)
 add_executable(palmier_services_export_coordinator_tests
     services/export_coordinator_test.cpp
     services/export_coordinator_test_part2.cpp
-    services/export_coordinator_property_test.cpp)
+    services/export_coordinator_property_test.cpp
+    services/export_coordinator_property_test_part2.cpp)
 target_link_libraries(palmier_services_export_coordinator_tests PRIVATE
     Palmier::services
     Palmier::test_support)
@@ -3083,6 +3084,7 @@ target_link_libraries(palmier_docs_tests PRIVATE
 # ---------------------------------------------------------------------------
 target_sources(palmier_docs_tests PRIVATE
     docs/documentation_consistency_test.cpp
+    docs/documentation_consistency_test_part2.cpp
     docs/file_size_property_test.cpp
     docs/suite_hygiene_property_test.cpp
     support/DocumentationChecker.cpp
@@ -3176,6 +3178,7 @@ target_sources(palmier_docs_tests PRIVATE
 # ---------------------------------------------------------------------------
 target_sources(palmier_docs_tests PRIVATE
     docs/parity_report_property_test.cpp
+    docs/parity_report_property_test_part2.cpp
     docs/port_backlog_property_test.cpp)
 
 # ---------------------------------------------------------------------------

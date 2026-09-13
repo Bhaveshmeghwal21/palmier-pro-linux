@@ -37,7 +37,6 @@
 #include "media/DecoderTeardownQueue.hpp"
 #include "media/MediaDecoder.hpp"
 
-
 namespace palmier::media {
 namespace testsupport_audioenginepropertytest {
 
@@ -80,10 +79,10 @@ public:
         bufferFrames.clear();
         return inner_.start(config);
     }
-    void                       stop() noexcept override { inner_.stop(); }
-    [[nodiscard]] bool         running() const noexcept override { return inner_.running(); }
-    [[nodiscard]] AudioFormat  format() const noexcept override { return inner_.format(); }
-    [[nodiscard]] std::size_t  quantumFrames() const noexcept override {
+    void stop() noexcept override { inner_.stop(); }
+    [[nodiscard]] bool running() const noexcept override { return inner_.running(); }
+    [[nodiscard]] AudioFormat format() const noexcept override { return inner_.format(); }
+    [[nodiscard]] std::size_t quantumFrames() const noexcept override {
         return inner_.quantumFrames();
     }
     [[nodiscard]] Result<void> submit(const AudioBuffer& buffer) override {
@@ -100,7 +99,7 @@ public:
     }
 
     /// Every sample delivered in this run, interleaved, in delivery order.
-    std::vector<float>       samples{};
+    std::vector<float> samples{};
     std::vector<std::size_t> bufferFrames{};
 
 private:
@@ -116,11 +115,11 @@ public:
         ++startAttempts;
         return makeError(ErrorCode::Io, "no audio device could be opened");
     }
-    void                        stop() noexcept override {}
-    [[nodiscard]] bool          running() const noexcept override { return false; }
-    [[nodiscard]] AudioFormat   format() const noexcept override { return AudioFormat{}; }
-    [[nodiscard]] std::size_t   quantumFrames() const noexcept override { return 0; }
-    [[nodiscard]] Result<void>  submit(const AudioBuffer&) override {
+    void stop() noexcept override {}
+    [[nodiscard]] bool running() const noexcept override { return false; }
+    [[nodiscard]] AudioFormat format() const noexcept override { return AudioFormat{}; }
+    [[nodiscard]] std::size_t quantumFrames() const noexcept override { return 0; }
+    [[nodiscard]] Result<void> submit(const AudioBuffer&) override {
         return makeError(ErrorCode::FailedPrecondition, "the sink is not open");
     }
     [[nodiscard]] std::uint64_t playedFrames() const noexcept override { return 0; }
@@ -136,13 +135,13 @@ public:
 /// What one synthetic asset decodes. A constant DC level makes the correct mixed
 /// value knowable in closed form (see the file comment).
 struct AssetScript {
-    bool        hasAudioStream = true;
-    bool        declareParameters = true;
-    int         sampleRate = 48'000;
-    int         channels = 2;
-    float       level = 0.25f;   ///< Every sample of every block.
+    bool hasAudioStream = true;
+    bool declareParameters = true;
+    int sampleRate = 48'000;
+    int channels = 2;
+    float level = 0.25f;  ///< Every sample of every block.
     std::size_t blockFrames = 512;
-    Duration    duration = Duration::fromSeconds(120.0);
+    Duration duration = Duration::fromSeconds(120.0);
     /// Source position at which decodeAudio() starts failing (Requirement 6.9).
     std::optional<Duration> failFrom{};
 };
@@ -179,7 +178,7 @@ public:
     [[nodiscard]] const MediaInfo& info() const override { return info_; }
 
     [[nodiscard]] Result<BackendFrame> decode(bool) override { return BackendFrame::eos(); }
-    [[nodiscard]] Result<void>         seek(Duration) override { return ok(); }
+    [[nodiscard]] Result<void> seek(Duration) override { return ok(); }
 
     [[nodiscard]] Result<BackendAudioFrame> decodeAudio(int) override {
         if (script_.failFrom.has_value() && position_ >= *script_.failFrom) {
@@ -198,10 +197,10 @@ public:
                                    script_.level);
         BackendAudioFrame frame;
         frame.timestamp = position_;
-        frame.buffer = AudioBuffer::interleaved(script_.sampleRate, script_.channels,
-                                                std::move(samples));
-        position_ = position_ + framesToDuration(static_cast<std::uint64_t>(frames),
-                                                 script_.sampleRate);
+        frame.buffer =
+            AudioBuffer::interleaved(script_.sampleRate, script_.channels, std::move(samples));
+        position_ =
+            position_ + framesToDuration(static_cast<std::uint64_t>(frames), script_.sampleRate);
         return frame;
     }
 
@@ -212,8 +211,8 @@ public:
 
 private:
     AssetScript script_;
-    MediaInfo   info_{};
-    Duration    position_{};
+    MediaInfo info_{};
+    Duration position_{};
 };
 
 /// Registry of scripted assets keyed by the path a clip's asset reference carries.
@@ -221,7 +220,7 @@ class AssetLibrary {
 public:
     /// Register `script` under a fresh asset id and return the reference clips use.
     [[nodiscard]] MediaAssetRef add(AssetScript script) {
-        const Uuid  id = Uuid::generateV4();
+        const Uuid id = Uuid::generateV4();
         std::string path = "synthetic://asset-" + id.toString();
         scripts_.emplace(path, script);
         return MediaAssetRef{id, path};
@@ -230,7 +229,7 @@ public:
     [[nodiscard]] DecodeBackendFactory factory() const {
         // The registry outlives every engine in each property case.
         const auto* scripts = &scripts_;
-        return [scripts](const std::filesystem::path&           path,
+        return [scripts](const std::filesystem::path& path,
                          const DecodePrefs&) -> Result<std::unique_ptr<IDecodeBackend>> {
             auto it = scripts->find(path.string());
             if (it == scripts->end()) {
@@ -259,8 +258,9 @@ private:
 }
 
 /// Append an audio track holding exactly one clip, and return the clip id.
-inline ClipId addAudioClip(Project& project, const MediaAssetRef& asset, Duration start, Duration length,
-                    double gain, bool muted, Duration sourceIn = Duration::zero()) {
+inline ClipId addAudioClip(Project& project, const MediaAssetRef& asset, Duration start,
+                           Duration length, double gain, bool muted,
+                           Duration sourceIn = Duration::zero()) {
     Track track;
     track.id = Uuid::generateV4();
     track.kind = TrackKind::Audio;
@@ -296,22 +296,27 @@ inline ClipId addAudioClip(Project& project, const MediaAssetRef& asset, Duratio
 /// graph's exact identity path) then rates that force a real conversion.
 [[nodiscard]] inline int rateFor(int index) {
     switch (index) {
-        case 0: return 48'000;
-        case 1: return 44'100;
-        case 2: return 32'000;
-        case 3: return 96'000;
-        default: return 48'000;
+        case 0:
+            return 48'000;
+        case 1:
+            return 44'100;
+        case 2:
+            return 32'000;
+        case 3:
+            return 96'000;
+        default:
+            return 48'000;
     }
 }
 
 /// A configured engine plus everything it borrows, so a property can build one in
 /// a line and let it die at scope exit.
 struct EngineFixture {
-    TestClock            clock{};
+    TestClock clock{};
     DecoderTeardownQueue teardown{};
-    AssetLibrary         library{};
-    Project              project{makeProject()};
-    RecordingSink*       sink{nullptr};
+    AssetLibrary library{};
+    Project project{makeProject()};
+    RecordingSink* sink{nullptr};
 
     [[nodiscard]] std::unique_ptr<AudioEngine> engine(std::size_t quantumFrames = 256) {
         auto owned = std::make_unique<RecordingSink>(clock.fn());
@@ -324,8 +329,7 @@ struct EngineFixture {
     }
 };
 
-} // namespace
-
+}  // namespace
 
 }  // namespace testsupport_audioenginepropertytest
 }  // namespace palmier::media

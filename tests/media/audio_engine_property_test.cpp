@@ -10,7 +10,8 @@
 
 namespace palmier::media {
 
-using namespace palmier::media::testsupport_audioenginepropertytest;  // NOLINT(google-build-using-namespace)
+using namespace palmier::media::
+    testsupport_audioenginepropertytest;  // NOLINT(google-build-using-namespace)
 
 // ---------------------------------------------------------------------------
 // Property 27

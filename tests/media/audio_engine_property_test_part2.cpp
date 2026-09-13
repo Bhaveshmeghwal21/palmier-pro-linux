@@ -10,14 +10,15 @@
 
 namespace palmier::media {
 
-using namespace palmier::media::testsupport_audioenginepropertytest;  // NOLINT(google-build-using-namespace)
+using namespace palmier::media::
+    testsupport_audioenginepropertytest;  // NOLINT(google-build-using-namespace)
 
 // ---------------------------------------------------------------------------
 // Unit tests — NullAudioSink (task 8.3)
 // ---------------------------------------------------------------------------
 
 TEST(NullAudioSinkTest, AdvancesMonotonicPositionFromTheInjectedSteadyClock) {
-    TestClock     clock;
+    TestClock clock;
     NullAudioSink sink{clock.fn()};
 
     ASSERT_TRUE(sink.start(AudioSinkConfig{audioOutputFormat(), 480}).isOk());
@@ -47,7 +48,7 @@ TEST(NullAudioSinkTest, AdvancesMonotonicPositionFromTheInjectedSteadyClock) {
     EXPECT_EQ(sink.playedFrames(), 4'800u);
 }
 TEST(NullAudioSinkTest, RejectsMisuseAndReportsTheConfiguredGeometry) {
-    TestClock     clock;
+    TestClock clock;
     NullAudioSink sink{clock.fn()};
 
     const AudioBuffer block(48'000, 2, 128);
@@ -80,10 +81,10 @@ TEST(AudioSinkTest, RequestsASmallerQuantumAboveFortyEightFramesPerSecond) {
 
 TEST(AudioEngineTest, UnavailableOutputSuppressesAudioKeepsTheClockAndRaisesANotice) {
     // Requirement 6.7.
-    TestClock            clock;
+    TestClock clock;
     DecoderTeardownQueue teardown;
-    AssetLibrary         library;
-    Project              project = makeProject();
+    AssetLibrary library;
+    Project project = makeProject();
 
     AssetScript script;
     script.level = 0.5f;
@@ -92,8 +93,12 @@ TEST(AudioEngineTest, UnavailableOutputSuppressesAudioKeepsTheClockAndRaisesANot
 
     AudioEngineOptions options;
     options.quantumFrames = 480;  // 10 ms
-    AudioEngine engine{[&project] { return &project; }, std::make_unique<UnavailableSink>(),
-                       teardown, library.factory(), options, clock.fn()};
+    AudioEngine engine{[&project] { return &project; },
+                       std::make_unique<UnavailableSink>(),
+                       teardown,
+                       library.factory(),
+                       options,
+                       clock.fn()};
 
     const auto startedAt = clock.now();
     ASSERT_TRUE(engine.start(Duration::zero()).isOk());  // not an error (6.7)
@@ -120,10 +125,10 @@ TEST(AudioEngineTest, UnavailableOutputSuppressesAudioKeepsTheClockAndRaisesANot
 }
 TEST(AudioEngineTest, RetiresAudioDecodersThroughTheTeardownQueue) {
     // Requirement 14.8 / upstream PR 405: the audio decoder reuses the queue.
-    TestClock            clock;
+    TestClock clock;
     DecoderTeardownQueue teardown;
-    AssetLibrary         library;
-    Project              project = makeProject();
+    AssetLibrary library;
+    Project project = makeProject();
 
     for (int i = 0; i < 3; ++i) {
         AssetScript script;
@@ -156,10 +161,10 @@ TEST(AudioEngineTest, RetiresAudioDecodersThroughTheTeardownQueue) {
     EXPECT_EQ(teardown.acceptedCount(), teardown.retiredCount());
 }
 TEST(AudioEngineTest, MixesAtTheFixedOutputFormatAndRefusesMisuse) {
-    TestClock            clock;
+    TestClock clock;
     DecoderTeardownQueue teardown;
-    AssetLibrary         library;
-    Project              project = makeProject();
+    AssetLibrary library;
+    Project project = makeProject();
 
     AudioEngineOptions options;
     options.quantumFrames = 256;
@@ -182,8 +187,7 @@ TEST(AudioEngineTest, MixesAtTheFixedOutputFormatAndRefusesMisuse) {
     auto delivered = engine.pump();
     ASSERT_TRUE(delivered.isOk());
     EXPECT_EQ(delivered.value(), 256u);
-    EXPECT_EQ(engine.mixPosition(),
-              Duration::fromSeconds(1.0) + framesToDuration(256, 48'000));
+    EXPECT_EQ(engine.mixPosition(), Duration::fromSeconds(1.0) + framesToDuration(256, 48'000));
 
     // An empty project mixes to silence with no error.
     EXPECT_TRUE(engine.errors().empty());
@@ -191,9 +195,8 @@ TEST(AudioEngineTest, MixesAtTheFixedOutputFormatAndRefusesMisuse) {
 
     // renderRange refuses an inverted range and yields exact silence for an empty
     // project (Requirement 6.11).
-    EXPECT_TRUE(engine
-                    .renderRange(project, Duration::fromSeconds(1.0), Duration::zero())
-                    .isError());
+    EXPECT_TRUE(
+        engine.renderRange(project, Duration::fromSeconds(1.0), Duration::zero()).isError());
     auto silent = engine.renderRange(project, Duration::zero(), Duration::fromSeconds(0.5));
     ASSERT_TRUE(silent.isOk());
     EXPECT_EQ(silent.value().frameCount(), 24'000u);
@@ -201,10 +204,10 @@ TEST(AudioEngineTest, MixesAtTheFixedOutputFormatAndRefusesMisuse) {
 }
 TEST(AudioEngineTest, AnAssetThatCannotBeOpenedSilencesTheClipAndNamesIt) {
     // Requirement 6.9 for the "decoder cannot even be opened" case.
-    TestClock            clock;
+    TestClock clock;
     DecoderTeardownQueue teardown;
-    AssetLibrary         library;
-    Project              project = makeProject();
+    AssetLibrary library;
+    Project project = makeProject();
 
     // An asset the synthetic factory knows nothing about.
     MediaAssetRef missing{Uuid::generateV4(), "synthetic://not-registered"};

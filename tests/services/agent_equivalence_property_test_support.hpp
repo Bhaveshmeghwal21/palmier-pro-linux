@@ -46,10 +46,8 @@
 #include "services/ProjectStore.hpp"
 #include "services/ToolRegistry.hpp"
 
-
 namespace palmier::services {
 namespace testsupport_agentequivalencepropertytest {
-
 
 namespace fs = std::filesystem;
 
@@ -65,8 +63,8 @@ public:
     ScratchDir() {
         static std::atomic<std::uint64_t> counter{0};
         root_ = fs::temp_directory_path() /
-                ("palmier_agent_equiv_" + std::to_string(static_cast<long long>(::getpid())) +
-                 "_" + std::to_string(counter.fetch_add(1)));
+                ("palmier_agent_equiv_" + std::to_string(static_cast<long long>(::getpid())) + "_" +
+                 std::to_string(counter.fetch_add(1)));
         std::error_code ec;
         fs::remove_all(root_, ec);
         fs::create_directories(root_, ec);
@@ -100,10 +98,8 @@ public:
     /// An absolute path whose PARENT does not exist, so a write into it fails for
     /// a reason that does not depend on the process's user (the suite runs as
     /// root, which bypasses permission bits).
-    [[nodiscard]] fs::path unwritablePath(std::string_view tag,
-                                          std::string_view extension) const {
-        return root_ / "no-such-directory" /
-               (std::string(tag) + std::string(extension));
+    [[nodiscard]] fs::path unwritablePath(std::string_view tag, std::string_view extension) const {
+        return root_ / "no-such-directory" / (std::string(tag) + std::string(extension));
     }
 
 private:
@@ -121,8 +117,8 @@ private:
     static constexpr std::size_t kDashes[] = {8, 13, 18, 23};
     for (std::size_t i = 0; i < kLength; ++i) {
         const char c = text[at + i];
-        const bool isDashPosition = (i == kDashes[0] || i == kDashes[1] ||
-                                     i == kDashes[2] || i == kDashes[3]);
+        const bool isDashPosition =
+            (i == kDashes[0] || i == kDashes[1] || i == kDashes[2] || i == kDashes[3]);
         if (isDashPosition) {
             if (c != '-') return false;
         } else if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
@@ -138,7 +134,7 @@ private:
     for (std::size_t i = 0; i + 36 <= text.size();) {
         if (uuidAt(text, i)) {
             const std::string uuid = text.substr(i, 36);
-            bool              seen = false;
+            bool seen = false;
             for (const std::string& earlier : found) {
                 if (earlier == uuid) {
                     seen = true;
@@ -162,10 +158,10 @@ private:
 /// This is the ONE concession to non-determinism in the whole property: the value
 /// of an identifier that did not exist before the invocation. Count, position,
 /// multiplicity and order of appearance are all preserved.
-[[nodiscard]] inline std::string canonicalizeFreshIds(const std::string&              text,
-                                               const std::vector<std::string>& known) {
+[[nodiscard]] inline std::string canonicalizeFreshIds(const std::string& text,
+                                                      const std::vector<std::string>& known) {
     std::map<std::string, std::string> placeholders;
-    std::size_t                        next = 0;
+    std::size_t next = 0;
     for (const std::string& uuid : uuidsIn(text)) {
         bool isKnown = false;
         for (const std::string& k : known) {
@@ -184,7 +180,7 @@ private:
     for (std::size_t i = 0; i < text.size();) {
         if (uuidAt(text, i)) {
             const std::string uuid = text.substr(i, 36);
-            const auto        it = placeholders.find(uuid);
+            const auto it = placeholders.find(uuid);
             out += (it == placeholders.end()) ? uuid : it->second;
             i += 36;
         } else {
@@ -205,21 +201,21 @@ private:
 /// arguments and the failure comes from the engine or the hook.
 enum class Sabotage {
     None,
-    BogusSelection,    ///< the selected clip is not in the project
-    PlayheadOutside,   ///< the playhead is past the selected clip's end
-    BogusTracks,       ///< track ordinals resolve to identifiers no track has
-    MissingImportFile, ///< `import <path>` names a file that does not exist
-    UnwritableExport,  ///< `export as mp4 to <path>` names a missing directory
-    UnwritableSave,    ///< the document path's parent directory does not exist
+    BogusSelection,     ///< the selected clip is not in the project
+    PlayheadOutside,    ///< the playhead is past the selected clip's end
+    BogusTracks,        ///< track ordinals resolve to identifiers no track has
+    MissingImportFile,  ///< `import <path>` names a file that does not exist
+    UnwritableExport,   ///< `export as mp4 to <path>` names a missing directory
+    UnwritableSave,     ///< the document path's parent directory does not exist
 };
 
 struct World {
-    ScratchDir        scratch;
-    Project           project;
-    std::vector<Uuid> trackIds;      ///< in project order; index i is ordinal i+1
-    Uuid              clipId;        ///< a clip with room on either side to split
-    std::int64_t      clipStartNs = 0;
-    std::int64_t      clipEndNs = 0;
+    ScratchDir scratch;
+    Project project;
+    std::vector<Uuid> trackIds;  ///< in project order; index i is ordinal i+1
+    Uuid clipId;                 ///< a clip with room on either side to split
+    std::int64_t clipStartNs = 0;
+    std::int64_t clipEndNs = 0;
 
     Sabotage sabotage = Sabotage::None;
 
@@ -237,23 +233,21 @@ struct World {
     // `context()` is read once per interpretation and a freshly generated id per
     // read would hand the two paths different arguments — the property would then
     // be failing on the harness rather than on the product.
-    Uuid              absentClipId = Uuid::generateV4();
-    std::vector<Uuid> absentTrackIds = {Uuid::generateV4(), Uuid::generateV4(),
-                                        Uuid::generateV4()};
+    Uuid absentClipId = Uuid::generateV4();
+    std::vector<Uuid> absentTrackIds = {Uuid::generateV4(), Uuid::generateV4(), Uuid::generateV4()};
 
     /// The editor context both interpreters read. Identical on both sides by
     /// construction — it is a property of the world, not of a session — and stable
     /// across reads.
     [[nodiscard]] EditorContext context() const {
         EditorContext context;
-        context.selectedClipId =
-            (sabotage == Sabotage::BogusSelection) ? absentClipId  // no clip has this id
-                                                   : clipId;
+        context.selectedClipId = (sabotage == Sabotage::BogusSelection)
+                                     ? absentClipId  // no clip has this id
+                                     : clipId;
         context.playheadNs = (sabotage == Sabotage::PlayheadOutside)
                                  ? clipEndNs + 1'000'000'000
                                  : clipStartNs + (clipEndNs - clipStartNs) / 2;
-        context.trackIds =
-            (sabotage == Sabotage::BogusTracks) ? absentTrackIds : trackIds;
+        context.trackIds = (sabotage == Sabotage::BogusTracks) ? absentTrackIds : trackIds;
         context.documentPath = documentPath;
         return context;
     }
@@ -339,18 +333,17 @@ public:
         hooks.importMedia = [this](const fs::path& path) -> Result<ImportedAsset> {
             std::error_code ec;
             if (!fs::exists(path, ec)) {
-                return err<ImportedAsset>(makeError(
-                    ErrorCode::NotFound, "media.import: no such file: " + path.string()));
+                return err<ImportedAsset>(
+                    makeError(ErrorCode::NotFound, "media.import: no such file: " + path.string()));
             }
             std::map<std::string, Uuid>& ids = *world_.importIds;
-            const auto                   it = ids.find(path.string());
-            const Uuid                   assetId =
-                (it == ids.end()) ? ids.emplace(path.string(), Uuid::generateV4()).first->second
-                                                : it->second;
+            const auto it = ids.find(path.string());
+            const Uuid assetId = (it == ids.end())
+                                     ? ids.emplace(path.string(), Uuid::generateV4()).first->second
+                                     : it->second;
 
             const MediaAssetRef asset(assetId, path.string());
-            if (Result<void> added = session_.mediaLibrary().importAsset(asset);
-                added.isError()) {
+            if (Result<void> added = session_.mediaLibrary().importAsset(asset); added.isError()) {
                 return err<ImportedAsset>(std::move(added).error());
             }
             ImportedAsset imported;
@@ -371,8 +364,8 @@ public:
             }
             std::ofstream out(outputPath, std::ios::binary);
             if (!out) {
-                return err<Json>(makeError(ErrorCode::Io,
-                                           "timeline.export: cannot write " + outputPath));
+                return err<Json>(
+                    makeError(ErrorCode::Io, "timeline.export: cannot write " + outputPath));
             }
             out << "palmier export";
             Json result = Json::object();
@@ -385,15 +378,15 @@ public:
         executor_ = std::make_unique<McpToolExecutor>(registry_, &session_);
     }
 
-    [[nodiscard]] ProjectSession&     session() noexcept { return session_; }
+    [[nodiscard]] ProjectSession& session() noexcept { return session_; }
     [[nodiscard]] const ToolRegistry& registry() const noexcept { return registry_; }
-    [[nodiscard]] McpToolExecutor&    executor() noexcept { return *executor_; }
+    [[nodiscard]] McpToolExecutor& executor() noexcept { return *executor_; }
 
     /// The interpreter this stack's agent uses: the real offline interpreter over
     /// the world's context, with the network seam armed to fail the test.
     [[nodiscard]] OfflineIntentInterpreter interpreter() const {
         OfflineIntentInterpreter::Options options;
-        const World*                      world = &world_;
+        const World* world = &world_;
         options.context = [world] { return world->context(); };
         options.network = [](std::string_view endpoint) -> Result<void> {
             ADD_FAILURE() << "the offline interpreter reached for the network: " << endpoint;
@@ -423,9 +416,9 @@ public:
     [[nodiscard]] std::size_t redoDepth() const { return session_.engine().redoDepth(); }
 
 private:
-    const World&                     world_;
-    ProjectSession                   session_;
-    ToolRegistry                     registry_;
+    const World& world_;
+    ProjectSession session_;
+    ToolRegistry registry_;
     std::unique_ptr<McpToolExecutor> executor_;
 };
 
@@ -447,7 +440,7 @@ public:
 /// history are a documented no-op, not a failure).
 struct FailableTool {
     const char* toolName;
-    Sabotage    sabotage;
+    Sabotage sabotage;
 };
 
 inline const std::vector<FailableTool>& failableTools() {
@@ -478,9 +471,9 @@ inline const std::vector<FailableTool>& failableTools() {
 /// untouched context.
 struct DrawnCase {
     std::unique_ptr<World> world;
-    PhrasePattern          pattern;
-    std::string            utterance;
-    bool                   forcedToFail = false;
+    PhrasePattern pattern;
+    std::string utterance;
+    bool forcedToFail = false;
 };
 
 [[nodiscard]] inline DrawnCase drawCase() {
@@ -537,7 +530,6 @@ inline void primeHistory(Stack& stack, const World& world, int priming) {
         (void)stack.executor().executeTool("edit.undo", Json::object());
     }
 }
-
 
 }  // namespace testsupport_agentequivalencepropertytest
 }  // namespace palmier::services

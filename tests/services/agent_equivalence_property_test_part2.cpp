@@ -11,7 +11,8 @@
 namespace palmier::services {
 namespace {
 
-using namespace palmier::services::testsupport_agentequivalencepropertytest;  // NOLINT(google-build-using-namespace)
+using namespace palmier::services::
+    testsupport_agentequivalencepropertytest;  // NOLINT(google-build-using-namespace)
 
 // ===========================================================================
 // Feature: end-to-end-editor-integration, Property 62: The agent path equals a
@@ -49,7 +50,7 @@ using namespace palmier::services::testsupport_agentequivalencepropertytest;  //
 // ===========================================================================
 RC_GTEST_PROP(AgentEquivalenceProperties, TheAgentPathEqualsADirectToolInvocation, ()) {
     const DrawnCase drawn = drawCase();
-    const World&    world = *drawn.world;
+    const World& world = *drawn.world;
     // 0 = pristine history, 1 = one applied edit (so `undo` has something to do),
     // 2 = one applied edit then undone (so `redo` has something to do).
     const int priming = *rc::gen::element(0, 1, 2);
@@ -75,7 +76,7 @@ RC_GTEST_PROP(AgentEquivalenceProperties, TheAgentPathEqualsADirectToolInvocatio
     // two interpreters are separately asserted to agree on them, which is why
     // sharing them is not hiding anything.
     const OfflineIntentInterpreter agentInterpreter = agentStack.interpreter();
-    const Result<AgentIntent>      interpreted = agentInterpreter.interpret(drawn.utterance);
+    const Result<AgentIntent> interpreted = agentInterpreter.interpret(drawn.utterance);
     RC_PRE(interpreted.isOk());  // Property 62 quantifies over utterances that MAP
     const AgentIntent& intent = interpreted.value();
 
@@ -86,7 +87,7 @@ RC_GTEST_PROP(AgentEquivalenceProperties, TheAgentPathEqualsADirectToolInvocatio
     RC_ASSERT(interpretedAgain.value().arguments.dump() == intent.arguments.dump());
 
     // --- The agent path: interpreter -> orchestrator -> executor -----------
-    AlwaysAuthorized  gate;
+    AlwaysAuthorized gate;
     AgentOrchestrator agent(agentStack.executor(), gate, agentInterpreter.asInterpreter());
     const Result<AgentTurn> agentOutcome = agent.sendMessage(drawn.utterance);
 
@@ -126,10 +127,9 @@ RC_GTEST_PROP(AgentEquivalenceProperties, TheAgentPathEqualsADirectToolInvocatio
     const std::string canonicalAgent = canonicalizeFreshIds(afterAgent, knownIds);
     const std::string canonicalDirect = canonicalizeFreshIds(afterDirect, knownIds);
     if (canonicalAgent != canonicalDirect) {
-        RC_FAIL("the agent path and a direct invocation of '" + intent.toolName +
-                "' with " + intent.arguments.dump() +
-                " left different states.\nagent:\n" + canonicalAgent + "\ndirect:\n" +
-                canonicalDirect);
+        RC_FAIL("the agent path and a direct invocation of '" + intent.toolName + "' with " +
+                intent.arguments.dump() + " left different states.\nagent:\n" + canonicalAgent +
+                "\ndirect:\n" + canonicalDirect);
     }
 
     // 5. Requirement 11.5's two halves, now that the paths are known to agree.
@@ -167,8 +167,7 @@ TEST(AgentEquivalenceCanonicalization, HidesFreshIdentifierValuesAndNothingElse)
     // A known id survives verbatim; a fresh one becomes a positional placeholder.
     EXPECT_EQ(canonicalizeFreshIds("track " + known.toString(), knownIds),
               "track " + known.toString());
-    EXPECT_EQ(canonicalizeFreshIds("track " + freshA.toString(), knownIds),
-              "track <fresh-uuid-0>");
+    EXPECT_EQ(canonicalizeFreshIds("track " + freshA.toString(), knownIds), "track <fresh-uuid-0>");
 
     // Two different fresh ids get two different placeholders...
     EXPECT_EQ(canonicalizeFreshIds(freshA.toString() + " " + freshB.toString(), knownIds),
@@ -189,11 +188,9 @@ TEST(AgentEquivalenceCanonicalization, HidesFreshIdentifierValuesAndNothingElse)
     // first fresh id recurs does not canonicalize like one in which the second
     // does, so a path that cross-referenced the wrong object still fails.
     EXPECT_NE(canonicalizeFreshIds(
-                  freshA.toString() + " " + freshB.toString() + " " + freshA.toString(),
-                  knownIds),
+                  freshA.toString() + " " + freshB.toString() + " " + freshA.toString(), knownIds),
               canonicalizeFreshIds(
-                  freshA.toString() + " " + freshB.toString() + " " + freshB.toString(),
-                  knownIds));
+                  freshA.toString() + " " + freshB.toString() + " " + freshB.toString(), knownIds));
 
     // Nor is putting a fresh id where a pre-existing one belongs.
     EXPECT_NE(canonicalizeFreshIds("track " + known.toString(), knownIds),
@@ -204,8 +201,7 @@ TEST(AgentEquivalenceCanonicalization, HidesFreshIdentifierValuesAndNothingElse)
               canonicalizeFreshIds(freshA.toString() + " " + freshB.toString(), knownIds));
 
     // Non-UUID text is untouched, including near-misses of the UUID shape.
-    EXPECT_EQ(canonicalizeFreshIds("plain text, 1234-56, {}", knownIds),
-              "plain text, 1234-56, {}");
+    EXPECT_EQ(canonicalizeFreshIds("plain text, 1234-56, {}", knownIds), "plain text, 1234-56, {}");
 }
 
 }  // namespace

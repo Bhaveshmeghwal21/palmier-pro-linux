@@ -11,7 +11,8 @@
 namespace palmier::services {
 namespace {
 
-using namespace palmier::services::testsupport_projecttoolspropertytest;  // NOLINT(google-build-using-namespace)
+using namespace palmier::services::
+    testsupport_projecttoolspropertytest;  // NOLINT(google-build-using-namespace)
 
 // ===========================================================================
 // Feature: end-to-end-editor-integration, Property 8: project.create carries

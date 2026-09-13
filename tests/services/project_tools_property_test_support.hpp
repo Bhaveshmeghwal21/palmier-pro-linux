@@ -48,10 +48,8 @@
 #include "services/ProjectStore.hpp"
 #include "services/ToolSchema.hpp"
 
-
 namespace palmier::services {
 namespace testsupport_projecttoolspropertytest {
-
 
 namespace fs = std::filesystem;
 
@@ -66,10 +64,9 @@ class ScratchDir {
 public:
     ScratchDir() {
         static std::atomic<std::uint64_t> counter{0};
-        root_ = fs::temp_directory_path() /
-                ("palmier_project_tools_prop_" +
-                 std::to_string(static_cast<long long>(::getpid())) + "_" +
-                 std::to_string(counter.fetch_add(1)));
+        root_ = fs::temp_directory_path() / ("palmier_project_tools_prop_" +
+                                             std::to_string(static_cast<long long>(::getpid())) +
+                                             "_" + std::to_string(counter.fetch_add(1)));
         std::error_code ec;
         fs::remove_all(root_, ec);
         fs::create_directories(root_, ec);
@@ -89,8 +86,7 @@ public:
     /// given one of these, so nothing lands in the ctest working directory.
     [[nodiscard]] fs::path file(std::string_view tag) const {
         static std::atomic<std::uint64_t> counter{0};
-        return root_ / (std::string(tag) + "_" + std::to_string(counter.fetch_add(1)) +
-                        ".palmier");
+        return root_ / (std::string(tag) + "_" + std::to_string(counter.fetch_add(1)) + ".palmier");
     }
 
     /// True iff nothing was created inside this directory.
@@ -126,17 +122,17 @@ private:
 
 /// Everything a failed call must leave untouched, in one comparable value.
 struct SessionFingerprint {
-    std::string                          bytes;
-    std::optional<fs::path>              documentPath;
-    bool                                 modified = false;
-    std::size_t                          undoDepth = 0;
+    std::string bytes;
+    std::optional<fs::path> documentPath;
+    bool modified = false;
+    std::size_t undoDepth = 0;
 
     [[nodiscard]] bool operator==(const SessionFingerprint& other) const = default;
 };
 
 [[nodiscard]] inline SessionFingerprint fingerprint(const ProjectSession& session) {
-    return SessionFingerprint{projectBytes(session), session.documentPath(),
-                              session.modified(), session.engine().undoDepth()};
+    return SessionFingerprint{projectBytes(session), session.documentPath(), session.modified(),
+                              session.engine().undoDepth()};
 }
 
 [[nodiscard]] inline std::size_t drawIndex(std::size_t count) {
@@ -157,9 +153,8 @@ struct SessionFingerprint {
 /// surface publishes them (`ColorSpace::toStringView`).
 inline const std::vector<ColorSpace>& selectableColorSpaces() {
     static const std::vector<ColorSpace> spaces = {
-        ColorSpace::Srgb,       ColorSpace::Rec709,     ColorSpace::Rec2020,
-        ColorSpace::Rec2100Pq,  ColorSpace::Rec2100Hlg, ColorSpace::DisplayP3,
-        ColorSpace::LinearSrgb};
+        ColorSpace::Srgb,       ColorSpace::Rec709,    ColorSpace::Rec2020,   ColorSpace::Rec2100Pq,
+        ColorSpace::Rec2100Hlg, ColorSpace::DisplayP3, ColorSpace::LinearSrgb};
     return spaces;
 }
 
@@ -170,11 +165,11 @@ inline const std::vector<ColorSpace>& selectableColorSpaces() {
 /// One `project.create` argument tuple, plus the settings it asks for so the
 /// resulting project can be compared against the request.
 struct CreateRequest {
-    std::string                name;
-    double                     fps = 30.0;
-    std::int64_t               width = 1920;
-    std::int64_t               height = 1080;
-    std::optional<ColorSpace>  colorSpace;  ///< std::nullopt ⇒ argument omitted.
+    std::string name;
+    double fps = 30.0;
+    std::int64_t width = 1920;
+    std::int64_t height = 1080;
+    std::optional<ColorSpace> colorSpace;  ///< std::nullopt ⇒ argument omitted.
 
     [[nodiscard]] Json args() const {
         Json out = Json::object();
@@ -204,7 +199,7 @@ struct CreateRequest {
         case 1:
             return drawAsciiText(kMaxProjectNameLength);  // 128 characters
         case 2: {
-            static const std::vector<std::string> pieces = {"é",  "ü",      "日本語",
+            static const std::vector<std::string> pieces = {"é",      "ü",  "日本語",
                                                             "Привет", "🎬", "λ"};
             std::string text;
             const int count = *rc::gen::inRange(1, 5);
@@ -225,11 +220,9 @@ struct CreateRequest {
         case 1:
             return static_cast<double>(kMaxFramesPerSecond);  // 240 fps
         case 2:
-            return *rc::gen::element<double>(24000.0 / 1001.0, 30000.0 / 1001.0,
-                                             60000.0 / 1001.0);
+            return *rc::gen::element<double>(24000.0 / 1001.0, 30000.0 / 1001.0, 60000.0 / 1001.0);
         case 3:
-            return static_cast<double>(*rc::gen::inRange<std::int64_t>(1'000, 240'001)) /
-                   1'000.0;
+            return static_cast<double>(*rc::gen::inRange<std::int64_t>(1'000, 240'001)) / 1'000.0;
         default:
             return static_cast<double>(
                 *rc::gen::inRange<std::int64_t>(kMinFramesPerSecond, kMaxFramesPerSecond + 1));
@@ -310,17 +303,17 @@ struct Shape {
     project.id = Uuid::generateV4();
     project.name = drawAsciiText(*rc::gen::inRange<std::size_t>(1, 33));
     project.version = SchemaVersion::current();
-    project.timelineFps = *rc::gen::element<FrameRate>(
-        FrameRate::fps24(), FrameRate::fps25(), FrameRate::fps30(), FrameRate::fps29_97(),
-        FrameRate::fps60());
+    project.timelineFps =
+        *rc::gen::element<FrameRate>(FrameRate::fps24(), FrameRate::fps25(), FrameRate::fps30(),
+                                     FrameRate::fps29_97(), FrameRate::fps60());
     project.canvas = Resolution{static_cast<std::uint32_t>(*rc::gen::inRange(16, 3'841)),
                                 static_cast<std::uint32_t>(*rc::gen::inRange(16, 2'161))};
     project.colorSpace = selectableColorSpaces()[drawIndex(selectableColorSpaces().size())];
 
     const int assetCount = *rc::gen::inRange(1, shape.maxAssets + 1);
     for (int i = 0; i < assetCount; ++i) {
-        project.assets.emplace_back(Uuid::generateV4(),
-                                    "/media/" + drawAsciiText(*rc::gen::inRange<std::size_t>(1, 12)));
+        project.assets.emplace_back(
+            Uuid::generateV4(), "/media/" + drawAsciiText(*rc::gen::inRange<std::size_t>(1, 12)));
     }
 
     int clipsRemaining = shape.clipBudget;
@@ -355,7 +348,7 @@ struct Shape {
 /// Make `project` the session's current project through the load path the tool
 /// surface itself uses: a `.palmier` document plus `ProjectSession::openProject`.
 [[nodiscard]] inline bool seedSession(ProjectSession& session, const Project& project,
-                              const fs::path& seedPath) {
+                                      const fs::path& seedPath) {
     if (saveProjectToFile(project, seedPath).isError()) return false;
     return session.openProject(seedPath).isOk();
 }
@@ -419,18 +412,19 @@ struct Shape {
 /// How a drawn argument object relates to the tool's declared schema. Every shape
 /// is in scope: Requirement 3.5's refusal must not depend on the arguments.
 enum class ArgMode {
-    Empty,          ///< `{}` — every required argument missing.
-    Valid,          ///< every required argument present and in range.
-    WrongType,      ///< one argument of the wrong JSON type.
-    OutOfBounds,    ///< one numeric/enum argument outside its declared bound.
-    UnknownKey,     ///< a member the schema does not declare.
-    Garbage,        ///< nothing the schema knows about at all.
+    Empty,        ///< `{}` — every required argument missing.
+    Valid,        ///< every required argument present and in range.
+    WrongType,    ///< one argument of the wrong JSON type.
+    OutOfBounds,  ///< one numeric/enum argument outside its declared bound.
+    UnknownKey,   ///< a member the schema does not declare.
+    Garbage,      ///< nothing the schema knows about at all.
 };
 
 /// Draw an argument object for `schema`. Any path-shaped argument is pointed at
 /// an absolute path inside `scratch`, so a tool that ignored the refusal and
 /// wrote something would leave observable evidence there and nowhere else.
-[[nodiscard]] inline Json drawArgs(const ToolSchema& schema, ArgMode mode, const ScratchDir& scratch) {
+[[nodiscard]] inline Json drawArgs(const ToolSchema& schema, ArgMode mode,
+                                   const ScratchDir& scratch) {
     if (mode == ArgMode::Empty) return Json::object();
     if (mode == ArgMode::Garbage) {
         Json args = Json::object();
@@ -480,7 +474,6 @@ enum class ArgMode {
     }
     return args;
 }
-
 
 }  // namespace testsupport_projecttoolspropertytest
 }  // namespace palmier::services

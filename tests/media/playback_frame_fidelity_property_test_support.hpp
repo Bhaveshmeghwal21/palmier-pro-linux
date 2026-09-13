@@ -45,7 +45,6 @@
 #include "media/MediaDecoder.hpp"
 #include "media/MediaInfo.hpp"
 
-
 namespace palmier::media {
 namespace testsupport_playbackframefidelitypropertytest {
 
@@ -67,12 +66,12 @@ constexpr auto kWaitCeiling = 60s;
 /// One synthetic media asset. `salt` distinguishes assets, so a frame decoded
 /// from the wrong decoder is detectable, and `frameCount` bounds its stream.
 struct SyntheticAsset {
-    Uuid          assetId{};
-    std::string   path{};
+    Uuid assetId{};
+    std::string path{};
     std::uint32_t width{0};
     std::uint32_t height{0};
-    FrameRate     rate{};
-    int           frameCount{0};
+    FrameRate rate{};
+    int frameCount{0};
     std::uint32_t salt{0};
     /// Frames between keyframes, as in a real encoded stream. A backward seek can
     /// only land on a keyframe, so this is what makes a seek inexact.
@@ -92,7 +91,8 @@ struct SyntheticAsset {
 /// of the frame index modulo 256, so two different frames of the same asset never
 /// share a red channel for the frame counts used here; G mixes index and pixel
 /// position; B identifies the asset.
-[[nodiscard]] inline std::vector<std::uint8_t> syntheticPixels(const SyntheticAsset& asset, int index) {
+[[nodiscard]] inline std::vector<std::uint8_t> syntheticPixels(const SyntheticAsset& asset,
+                                                               int index) {
     const std::size_t pixels = static_cast<std::size_t>(asset.width) * asset.height;
     std::vector<std::uint8_t> rgba(pixels * 4u);
     for (std::size_t p = 0; p < pixels; ++p) {
@@ -107,7 +107,7 @@ struct SyntheticAsset {
 
 /// Backend counters, shared with the test so it can assert on decode behaviour.
 struct BackendCounters {
-    std::mutex    mutex{};
+    std::mutex mutex{};
     std::uint64_t decodes{0};
     std::uint64_t seeks{0};
     std::uint64_t backendsOpened{0};
@@ -150,15 +150,15 @@ public:
     SyntheticVideoBackend(SyntheticAsset asset, std::shared_ptr<BackendCounters> counters)
         : asset_(std::move(asset)), counters_(std::move(counters)) {
         MediaStreamInfo video;
-        video.index      = 0;
-        video.type       = MediaStreamType::Video;
-        video.codec      = MediaCodecId::H264;
-        video.codecName  = "h264";
+        video.index = 0;
+        video.type = MediaStreamType::Video;
+        video.codec = MediaCodecId::H264;
+        video.codecName = "h264";
         video.resolution = Resolution{asset_.width, asset_.height};
-        video.frameRate  = asset_.rate;
-        video.duration   = asset_.frameStep() * static_cast<std::int64_t>(asset_.frameCount);
+        video.frameRate = asset_.rate;
+        video.duration = asset_.frameStep() * static_cast<std::int64_t>(asset_.frameCount);
         info_.containerFormat = "synthetic";
-        info_.duration        = video.duration;
+        info_.duration = video.duration;
         info_.streams.push_back(video);
         if (counters_) counters_->noteOpen();
     }
@@ -169,9 +169,9 @@ public:
         if (cursor_ >= asset_.frameCount) return BackendFrame::eos();
 
         BackendFrame frame;
-        frame.timestamp   = asset_.frameStep() * static_cast<std::int64_t>(cursor_);
-        frame.desc        = gpu::FrameDesc{asset_.width, asset_.height, gpu::FrameFormat::RGBA8};
-        frame.hardware    = false;
+        frame.timestamp = asset_.frameStep() * static_cast<std::int64_t>(cursor_);
+        frame.desc = gpu::FrameDesc{asset_.width, asset_.height, gpu::FrameFormat::RGBA8};
+        frame.hardware = false;
         const std::vector<std::uint8_t> pixels = syntheticPixels(asset_, cursor_);
         frame.cpuPixels.resize(pixels.size());
         for (std::size_t i = 0; i < pixels.size(); ++i) {
@@ -184,8 +184,8 @@ public:
 
     [[nodiscard]] Result<void> seek(Duration ts) override {
         const std::int64_t step = asset_.frameStep().ticks();
-        std::int64_t       index = step > 0 ? (ts.ticks() + step / 2) / step : 0;
-        index                    = std::clamp<std::int64_t>(index, 0, asset_.frameCount);
+        std::int64_t index = step > 0 ? (ts.ticks() + step / 2) / step : 0;
+        index = std::clamp<std::int64_t>(index, 0, asset_.frameCount);
         // Not `index`: a backward seek can only reach a keyframe. Everything between
         // the keyframe and the frame that was asked for has to be decoded through.
         cursor_ = asset_.keyframeAtOrBefore(static_cast<int>(index));
@@ -194,17 +194,17 @@ public:
     }
 
 private:
-    SyntheticAsset                   asset_;
+    SyntheticAsset asset_;
     std::shared_ptr<BackendCounters> counters_;
-    MediaInfo                        info_{};
-    int                              cursor_{0};
+    MediaInfo info_{};
+    int cursor_{0};
 };
 
 /// A factory that dispatches on the (virtual) path each asset was registered
 /// under. This is MediaDecoder's documented injection seam — no new seam was
 /// added for the tests, and nothing here reads the filesystem.
-[[nodiscard]] inline DecodeBackendFactory syntheticFactory(std::vector<SyntheticAsset> assets,
-                                                    std::shared_ptr<BackendCounters> counters) {
+[[nodiscard]] inline DecodeBackendFactory syntheticFactory(
+    std::vector<SyntheticAsset> assets, std::shared_ptr<BackendCounters> counters) {
     auto byPath = std::make_shared<std::unordered_map<std::string, SyntheticAsset>>();
     for (const auto& asset : assets) byPath->emplace(asset.path, asset);
 
@@ -234,25 +234,25 @@ private:
 
 /// A clip plus the bookkeeping the test needs to predict its content.
 struct PlacedClip {
-    Clip     clip{};
-    int      assetIndex{0};
-    int      sourceInFrames{0};
-    int      lengthFrames{0};
+    Clip clip{};
+    int assetIndex{0};
+    int sourceInFrames{0};
+    int lengthFrames{0};
     Duration step{};
 };
 
 [[nodiscard]] inline Project projectWith(const std::vector<PlacedClip>& placed, Resolution canvas,
-                                  FrameRate timelineFps) {
+                                         FrameRate timelineFps) {
     Track track;
-    track.id   = Uuid::generateV4();
+    track.id = Uuid::generateV4();
     track.kind = TrackKind::Video;
     for (const auto& p : placed) track.clips.push_back(p.clip);
 
     Project project;
-    project.id          = Uuid::generateV4();
-    project.name        = "playback-fidelity";
+    project.id = Uuid::generateV4();
+    project.name = "playback-fidelity";
     project.timelineFps = timelineFps;
-    project.canvas      = canvas;
+    project.canvas = canvas;
     project.tracks.push_back(std::move(track));
     return project;
 }
@@ -260,8 +260,9 @@ struct PlacedClip {
 /// Largest absolute per-channel difference between a rendered frame and the
 /// expected source pixels, over the region the source covers on the canvas.
 [[nodiscard]] inline int maxChannelDifference(const gpu::RenderedFrame& rendered,
-                                      const std::vector<std::uint8_t>& expected,
-                                      std::uint32_t sourceWidth, std::uint32_t sourceHeight) {
+                                              const std::vector<std::uint8_t>& expected,
+                                              std::uint32_t sourceWidth,
+                                              std::uint32_t sourceHeight) {
     const auto* out = static_cast<const std::uint8_t*>(rendered.hostData());
     if (out == nullptr) return 255;
 
@@ -275,7 +276,7 @@ struct PlacedClip {
             const std::size_t d = (static_cast<std::size_t>(y) * rendered.width() + x) * 4u;
             for (int c = 0; c < 4; ++c) {
                 const int diff = static_cast<int>(out[d + c]) - static_cast<int>(expected[s + c]);
-                worst          = std::max(worst, diff < 0 ? -diff : diff);
+                worst = std::max(worst, diff < 0 ? -diff : diff);
             }
         }
     }
@@ -287,18 +288,21 @@ struct PlacedClip {
 /// nanoseconds, so the mapping cannot rely on a tidy divisor.
 [[nodiscard]] inline FrameRate rateFor(int choice) {
     switch (choice) {
-        case 0: return FrameRate::fps24();
-        case 1: return FrameRate::fps30();
-        case 2: return FrameRate::fps60();
-        default: return FrameRate::fps23_976();
+        case 0:
+            return FrameRate::fps24();
+        case 1:
+            return FrameRate::fps30();
+        case 2:
+            return FrameRate::fps60();
+        default:
+            return FrameRate::fps23_976();
     }
 }
 
 /// Access patterns over a clip's frames: the shapes real playback produces.
 enum class AccessPattern { Sequential, ForwardSeek, BackwardSeek, Interleaved };
 
-} // namespace
-
+}  // namespace
 
 // Helpers that sat between the cases in the single-file original.
 
@@ -310,18 +314,18 @@ namespace {
 
 /// A one-asset fixture: 30 fps, `frameCount` frames, `size` x `size` pixels.
 struct Fixture {
-    SyntheticAsset                   asset{};
+    SyntheticAsset asset{};
     std::shared_ptr<BackendCounters> counters{std::make_shared<BackendCounters>()};
 
     explicit Fixture(std::uint32_t width = 32, std::uint32_t height = 24, int frameCount = 12,
                      std::uint32_t salt = 5) {
-        asset.assetId    = Uuid::generateV4();
-        asset.path       = "synthetic://fixture-" + asset.assetId.toString();
-        asset.width      = width;
-        asset.height     = height;
-        asset.rate       = FrameRate::fps30();
+        asset.assetId = Uuid::generateV4();
+        asset.path = "synthetic://fixture-" + asset.assetId.toString();
+        asset.width = width;
+        asset.height = height;
+        asset.rate = FrameRate::fps30();
         asset.frameCount = frameCount;
-        asset.salt       = salt;
+        asset.salt = salt;
     }
 
     [[nodiscard]] Duration step() const { return asset.frameStep(); }
@@ -329,11 +333,11 @@ struct Fixture {
     [[nodiscard]] Clip clipAt(int sourceInFrames, int lengthFrames,
                               Duration timelineStart = Duration::zero()) const {
         Clip clip;
-        clip.id            = Uuid::generateV4();
-        clip.assetRef      = MediaAssetRef{asset.assetId, asset.path};
+        clip.id = Uuid::generateV4();
+        clip.assetRef = MediaAssetRef{asset.assetId, asset.path};
         clip.timelineStart = timelineStart;
-        clip.sourceIn      = step() * static_cast<std::int64_t>(sourceInFrames);
-        clip.sourceOut     = step() * static_cast<std::int64_t>(sourceInFrames + lengthFrames);
+        clip.sourceIn = step() * static_cast<std::int64_t>(sourceInFrames);
+        clip.sourceOut = step() * static_cast<std::int64_t>(sourceInFrames + lengthFrames);
         return clip;
     }
 
@@ -343,23 +347,22 @@ struct Fixture {
 };
 
 [[nodiscard]] inline ClipFrameProviderOptions unitOptions(std::size_t capacity = 2,
-                                                   std::size_t prefetch = 0) {
+                                                          std::size_t prefetch = 0) {
     ClipFrameProviderOptions options;
-    options.decoderCacheCapacity   = capacity;
-    options.prefetchDepth          = prefetch;
-    options.prefs                  = softwarePrefs();
-    options.pool.workerCount       = 2;
+    options.decoderCacheCapacity = capacity;
+    options.prefetchDepth = prefetch;
+    options.prefs = softwarePrefs();
+    options.pool.workerCount = 2;
     options.pool.clipQueueCapacity = 3;
     return options;
 }
 
 [[nodiscard]] inline bool framesEqual(const gpu::SourceFrame& frame,
-                               const std::vector<std::uint8_t>& expected) {
+                                      const std::vector<std::uint8_t>& expected) {
     return frame.rgba == expected;
 }
 
-} // namespace
-
+}  // namespace
 
 namespace {
 
@@ -369,12 +372,12 @@ class FailingBackend final : public IDecodeBackend {
 public:
     explicit FailingBackend(int goodFrames) : goodFrames_(goodFrames) {
         MediaStreamInfo video;
-        video.index      = 0;
-        video.type       = MediaStreamType::Video;
-        video.codec      = MediaCodecId::H264;
-        video.codecName  = "h264";
+        video.index = 0;
+        video.type = MediaStreamType::Video;
+        video.codec = MediaCodecId::H264;
+        video.codecName = "h264";
         video.resolution = Resolution{16, 16};
-        video.frameRate  = FrameRate::fps30();
+        video.frameRate = FrameRate::fps30();
         info_.streams.push_back(video);
     }
 
@@ -395,12 +398,11 @@ public:
 
 private:
     MediaInfo info_{};
-    int       goodFrames_;
-    int       produced_{0};
+    int goodFrames_;
+    int produced_{0};
 };
 
-} // namespace
-
+}  // namespace
 
 }  // namespace testsupport_playbackframefidelitypropertytest
 }  // namespace palmier::media
