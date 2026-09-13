@@ -204,12 +204,18 @@ recording what actually happened:
 ```
 PALMIER_L4_ENCODER_NAME=h264_nvenc      PALMIER_L4_USED_HARDWARE_ENCODE=true
 PALMIER_L4_FRAMES_ENCODED=300           PALMIER_L4_SOFTWARE_FALLBACK=false
-PALMIER_L4_ELAPSED_MS=11863             PALMIER_L4_OUTPUT_BYTES=622870
+PALMIER_L4_ELAPSED_MS=30115             PALMIER_L4_OUTPUT_BYTES=622870
 ```
 
 The same job asserts the hardware and software exports of that fixture agree on frame
 count and duration, so "NVENC works" is a measurement rather than a claim. See
 [`docs/HARDWARE_ENCODE.md`](docs/HARDWARE_ENCODE.md).
+
+Those are the values from one run, not a specification. Re-running the job at a later commit
+reproduced the encoder, the frame count and the output size exactly — 622870 bytes both times
+— while `PALMIER_L4_ELAPSED_MS` moved from 11863 to 30115 on the same hardware and the same
+fixture, because the runner is a shared machine. Treat the byte count as reproducible and the
+wall-clock as an indication of order of magnitude only.
 
 **Compiled and type-checked but not executed:** the VAAPI and Quick Sync paths, and the
 Vulkan compositor. No hosted runner has an AMD or Intel encode device, so CI proves these
