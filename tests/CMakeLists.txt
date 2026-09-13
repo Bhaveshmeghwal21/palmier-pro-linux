@@ -2424,7 +2424,8 @@ palmier_register_test(palmier_media_audio_decode_tests)
 # Links Palmier::media (which brings in Palmier::gpu and Palmier::core).
 # ---------------------------------------------------------------------------
 add_executable(palmier_media_playback_tests
-    media/playback_frame_fidelity_property_test.cpp)
+    media/playback_frame_fidelity_property_test.cpp
+    media/playback_frame_fidelity_property_test_part2.cpp)
 target_link_libraries(palmier_media_playback_tests PRIVATE
     Palmier::media
     Palmier::test_support)
@@ -2457,7 +2458,8 @@ palmier_register_test(palmier_media_playback_tests)
 # Links Palmier::media (which brings in Palmier::gpu and Palmier::core).
 # ---------------------------------------------------------------------------
 add_executable(palmier_media_audio_engine_tests
-    media/audio_engine_property_test.cpp)
+    media/audio_engine_property_test.cpp
+    media/audio_engine_property_test_part2.cpp)
 target_link_libraries(palmier_media_audio_engine_tests PRIVATE
     Palmier::media
     Palmier::test_support)
@@ -2896,6 +2898,7 @@ palmier_register_test(palmier_media_export_audio_tests)
 # snapshot across an edit made while the export runs.
 add_executable(palmier_services_export_coordinator_tests
     services/export_coordinator_test.cpp
+    services/export_coordinator_test_part2.cpp
     services/export_coordinator_property_test.cpp)
 target_link_libraries(palmier_services_export_coordinator_tests PRIVATE
     Palmier::services
@@ -2974,6 +2977,7 @@ palmier_register_test(palmier_services_still_frame_capture_tests)
 # ---------------------------------------------------------------------------
 add_executable(palmier_services_agent_equivalence_tests
     services/agent_equivalence_property_test.cpp
+    services/agent_equivalence_property_test_part2.cpp
     "${PROJECT_SOURCE_DIR}/src/services/OfflineIntentInterpreter.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/AgentOrchestrator.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/McpToolExecutor.cpp"

@@ -56,21 +56,16 @@ const std::map<std::string, std::size_t>& allowlist() {
         {"tests/docs/documentation_consistency_property_test.cpp", 1968},
         {"tests/services/mcp_protocol_property_test.cpp", 1883},
         {"tests/ui/shell_unit_test.cpp", 1846},
-        {"tests/services/export_coordinator_test.cpp", 1647},
         {"tests/services/export_coordinator_property_test.cpp", 1622},
         {"tests/docs/suite_hygiene_property_test.cpp", 1441},
         {"tests/services/offline_mode_availability_test.cpp", 1414},
-        {"tests/media/audio_engine_property_test.cpp", 1316},
         {"tests/services/generative_lifecycle_property_test.cpp", 1293},
-        {"tests/services/project_tools_property_test.cpp", 1266},
+        {"tests/services/offline_interpreter_property_test.cpp", 1127},
         {"tests/support/ReportParser.cpp", 1202},
         {"tests/services/generative_atomicity_property_test.cpp", 1191},
         {"tests/docs/documentation_consistency_test.cpp", 1190},
-        {"tests/services/offline_interpreter_property_test.cpp", 1127},
         {"tests/docs/parity_report_property_test.cpp", 1053},
-        {"tests/media/playback_frame_fidelity_property_test.cpp", 1047},
         {"tests/services/remote_access_gate_property_test.cpp", 1019},
-        {"tests/services/agent_equivalence_property_test.cpp", 1002},
     };
     return pinned;
 }
