@@ -186,7 +186,16 @@ Honest about the boundary, because it matters more than a claim of completeness.
 validation, software and (compiled) hardware codec paths, GPU and CPU compositing,
 export, audio playback and metering, timeline waveforms, scrub audio, a full primary
 grade with tone curves, video scopes, 3D LUTs, project save/load, the MCP server and
-agent chat, localization, and Debian/Flatpak/AppImage packaging.
+agent chat, and localization.
+
+**Packaging is verified to three different depths**, because only one of the three formats
+can be built on a hosted runner. The `.deb` is built by CI on every `v*` tag and then
+inspected with `dpkg-deb` — contents, declared dependencies, and metadata. The Flatpak and
+AppImage recipes are provided as source inputs to `flatpak-builder` and `appimage-builder`;
+their manifests are cross-checked on every run against the shared freedesktop files, so a
+renamed application id, executable, licence, or an installed asset that does not exist
+fails the build — but the images themselves are not built in CI, and are the least
+exercised part of this repository.
 
 **Verified on real NVIDIA hardware:** H.264 hardware encode. The `l4-validation` job runs
 on a self-hosted NVIDIA L4 runner and exports a 300-frame 1920x1080/30 fps fixture,

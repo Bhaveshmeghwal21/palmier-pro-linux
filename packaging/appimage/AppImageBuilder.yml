@@ -20,7 +20,7 @@ AppDir:
     id: io.palmier.PalmierPro
     name: Palmier Pro
     icon: io.palmier.PalmierPro
-    version: 0.1.0
+    version: 0.4.0
     # Entry point relative to AppDir; must be executable.
     exec: usr/bin/palmier-pro
     exec_args: $@

@@ -16,7 +16,7 @@
 
 set(CPACK_GENERATOR "DEB")
 set(CPACK_PACKAGE_NAME "palmier-pro")
-set(CPACK_PACKAGE_VERSION "0.3.0")
+set(CPACK_PACKAGE_VERSION "0.4.0")
 set(CPACK_PACKAGE_CONTACT "Palmier, Inc. and contributors <maintainers@palmier.io>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "AI-native multi-track video editor with GPU acceleration")

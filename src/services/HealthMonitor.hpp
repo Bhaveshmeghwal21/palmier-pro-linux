@@ -182,7 +182,7 @@ private:
 ///
 /// Shape (stable, documented in docs/OBSERVABILITY.md):
 ///
-///     {"state":"ok","version":"0.3.0","uptimeSeconds":41,
+///     {"state":"ok","version":"0.4.0","uptimeSeconds":41,
 ///      "checks":[{"name":"gpu","state":"degraded","detail":"no Vulkan device"}],
 ///      "log":{"total":12,"warnings":1,"errors":0,"critical":0,
 ///             "errorsByCategory":{},"lastError":null}}

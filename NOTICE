@@ -61,11 +61,45 @@ credentials) before access is granted (see Requirements 6, 9, and 13.2).
 3. Third-party dependencies
 --------------------------------------------------------------------------------
 
-This software builds against third-party libraries (for example Qt 6, FFmpeg,
-Vulkan/shaderc, libva, LittleCMS/lcms2, libsecret, GoogleTest, and RapidCheck),
-each distributed under its own license. Those licenses are not superseded by
-the GPLv3 grant that covers Palmier Pro's own source code; consult each
-dependency's license for its terms.
+This software links against third-party libraries, each distributed under its
+own license. Those licenses are not superseded by the GPLv3 grant that covers
+Palmier Pro's own source code. No third-party source is vendored into this
+repository; every library below is linked dynamically from the host system, and
+the versions actually required are declared in packaging/apt-packages.txt and
+packaging/deb/debian/control.
+
+  Runtime dependencies:
+
+    Qt 6 (Core, Gui, Widgets, Quick, Qml)  LGPL-3.0-only, or a commercial
+                                           license from The Qt Company
+    FFmpeg (libavcodec, libavformat,       LGPL-2.1-or-later as ordinarily
+      libavutil, libswscale, libswresample)  configured -- but see the note below
+    Vulkan loader (libvulkan)              Apache-2.0
+    shaderc                                Apache-2.0
+    libva (libva, libva-drm)               MIT
+    LittleCMS (lcms2)                      MIT
+    libsecret                              LGPL-2.1-or-later
+    OpenSSL 3 (optional; only when          Apache-2.0
+      PALMIER_HAVE_OPENSSL is defined)
+
+  Build- and test-time only, not shipped in any package:
+
+    GoogleTest                             BSD-3-Clause
+    RapidCheck                             BSD-2-Clause
+
+A note on FFmpeg, because it is the one dependency whose license depends on how
+it was built rather than on which library you chose. FFmpeg is LGPL-2.1-or-later
+in its default configuration, but a build configured with --enable-gpl (or one
+linking GPL-only components such as libx264) is GPL-2.0-or-later instead. Both
+outcomes are compatible with this project, whose own grant is GPLv3 *or later*:
+GPL-2.0-or-later permits relicensing to GPLv3, so the combined work may be
+distributed under GPLv3. A hypothetical GPL-2.0-ONLY dependency would not be
+compatible. Anyone redistributing a built artifact should confirm the license of
+the specific FFmpeg build they linked, and comply with its terms as well as with
+the GPLv3 obligations for this software.
+
+Nothing above is legal advice; consult each dependency's own license text for
+its authoritative terms.
 
 ================================================================================
 Applying the license header

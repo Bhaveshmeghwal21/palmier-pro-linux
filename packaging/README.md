@@ -66,6 +66,18 @@ cpack --config packaging/CPackConfig.cmake
 ## Note on build tooling
 
 `flatpak-builder`, `appimage-builder`/`appimagetool`, and `dpkg-buildpackage`
-are not run here; these recipes are the source inputs to those tools. Manifest
-and control syntax is validated (YAML/JSON/XML parsers, `xmllint`, and Debian
-field checks) as part of the packaging task.
+are not run here; these recipes are the source inputs to those tools.
+
+What *is* checked automatically, on every CI run, is that the three formats agree with each
+other. `scripts/check_repo_consistency.py` compares the application id, the executable
+name, and the licence across all three formats and the two shared freedesktop files;
+asserts every asset the Flatpak manifest installs exists; and asserts the `.desktop`
+advertises the MIME type the shared MIME definition declares, so double-clicking a
+`.palmier` file cannot silently stop opening the editor. The release version is compared
+across CMake, the CPack config, the MCP server, the AppStream metainfo, and the AppImage
+recipe — the last two having drifted to 0.1.0 while the project was at 0.3.0, which is why
+they are gated now.
+
+Beyond that, CI builds the `.deb` on every `v*` tag and inspects it with `dpkg-deb`. The
+Flatpak and AppImage images are not built by any job, so treat them as the least exercised
+artefacts here and build them once by hand before relying on them.

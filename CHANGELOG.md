@@ -11,6 +11,8 @@ task's completion commit, its CI run and the suite size at that point.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-13
+
 ### Added
 
 - **Clip speed.** A clip now carries a playback rate, so footage can be sped up or slowed down
@@ -39,26 +41,6 @@ task's completion commit, its CI run and the suite size at that point.
   implied zero past the last keyframe. The animatable set is closed rather than free-form because
   each entry has to be read at render time, and a property nothing evaluates would be an animation
   that silently does nothing.
-
-### Changed
-
-- **Project schema 1.8**, adding `Clip::speed` (1.7) and `Clip::keyframes` (1.8). Every earlier
-  document reads at unit speed and unanimated, which is exactly what those documents were. Unlike
-  every earlier addition, an unrecognised property or interpolation name inside a keyframe track is
-  refused rather than ignored: dropping an animation changes how the edit plays, which is the same
-  reason an unrecognised effect kind is refused.
-
-### Fixed
-
-- **The upstream parity report rested on an inference it did not need to make.** Its provenance
-  recorded the upstream repository as unreachable and took the upstream side of every row from a
-  spec document instead. Upstream is public, and its GPLv3 source is preserved at the
-  `last-gpl-source` tag, so the comparison is now made against the real tool surface -- the
-  `ToolName` enum in `Sources/PalmierPro/Agent/Tools/ToolDefinitions.swift`, which declares 52
-  tools against this port's 44. The `layout` entry, which said no multi-clip layout or
-  picture-in-picture operation existed, is now `present`.
-
-### Added
 
 - **`timeline.apply_layout`**, arranging several clips at once as `side_by_side`,
   `picture_in_picture` or `grid`. One edit covering every named clip, so undoing an arrangement
@@ -105,7 +87,48 @@ task's completion commit, its CI run and the suite size at that point.
   audio, a bed's first 0.4 seconds fell from -46.5 dB to -60.3 dB while the level 2 seconds in was
   unchanged at -27.9 dB.
 
+- **`export.tool_budget_seconds`, because a real edit could not be exported at all.** The
+  tool surface awaits its own export under a bounded budget so an overrun reports a clean
+  timeout and removes the partial file. That budget was fixed at 55 seconds and reachable
+  only by an embedder, and a multi-track timeline renders at only a few frames per second
+  on a modest host - measured here at **6.7 fps** for a single 1080p layer and **7.6 fps**
+  at a 720p canvas, so decode dominates and shrinking the canvas buys almost nothing. A
+  ten-second five-track edit therefore could not be exported by any operator of the
+  shipped binary, on any hardware, with no way to raise the limit.
+
+  One knob moves everything that has to move: the executor's per-invocation limit and the
+  protocol layer's budget are derived from it with headroom, so the export still reports
+  its own timeout rather than being killed first. Never shorter than the previous
+  defaults, so raising nothing changes nothing. Found by editing real footage end to end
+  rather than by a test.
+
+- **A health and error-tracking surface.** `GET /health` on the MCP endpoint answers with
+  the process state, version, uptime, one entry per component, and counts of what the log
+  has carried including a per-category breakdown of failures and the most recent one. A
+  separate path rather than a tool call, so a container runtime or a person with `curl`
+  can ask without speaking JSON-RPC or holding a session.
+  - `degraded` is served as **200**, only `unavailable` as 503: no GPU and no audio
+    device are supported ways to run this editor, and restarting the process for either
+    would destroy a usable one.
+  - Error tracking **decorates the existing log sink** rather than adding a parallel
+    reporting path, so anything logged is counted by construction and a failure cannot be
+    recorded that the log does not also carry. The sink is installed before any component
+    is built, because the failures raised during composition are the interesting ones.
+  - When remote access is enabled the endpoint is behind the **same admission gate** as
+    `/mcp`; an unauthenticated remote peer gets 401 and the report is never built. A test
+    asserts the served key set is exactly the five documented ones, so no credential,
+    path or host can be added to it without that decision being made again.
+  - 40 tests, including a probe that throws, a clock that goes backwards, concurrent
+    counting from eight threads, and the refusal path. See
+    [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
+
 ### Changed
+
+- **Project schema 1.8**, adding `Clip::speed` (1.7) and `Clip::keyframes` (1.8). Every earlier
+  document reads at unit speed and unanimated, which is exactly what those documents were. Unlike
+  every earlier addition, an unrecognised property or interpolation name inside a keyframe track is
+  refused rather than ignored: dropping an animation changes how the edit plays, which is the same
+  reason an unrecognised effect kind is refused.
 
 - **Project schema 1.6** adds `Clip::transform` and the two fade durations. A clip carrying none of
   those keys — every 1.0-1.5 document — reads with the defaults, which are exactly the behaviour
@@ -128,7 +151,28 @@ task's completion commit, its CI run and the suite size at that point.
   (the inverse of upstream's convention), and states that the coordinates are now
   resolution-independent because the source is fitted to the canvas before compositing.
 
+- **No production translation unit exceeds 1000 lines any more.** The last two did:
+  `services/ProjectStore.cpp` (1082) and `services/ExportCoordinator.cpp` (1080). Each is
+  now one unit per subject, none over 500 lines:
+  - the project store splits into the JSON machinery
+    ([`ProjectStoreJson.hpp`](src/services/ProjectStoreJson.hpp)), the format vocabulary,
+    the writers, the readers, and the public save/load surface that remains
+    `ProjectStore.cpp`;
+  - export coordination splits into the worker, request validation, progress reporting and
+    the agent tool surface.
+
+  The JSON parser and writer are deliberately kept in a header of their own: nothing in
+  them knows about projects, clips or tracks.
+
 ### Fixed
+
+- **The upstream parity report rested on an inference it did not need to make.** Its provenance
+  recorded the upstream repository as unreachable and took the upstream side of every row from a
+  spec document instead. Upstream is public, and its GPLv3 source is preserved at the
+  `last-gpl-source` tag, so the comparison is now made against the real tool surface -- the
+  `ToolName` enum in `Sources/PalmierPro/Agent/Tools/ToolDefinitions.swift`, which declares 52
+  tools against this port's 44. The `layout` entry, which said no multi-clip layout or
+  picture-in-picture operation existed, is now `present`.
 
 - **Every transition rendered as a hard cut.** `timeline.add_transition` stored a transition,
   project save/load round-tripped it, the timeline panel drew it and a tested cross-dissolve
@@ -196,25 +240,6 @@ task's completion commit, its CI run and the suite size at that point.
   models a keyframe-granular seek, which makes six existing assertions fail against the old
   code, and three new tests name each behaviour the fix rests on.
 
-### Added
-
-- **`export.tool_budget_seconds`, because a real edit could not be exported at all.** The
-  tool surface awaits its own export under a bounded budget so an overrun reports a clean
-  timeout and removes the partial file. That budget was fixed at 55 seconds and reachable
-  only by an embedder, and a multi-track timeline renders at only a few frames per second
-  on a modest host - measured here at **6.7 fps** for a single 1080p layer and **7.6 fps**
-  at a 720p canvas, so decode dominates and shrinking the canvas buys almost nothing. A
-  ten-second five-track edit therefore could not be exported by any operator of the
-  shipped binary, on any hardware, with no way to raise the limit.
-
-  One knob moves everything that has to move: the executor's per-invocation limit and the
-  protocol layer's budget are derived from it with headroom, so the export still reports
-  its own timeout rather than being killed first. Never shorter than the previous
-  defaults, so raising nothing changes nothing. Found by editing real footage end to end
-  rather than by a test.
-
-### Fixed
-
 - **The MCP endpoint served no protocol layer, so no external agent could connect.** This
   is the repository's headline claim, and it was broken in the shipped binary:
   `ApplicationComposition` never called `setProtocolDelegate`, so
@@ -252,45 +277,6 @@ task's completion commit, its CI run and the suite size at that point.
   by re-exporting on the L4 box: `mkv` now produces H.264 through `h264_nvenc` and through
   `libx264`, and `webm` produces VP9 with an honest software-fallback reason (that GPU has
   no VP9 encoder).
-
-### Added
-
-- **A health and error-tracking surface.** `GET /health` on the MCP endpoint answers with
-  the process state, version, uptime, one entry per component, and counts of what the log
-  has carried including a per-category breakdown of failures and the most recent one. A
-  separate path rather than a tool call, so a container runtime or a person with `curl`
-  can ask without speaking JSON-RPC or holding a session.
-  - `degraded` is served as **200**, only `unavailable` as 503: no GPU and no audio
-    device are supported ways to run this editor, and restarting the process for either
-    would destroy a usable one.
-  - Error tracking **decorates the existing log sink** rather than adding a parallel
-    reporting path, so anything logged is counted by construction and a failure cannot be
-    recorded that the log does not also carry. The sink is installed before any component
-    is built, because the failures raised during composition are the interesting ones.
-  - When remote access is enabled the endpoint is behind the **same admission gate** as
-    `/mcp`; an unauthenticated remote peer gets 401 and the report is never built. A test
-    asserts the served key set is exactly the five documented ones, so no credential,
-    path or host can be added to it without that decision being made again.
-  - 40 tests, including a probe that throws, a clock that goes backwards, concurrent
-    counting from eight threads, and the refusal path. See
-    [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
-
-### Changed
-
-- **No production translation unit exceeds 1000 lines any more.** The last two did:
-  `services/ProjectStore.cpp` (1082) and `services/ExportCoordinator.cpp` (1080). Each is
-  now one unit per subject, none over 500 lines:
-  - the project store splits into the JSON machinery
-    ([`ProjectStoreJson.hpp`](src/services/ProjectStoreJson.hpp)), the format vocabulary,
-    the writers, the readers, and the public save/load surface that remains
-    `ProjectStore.cpp`;
-  - export coordination splits into the worker, request validation, progress reporting and
-    the agent tool surface.
-
-  The JSON parser and writer are deliberately kept in a header of their own: nothing in
-  them knows about projects, clips or tracks.
-
-### Fixed
 
 - Two faults in the tooling used to perform these splits, both caught before they reached
   the tree. Naive brace counting placed the anonymous namespace 700 lines early in

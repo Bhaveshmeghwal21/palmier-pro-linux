@@ -38,7 +38,7 @@ import argparse
 import os
 import re
 import sys
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 #: Sources whose string literals are the authority on which variables are read.
 #: core/Logging.hpp is a header rather than a .cpp because the two logging variables are
@@ -133,16 +133,64 @@ VERSION_SOURCES = (
         r'kDefaultServerVersion\s*=\s*"(\d+\.\d+\.\d+)"',
         "the version MCP clients are told",
     ),
+    (
+        # AppStream advertises the newest <release> to software centres. Newest first is
+        # the AppStream convention, so the first match is the current release.
+        "packaging/shared/io.palmier.PalmierPro.metainfo.xml",
+        r'<release version="(\d+\.\d+\.\d+)"',
+        "the version software centres display",
+    ),
+    (
+        # Indented and three-part, so this cannot match the recipe's own top-level
+        # `version: 1` format declaration.
+        "packaging/appimage/AppImageBuilder.yml",
+        r"^    version:\s*(\d+\.\d+\.\d+)\s*$",
+        "the version baked into the AppImage",
+    ),
 )
+
+
+# A health-report example carries a concrete version, and those examples drift silently:
+# they are prose, so no build reads them. Scanned by shape rather than from a list, so an
+# example written later is covered without being registered anywhere.
+HEALTH_VERSION_EXAMPLE = re.compile(r'"version":\s*"(\d+\.\d+\.\d+)"')
+
+HEALTH_EXAMPLE_ROOTS = ("docs", "src")
+
+
+def _health_version_examples(root: str) -> List[Tuple[str, str]]:
+    """Every (relative path, version) pair appearing in a health-report example."""
+    found: List[Tuple[str, str]] = []
+    for top in HEALTH_EXAMPLE_ROOTS:
+        for directory, _subdirs, names in os.walk(os.path.join(root, top)):
+            for name in names:
+                if not name.endswith((".md", ".hpp", ".cpp")):
+                    continue
+                absolute = os.path.join(directory, name)
+                relative = os.path.relpath(absolute, root).replace(os.sep, "/")
+                try:
+                    with open(absolute, "r", encoding="utf-8") as handle:
+                        body = handle.read()
+                except OSError:
+                    continue
+                for version in HEALTH_VERSION_EXAMPLE.findall(body):
+                    found.append((relative, version))
+    return found
 
 
 def check_version_agreement(root: str) -> List[str]:
     """Every independent copy of the release version says the same thing.
 
-    Three files carry the version with no build-time relationship between them, and the
-    newest CHANGELOG heading is a fourth. Nothing had ever compared them, and they DID
+    Five files carry the version with no build-time relationship between them, and the
+    newest CHANGELOG heading is a sixth. Nothing had ever compared them, and they DID
     drift: the v0.2.0 tag produced a package stamped 0.1.0, because the tag does not feed
     PROJECT_VERSION. This turns that into a gate.
+
+    The gate originally covered three files, and the drift promptly survived in the two it
+    did not look at: the AppStream metainfo and the appimage-builder recipe were still
+    advertising 0.1.0 at project version 0.3.0, so a software centre would have named the
+    wrong release and an AppImage would have been stamped two minor versions stale. Any
+    file that independently states the version belongs here, or it will drift next.
     """
     failures: List[str] = []
     found = {}
@@ -163,6 +211,17 @@ def check_version_agreement(root: str) -> List[str]:
             found["CHANGELOG.md (newest release heading)"] = headings[0]
         else:
             failures.append("CHANGELOG.md declares no released version heading")
+
+    # Documented health-report examples state the version in prose, where nothing reads
+    # them. Each is compared against the project version rather than to the others, so the
+    # failure names the stale example instead of only reporting a disagreement.
+    project_version = found.get("CMakeLists.txt")
+    for relative, version in sorted(set(_health_version_examples(root))):
+        if project_version is not None and version != project_version:
+            failures.append(
+                f"{relative} shows a health report for version {version}, but the project "
+                f"is {project_version}; the example is prose, so nothing else reads it"
+            )
 
     distinct = set(found.values())
     if len(distinct) > 1:
@@ -341,12 +400,121 @@ def check_readme_measurements(root: str) -> List[str]:
     return failures
 
 
+# The identity every packaging manifest restates. Each format needs its own copy -- there
+# is no build-time relationship between them -- so they are compared instead.
+PACKAGING_APP_ID = "io.palmier.PalmierPro"
+PACKAGING_BINARY = "palmier-pro"
+PACKAGING_LICENSE = "GPL-3.0-or-later"
+
+PACKAGING_FILES = {
+    "metainfo": "packaging/shared/io.palmier.PalmierPro.metainfo.xml",
+    "desktop": "packaging/shared/io.palmier.PalmierPro.desktop",
+    "mime": "packaging/shared/io.palmier.PalmierPro.xml",
+    "icon": "packaging/shared/io.palmier.PalmierPro.svg",
+    "flatpak": "packaging/flatpak/io.palmier.PalmierPro.yaml",
+    "appimage": "packaging/appimage/AppImageBuilder.yml",
+    "deb-control": "packaging/deb/debian/control",
+    "deb-copyright": "packaging/deb/debian/copyright",
+}
+
+
+def _capture(pattern: str, text: str) -> Optional[str]:
+    """The first capturing group of `pattern` in `text`, or None."""
+    match = re.search(pattern, text, flags=re.M)
+    return match.group(1).strip() if match else None
+
+
+def check_packaging_manifests(root: str) -> List[str]:
+    """Every packaging manifest agrees on the application's identity.
+
+    Flatpak, AppImage and Debian each restate the application id, the executable name and
+    the licence, and the two shared freedesktop files restate them again. Nothing had ever
+    compared them. That matters more here than for most cross-file claims because CI builds
+    only the .deb, and only on a version tag: a rename in the Flatpak or AppImage recipe
+    could not fail any job, so it would have been discovered by whoever first tried to
+    install the result.
+    """
+    failures: List[str] = []
+    for label, relative in sorted(PACKAGING_FILES.items()):
+        if not os.path.isfile(os.path.join(root, relative)):
+            failures.append(f"the {label} packaging file {relative} is missing")
+    if failures:
+        return failures
+
+    text = {label: _read(root, path) for label, path in PACKAGING_FILES.items()}
+
+    # -- the application id, restated by three manifests and the two Flatpak rename keys
+    ids = {
+        "the metainfo <id>": _capture(r"<id>([^<]+)</id>", text["metainfo"]),
+        "the Flatpak app-id": _capture(r"^app-id:\s*(\S+)", text["flatpak"]),
+        "the AppImage app_info.id": _capture(r"^\s+id:\s*(\S+)", text["appimage"]),
+        "the Flatpak rename-desktop-file": _capture(
+            r"^rename-desktop-file:\s*(\S+?)\.desktop\s*$", text["flatpak"]
+        ),
+        "the Flatpak rename-appdata-file": _capture(
+            r"^rename-appdata-file:\s*(\S+?)\.metainfo\.xml\s*$", text["flatpak"]
+        ),
+    }
+    for where, value in sorted(ids.items()):
+        if value is None:
+            failures.append(f"{where} declares no application id")
+        elif value != PACKAGING_APP_ID:
+            failures.append(f"{where} says {value}, but the application id is {PACKAGING_APP_ID}")
+
+    # -- the executable name, restated by every format
+    binaries = {
+        "the desktop Exec": _capture(r"^Exec=(\S+)", text["desktop"]),
+        "the desktop TryExec": _capture(r"^TryExec=(\S+)", text["desktop"]),
+        "the metainfo <binary>": _capture(r"<binary>([^<]+)</binary>", text["metainfo"]),
+        "the Flatpak command": _capture(r"^command:\s*(\S+)", text["flatpak"]),
+        "the AppImage exec": _capture(r"^\s+exec:\s*\S*?([^/\s]+)\s*$", text["appimage"]),
+        "the Debian Package": _capture(r"^Package:\s*(\S+)", text["deb-control"]),
+    }
+    for where, value in sorted(binaries.items()):
+        if value is None:
+            failures.append(f"{where} names no executable")
+        elif value != PACKAGING_BINARY:
+            failures.append(f"{where} says {value}, but the executable is {PACKAGING_BINARY}")
+
+    # -- the licence, which must match the repository's own GPLv3-or-later grant
+    licences = {
+        "the metainfo <project_license>": _capture(
+            r"<project_license>([^<]+)</project_license>", text["metainfo"]
+        ),
+        "the Debian copyright": _capture(r"^License:\s*(\S+)", text["deb-copyright"]),
+    }
+    for where, value in sorted(licences.items()):
+        if value is None:
+            failures.append(f"{where} states no licence")
+        elif value != PACKAGING_LICENSE:
+            failures.append(f"{where} says {value}, but the project is {PACKAGING_LICENSE}")
+
+    # -- every shared asset the Flatpak manifest installs actually exists
+    for referenced in sorted(set(re.findall(r"(packaging/shared/\S+)", text["flatpak"]))):
+        if not os.path.isfile(os.path.join(root, referenced)):
+            failures.append(f"the Flatpak manifest installs {referenced}, which does not exist")
+
+    # -- the .desktop advertises the MIME type the shared MIME definition declares
+    mime_type = _capture(r'<mime-type type="([^"]+)"', text["mime"])
+    declared = _capture(r"^MimeType=(.*)$", text["desktop"]) or ""
+    if mime_type is None:
+        failures.append("the shared MIME definition declares no mime-type")
+    elif mime_type not in [entry for entry in declared.split(";") if entry]:
+        failures.append(
+            f"the MIME definition declares {mime_type}, which the .desktop MimeType= omits, "
+            "so double-clicking a project file would not open the editor"
+        )
+
+    return failures
+
+
 CHECKS = (
     ("environment example", check_environment_example),
     ("relative links", check_relative_links),
     ("Makefile targets", check_makefile_targets),
     ("release version agreement", check_version_agreement),
     ("README measured claims", check_readme_measurements),
+    ("packaging manifest agreement", check_packaging_manifests),
 )
 
 

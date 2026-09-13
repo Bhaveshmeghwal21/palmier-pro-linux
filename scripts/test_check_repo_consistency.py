@@ -182,6 +182,16 @@ class ReleaseVersionAgreement(unittest.TestCase):
     CHANGELOG = (
         "# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-09-09\n\n## [0.1.0] - 2026-08-31\n"
     )
+    # Newest release first, which is both the AppStream convention and what the check
+    # relies on to read the current version rather than the oldest one.
+    METAINFO = (
+        "<component>\n  <releases>\n"
+        '    <release version="0.2.0" date="2026-09-09"/>\n'
+        '    <release version="0.1.0" date="2026-08-31"/>\n'
+        "  </releases>\n</component>\n"
+    )
+    # `version: 1` is the recipe format, not the app version; the check must not read it.
+    APPIMAGE = "version: 1\n\nAppDir:\n  app_info:\n    version: 0.2.0\n"
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -191,7 +201,9 @@ class ReleaseVersionAgreement(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def _write_all(self, cmake=None, cpack=None, header=None, changelog=None) -> None:
+    def _write_all(
+        self, cmake=None, cpack=None, header=None, changelog=None, metainfo=None, appimage=None
+    ) -> None:
         write(self.root, "CMakeLists.txt", cmake if cmake is not None else self.CMAKE)
         write(self.root, "packaging/CPackConfig.cmake", cpack if cpack is not None else self.CPACK)
         write(
@@ -200,8 +212,18 @@ class ReleaseVersionAgreement(unittest.TestCase):
             header if header is not None else self.HEADER,
         )
         write(self.root, "CHANGELOG.md", changelog if changelog is not None else self.CHANGELOG)
+        write(
+            self.root,
+            "packaging/shared/io.palmier.PalmierPro.metainfo.xml",
+            metainfo if metainfo is not None else self.METAINFO,
+        )
+        write(
+            self.root,
+            "packaging/appimage/AppImageBuilder.yml",
+            appimage if appimage is not None else self.APPIMAGE,
+        )
 
-    def test_all_four_agreeing_is_clean(self):
+    def test_all_six_agreeing_is_clean(self):
         self.assertEqual(checker.check_version_agreement(self.root), [])
 
     def test_the_packaging_config_lagging_behind_is_a_failure(self):
@@ -239,6 +261,27 @@ class ReleaseVersionAgreement(unittest.TestCase):
         failures = checker.check_version_agreement(self.root)
         self.assertEqual(len(failures), 1, failures)
         self.assertIn("no version matching", failures[0])
+
+    def test_the_appstream_metainfo_lagging_behind_is_a_failure(self):
+        # The real drift this source was added for: at project version 0.3.0 the metainfo
+        # still advertised 0.1.0, so a software centre would name the wrong release.
+        self._write_all(metainfo=self.METAINFO.replace("0.2.0", "0.1.0"))
+        failures = checker.check_version_agreement(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("metainfo.xml", failures[0])
+
+    def test_the_appimage_recipe_lagging_behind_is_a_failure(self):
+        self._write_all(appimage=self.APPIMAGE.replace("    version: 0.2.0", "    version: 0.1.0"))
+        failures = checker.check_version_agreement(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("AppImageBuilder.yml", failures[0])
+
+    def test_the_appimage_recipe_format_version_is_not_read_as_the_app_version(self):
+        # `version: 1` sits at column 0; the app version is indented under app_info. A
+        # pattern that matched either would read 1 and report a spurious disagreement.
+        self.assertEqual(checker.check_version_agreement(self.root), [])
+        self._write_all(appimage="version: 2\n\nAppDir:\n  app_info:\n    version: 0.2.0\n")
+        self.assertEqual(checker.check_version_agreement(self.root), [])
 
 
 # A README fragment carrying every figure the check inspects, and the two sources it compares them
@@ -425,6 +468,118 @@ class ReadmeMeasuredClaims(unittest.TestCase):
         self.assertIn("coverage floor cannot be checked", failures[0])
 
 
+class PackagingManifestAgreement(unittest.TestCase):
+    """Three formats restate the same identity, and no CI job builds two of them.
+
+    CI builds only the .deb, and only on a version tag, so a rename in the Flatpak or
+    AppImage recipe cannot fail any job. These are the checks that would notice.
+    """
+
+    DESKTOP = (
+        "[Desktop Entry]\nType=Application\nName=Palmier Pro\n"
+        "Exec=palmier-pro %F\nTryExec=palmier-pro\nIcon=io.palmier.PalmierPro\n"
+        "MimeType=application/x-palmier-project;video/mp4;\n"
+    )
+    METAINFO = (
+        "<component>\n  <id>io.palmier.PalmierPro</id>\n"
+        "  <project_license>GPL-3.0-or-later</project_license>\n"
+        "  <provides><binary>palmier-pro</binary></provides>\n"
+        '  <releases><release version="0.3.0" date="2026-09-10"/></releases>\n'
+        "</component>\n"
+    )
+    MIME = (
+        '<mime-info>\n  <mime-type type="application/x-palmier-project">\n'
+        '    <glob pattern="*.palmier"/>\n  </mime-type>\n</mime-info>\n'
+    )
+    FLATPAK = (
+        "app-id: io.palmier.PalmierPro\nruntime: org.kde.Platform\nsdk: org.kde.Sdk\n"
+        "command: palmier-pro\nrename-desktop-file: io.palmier.PalmierPro.desktop\n"
+        "rename-appdata-file: io.palmier.PalmierPro.metainfo.xml\nmodules:\n"
+        "  - name: palmier-pro\n    build-commands:\n"
+        "      - install -Dm644 packaging/shared/io.palmier.PalmierPro.desktop /app/x\n"
+        "      - install -Dm644 packaging/shared/io.palmier.PalmierPro.svg /app/y\n"
+    )
+    APPIMAGE = (
+        "version: 1\n\nAppDir:\n  app_info:\n    id: io.palmier.PalmierPro\n"
+        "    name: Palmier Pro\n    version: 0.3.0\n    exec: usr/bin/palmier-pro\n"
+    )
+    CONTROL = "Source: palmier-pro\n\nPackage: palmier-pro\nArchitecture: amd64\n"
+    COPYRIGHT = "Upstream-Name: palmier-pro\n\nFiles: *\nLicense: GPL-3.0-or-later\n"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        self._write_all()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _write_all(self, **overrides) -> None:
+        files = {
+            "packaging/shared/io.palmier.PalmierPro.desktop": overrides.get(
+                "desktop", self.DESKTOP
+            ),
+            "packaging/shared/io.palmier.PalmierPro.metainfo.xml": overrides.get(
+                "metainfo", self.METAINFO
+            ),
+            "packaging/shared/io.palmier.PalmierPro.xml": overrides.get("mime", self.MIME),
+            "packaging/shared/io.palmier.PalmierPro.svg": overrides.get("icon", "<svg/>\n"),
+            "packaging/flatpak/io.palmier.PalmierPro.yaml": overrides.get("flatpak", self.FLATPAK),
+            "packaging/appimage/AppImageBuilder.yml": overrides.get("appimage", self.APPIMAGE),
+            "packaging/deb/debian/control": overrides.get("control", self.CONTROL),
+            "packaging/deb/debian/copyright": overrides.get("copyright", self.COPYRIGHT),
+        }
+        for relative, content in files.items():
+            if content is not None:
+                write(self.root, relative, content)
+
+    def test_a_consistent_set_of_manifests_is_clean(self):
+        self.assertEqual(checker.check_packaging_manifests(self.root), [])
+
+    def test_a_renamed_flatpak_app_id_is_a_failure(self):
+        self._write_all(
+            flatpak=self.FLATPAK.replace(
+                "app-id: io.palmier.PalmierPro", "app-id: io.palmier.Other"
+            )
+        )
+        failures = checker.check_packaging_manifests(self.root)
+        self.assertTrue(any("Flatpak app-id" in f for f in failures), failures)
+
+    def test_a_renamed_executable_in_one_format_is_a_failure(self):
+        # The AppImage entry point is a path; only its basename is the executable name.
+        self._write_all(appimage=self.APPIMAGE.replace("usr/bin/palmier-pro", "usr/bin/palmier"))
+        failures = checker.check_packaging_manifests(self.root)
+        self.assertTrue(any("AppImage exec" in f for f in failures), failures)
+
+    def test_a_relicensed_debian_package_is_a_failure(self):
+        self._write_all(copyright=self.COPYRIGHT.replace("GPL-3.0-or-later", "MIT"))
+        failures = checker.check_packaging_manifests(self.root)
+        self.assertTrue(any("Debian copyright" in f for f in failures), failures)
+
+    def test_a_desktop_file_that_drops_the_project_mime_type_is_a_failure(self):
+        # The editor would still launch, but double-clicking a .palmier file would not
+        # open it -- a defect no build or test would otherwise notice.
+        self._write_all(desktop=self.DESKTOP.replace("application/x-palmier-project;", ""))
+        failures = checker.check_packaging_manifests(self.root)
+        self.assertTrue(any("MimeType=" in f for f in failures), failures)
+
+    def test_installing_an_asset_that_does_not_exist_is_a_failure(self):
+        self._write_all(flatpak=self.FLATPAK.replace("PalmierPro.svg", "PalmierPro.svgg"))
+        failures = checker.check_packaging_manifests(self.root)
+        self.assertTrue(any("does not exist" in f for f in failures), failures)
+
+    def test_a_missing_manifest_is_reported_and_stops_the_comparison(self):
+        # With a file absent, comparing identities would report noise about the file that
+        # is not there; the absence is the finding.
+        os.remove(os.path.join(self.root, "packaging/flatpak/io.palmier.PalmierPro.yaml"))
+        failures = checker.check_packaging_manifests(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("is missing", failures[0])
+
+    def test_the_real_packaging_tree_agrees(self):
+        self.assertEqual(checker.check_packaging_manifests(REPO_ROOT), [])
+
+
 class TheRealRepository(unittest.TestCase):
     """What makes a passing run evidence about this tree and not only about fixtures."""
 
@@ -447,6 +602,7 @@ class TheRealRepository(unittest.TestCase):
                 "Makefile targets",
                 "release version agreement",
                 "README measured claims",
+                "packaging manifest agreement",
             ],
         )
 

@@ -65,7 +65,22 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
-    <release version="0.1.0" date="2024-01-01">
+    <release version="0.4.0" date="2026-09-13">
+      <description>
+        <p>Per-clip transforms and edge fades, clip speed, keyframe animation, and a packaging-manifest gate.</p>
+      </description>
+    </release>
+    <release version="0.3.0" date="2026-09-10">
+      <description>
+        <p>Per-clip transforms, edge fades, transitions, clip speed, and keyframe animation.</p>
+      </description>
+    </release>
+    <release version="0.2.0" date="2026-09-09">
+      <description>
+        <p>Colour grading with tone curves, video scopes, 3D LUTs, and the export coordinator.</p>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-08-31">
       <description>
         <p>Initial Linux port: timeline editor, GPU acceleration, MCP server, and agent chat.</p>
       </description>

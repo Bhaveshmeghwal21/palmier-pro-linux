@@ -138,7 +138,7 @@ The MCP endpoint serves a second path beside `/mcp`:
 
 ```console
 $ curl -fsS http://127.0.0.1:19789/health
-{"state":"ok","version":"0.3.0","uptimeSeconds":41,
+{"state":"ok","version":"0.4.0","uptimeSeconds":41,
  "checks":[{"name":"gpu","state":"ok","detail":""},
            {"name":"audio","state":"ok","detail":"pipewire"},
            {"name":"startup","state":"ok","detail":""}],
