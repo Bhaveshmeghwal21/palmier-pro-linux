@@ -93,6 +93,23 @@ set(RC_ENABLE_EXAMPLES OFF CACHE BOOL "Do not build RapidCheck's examples" FORCE
 
 FetchContent_MakeAvailable(googletest rapidcheck)
 
+# Consume the third-party test frameworks as SYSTEM includes. rapidcheck's own generator
+# headers emit narrowing-conversion warnings that cannot be fixed from here, and they
+# otherwise appear in this project's build output indistinguishably from its own -- which is
+# how a real format-truncation warning in src/services sat unnoticed behind them. Marked via
+# the target property rather than FetchContent's SYSTEM option, which needs CMake 3.25 and
+# this project requires 3.22.
+foreach(palmier_third_party_target gtest gtest_main gmock gmock_main rapidcheck rapidcheck_gtest)
+    if(TARGET ${palmier_third_party_target})
+        get_target_property(palmier_third_party_includes
+            ${palmier_third_party_target} INTERFACE_INCLUDE_DIRECTORIES)
+        if(palmier_third_party_includes)
+            set_target_properties(${palmier_third_party_target} PROPERTIES
+                INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${palmier_third_party_includes}")
+        endif()
+    endif()
+endforeach()
+
 # gtest_discover_tests() lives in the GoogleTest CMake module.
 include(GoogleTest)
 

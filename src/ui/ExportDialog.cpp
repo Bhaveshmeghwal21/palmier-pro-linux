@@ -220,7 +220,9 @@ void ExportDialog::onPump() {
     // the widgets below are always touched safely (Requirement 7.3's "keeping
     // the window responsive" — pump() only drains already-queued notifications
     // and never blocks).
-    coordinator_.pump();
+    // pump() returns how many notifications it drained; the timer below re-arms
+    // regardless, so the count is deliberately discarded rather than ignored.
+    static_cast<void>(coordinator_.pump());
     if (!coordinator_.running()) {
         pumpTimer_->stop();
     }

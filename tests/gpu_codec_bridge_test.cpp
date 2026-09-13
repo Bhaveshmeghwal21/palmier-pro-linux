@@ -212,7 +212,9 @@ TEST(CodecBridgeExecute, InputPreservedAcrossRetry) {
         return r.hardware ? Result<void>(Error(ErrorCode::Internal, "gpu lost")) : ok();
     };
 
-    bridge.execute(CodecId::H264, CodecOperation::Decode, op);
+    // These cases assert on what execute() did -- the recorded routes and the log
+    // sink -- so the returned execution is discarded on purpose.
+    static_cast<void>(bridge.execute(CodecId::H264, CodecOperation::Decode, op));
 
     ASSERT_EQ(calls.size(), 2u);
     EXPECT_EQ(calls[0].codec, CodecId::H264);
@@ -264,7 +266,9 @@ TEST(CodecBridgeExecute, CustomLogSinkReceivesFailureLine) {
     auto op = [](const CodecRoute& r) -> Result<void> {
         return r.hardware ? Result<void>(Error(ErrorCode::Internal, "lost")) : ok();
     };
-    bridge.execute(CodecId::H264, CodecOperation::Decode, op);
+    // These cases assert on what execute() did -- the recorded routes and the log
+    // sink -- so the returned execution is discarded on purpose.
+    static_cast<void>(bridge.execute(CodecId::H264, CodecOperation::Decode, op));
 
     ASSERT_FALSE(sink.empty());
     EXPECT_NE(sink.front().find("NVDEC"), std::string::npos);

@@ -116,11 +116,25 @@ std::string formatUtcMilliseconds(std::chrono::system_clock::time_point when) {
     std::tm utc{};
     ::gmtime_r(&wholeSeconds, &utc);
 
+    // Each field is clamped to its own rendered width. gmtime_r cannot return an
+    // out-of-range field for a valid time_t, but nothing in the types says so, and an
+    // unclamped "%04d" on tm_year + 1900 has the whole range of int -- so a stamp could in
+    // principle be truncated mid-field and put a malformed timestamp into a rejection log,
+    // which is the one place these strings are read back. Clamping makes the width provable
+    // rather than merely likely, and is what lets the buffer size below be checked at all.
+    const int year = std::clamp(utc.tm_year + 1900, 0, 9999);
+    const int month = std::clamp(utc.tm_mon + 1, 1, 12);
+    const int day = std::clamp(utc.tm_mday, 1, 31);
+    const int hour = std::clamp(utc.tm_hour, 0, 23);
+    const int minute = std::clamp(utc.tm_min, 0, 59);
+    const int second = std::clamp(utc.tm_sec, 0, 60);  // 60 admits a leap second.
+    const int millis = std::clamp(static_cast<int>(millisPart.count()), 0, 999);
+
+    // 4+1+2+1+2+1+2+1+2+1+2+1+3+1 = 24 characters, plus the terminator.
     std::array<char, 32> buffer{};
     // Millisecond precision, explicitly UTC (Requirement 10.8).
-    std::snprintf(buffer.data(), buffer.size(), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-                  utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min,
-                  utc.tm_sec, static_cast<int>(millisPart.count()));
+    std::snprintf(buffer.data(), buffer.size(), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", year, month,
+                  day, hour, minute, second, millis);
     return std::string(buffer.data());
 }
 
