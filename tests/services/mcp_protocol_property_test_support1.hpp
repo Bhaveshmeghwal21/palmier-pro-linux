@@ -104,6 +104,7 @@
 #include "core/Result.hpp"
 #include "core/SchemaVersion.hpp"
 #include "core/TextStyle.hpp"
+#include "core/Marker.hpp"
 #include "core/TimelineEngine.hpp"
 #include "core/Track.hpp"
 #include "core/Transition.hpp"
@@ -145,6 +146,8 @@ constexpr std::string_view kMediaSetTags = "media.set_tags";
 constexpr std::string_view kAddTrack = "timeline.add_track";
 constexpr std::string_view kRemoveTrack = "timeline.remove_track";
 constexpr std::string_view kSetTrackMuted = "timeline.set_track_muted";
+constexpr std::string_view kAddMarker = "timeline.add_marker";
+constexpr std::string_view kRemoveMarker = "timeline.remove_marker";
 constexpr std::string_view kUndo = "edit.undo";
 constexpr std::string_view kRedo = "edit.redo";
 constexpr std::string_view kAddClip = "timeline.add_clip";
@@ -366,6 +369,19 @@ constexpr std::int64_t kClipGapMs = 500;      ///< so an added clip has somewher
         captionCue.captionText = "Seed caption";
         captionTrack.clips.push_back(std::move(captionCue));
         project.tracks.push_back(std::move(captionTrack));
+    }
+
+    // A guaranteed marker (upstream parity: the `timeline` tool category's marker
+    // gap), mirroring the guaranteed effect/text clip/caption cue above: a marker is
+    // project-level rather than clip-level, so nothing else here creates one, and
+    // `timeline.remove_marker` needs a stable, guaranteed target to draw a valid
+    // invocation against.
+    {
+        Marker marker;
+        marker.id = Uuid::generateV4();
+        marker.timelineNs = Duration::zero();
+        marker.label = "Seed marker";
+        project.markers.push_back(std::move(marker));
     }
     return project;
 }

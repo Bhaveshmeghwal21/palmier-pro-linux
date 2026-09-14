@@ -621,7 +621,8 @@ add_executable(palmier_core_edit_commands_tests
     core/edit_commands_effect_text_test.cpp
     core/clip_properties_command_test.cpp
     core/clip_speed_test.cpp
-    core/keyframes_test.cpp)
+    core/keyframes_test.cpp
+    core/edit_commands_marker_test.cpp)
 target_link_libraries(palmier_core_edit_commands_tests PRIVATE
     Palmier::core
     Palmier::test_support)
@@ -1986,6 +1987,7 @@ palmier_register_test(palmier_services_media_import_tests)
 add_executable(palmier_services_session_tools_tests
     services/session_media_track_tools_test.cpp
     services/timeline_track_tools_property_test.cpp
+    services/timeline_marker_tools_test.cpp
     ${PALMIER_TOOL_SURFACE_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/services/ToolSchema.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/MediaImportService.cpp"

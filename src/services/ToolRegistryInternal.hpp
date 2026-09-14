@@ -123,6 +123,9 @@ inline constexpr const char* kMediaSetTags = "media.set_tags";
 inline constexpr const char* kAddTrack = "timeline.add_track";
 inline constexpr const char* kRemoveTrack = "timeline.remove_track";
 inline constexpr const char* kSetTrackMuted = "timeline.set_track_muted";
+// Timeline markers (upstream parity: the `timeline` tool category's marker gap).
+inline constexpr const char* kAddMarker = "timeline.add_marker";
+inline constexpr const char* kRemoveMarker = "timeline.remove_marker";
 inline constexpr const char* kUndo = "edit.undo";
 inline constexpr const char* kRedo = "edit.redo";
 // The accepted length of a filesystem path argument (`project.open`,
@@ -298,6 +301,8 @@ Tool makeMediaSetTagsTool(ProjectSession* session);
 Tool makeAddTrackTool(ProjectSession* session);
 Tool makeRemoveTrackTool(ProjectSession* session);
 Tool makeSetTrackMutedTool(ProjectSession* session);
+Tool makeAddMarkerTool(ProjectSession* session);
+Tool makeRemoveMarkerTool(ProjectSession* session);
 Tool makeUndoTool(ProjectSession* session);
 Tool makeRedoTool(ProjectSession* session);
 

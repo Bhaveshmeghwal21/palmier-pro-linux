@@ -40,6 +40,7 @@
 #include <vector>
 #include "core/Clip.hpp"
 #include "core/ClipGroup.hpp"
+#include "core/Marker.hpp"
 #include "core/ColorSpace.hpp"
 #include "core/Duration.hpp"
 #include "core/Effect.hpp"
@@ -94,6 +95,8 @@ void writeTrack(JsonWriter& w, const Track& track);
 
 void writeClipGroup(JsonWriter& w, const ClipGroup& group);
 
+void writeMarker(JsonWriter& w, const Marker& marker);
+
 void writeProject(JsonWriter& w, const Project& p);
 
 const JsonValue& requireMember(const JsonValue& obj, std::string_view key);
@@ -125,6 +128,10 @@ Uuid parseUuidString(const JsonValue& v, std::string_view what);
 ClipGroup readClipGroup(const JsonValue& v);
 
 std::vector<ClipGroup> readClipGroups(const JsonValue& projectObj);
+
+Marker readMarker(const JsonValue& v);
+
+std::vector<Marker> readMarkers(const JsonValue& projectObj);
 
 MediaAssetRef readMediaAssetRef(const JsonValue& v);
 

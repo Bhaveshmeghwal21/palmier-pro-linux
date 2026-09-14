@@ -100,6 +100,7 @@ Result — the whole project value:
 | `version` | string | document schema version |
 | `tracks` | array | see below |
 | `assets` | array | each `{ "assetId": string, "sourcePath": string }` |
+| `markers` | array | each `{ "markerId": string, "timelineNs": integer, "label": string }` |
 | `durationNs` | integer | timeline duration in nanoseconds |
 
 Each `tracks` entry: `id` (string), `kind` (`"video"` or `"audio"`), `muted` (bool), `locked`
@@ -274,6 +275,32 @@ Mute or unmute a track, leaving its clips and every other track untouched. Undon
 | `muted` | boolean | **yes** | |
 
 Result: `trackId` (string), `muted` (bool), *(command result)*.
+
+## `timeline.add_marker`
+
+Add a named marker at a position on the shared timeline. A marker belongs to no track or
+clip — it annotates a moment, and survives clips moving, trimming or being deleted around it.
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `timelineNs` | integer | **yes** | ≥ 0 |
+| `label` | string | no | defaults to `""` |
+| `markerId` | string *uuid* | no | generated when omitted |
+
+Result: `markerId` (string), *(command result)*.
+
+## `timeline.remove_marker`
+
+Remove one timeline marker by id.
+
+| Argument | Type | Required | Accepted values |
+|---|---|---|---|
+| `markerId` | string *uuid* | **yes** | |
+
+Result: `markerId` (string), *(command result)*.
+
+Markers are listed under `markers` in `timeline.read`'s result — each an object with
+`markerId`, `timelineNs` and `label` — rather than through a dedicated listing tool.
 
 ## `timeline.add_clip`
 

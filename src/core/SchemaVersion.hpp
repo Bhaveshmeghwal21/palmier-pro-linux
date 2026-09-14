@@ -10,7 +10,16 @@
 // supports a stored version iff the major numbers match and the reader's minor is
 // >= the stored minor.
 //
-// The current version is 1.8. Its addition over 1.7 is Clip::keyframes: animated opacity,
+// The current version is 1.9. Its addition over 1.8 is Project::markers: named points on
+// the shared timeline (core/Marker.hpp; upstream parity, the `timeline` tool category's
+// marker gap). A project carrying no "markers" key at all -- every 1.0-1.8 document --
+// reads with an empty list, following the same additive, ignorable pattern
+// MediaAssetRef::tags established at 1.4: a marker is a project-level annotation, not a
+// clip or track property, so an older reader that does not recognise the key can simply
+// skip it without changing how anything renders or plays -- unlike a new effect or track
+// KIND, which that reader must reject rather than silently drop.
+//
+// Version 1.8's addition over 1.7 is Clip::keyframes: animated opacity,
 // gain and transform. A clip carrying no "keyframes" key -- every 1.0-1.7 document -- reads
 // unanimated, which is exactly what those documents were. Unlike every earlier addition, an
 // unrecognised property or interpolation NAME inside a keyframe track is refused rather than
@@ -96,7 +105,7 @@ struct SchemaVersion {
         : major(major_), minor(minor_) {}
 
     /// The schema version this build writes and can fully round-trip.
-    [[nodiscard]] static constexpr SchemaVersion current() noexcept { return SchemaVersion{1, 8}; }
+    [[nodiscard]] static constexpr SchemaVersion current() noexcept { return SchemaVersion{1, 9}; }
 
     /// Can a reader at `reader` load data written at `stored`?
     /// Same major, and the reader is at least as new (minor) as the data.

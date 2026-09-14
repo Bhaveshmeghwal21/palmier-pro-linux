@@ -24,7 +24,7 @@ find is a defect in this document, not in the parser.
   against this port's 44. The 22 tool-category and 12 capability-area names below still
   come from the requirements document, because those are the categories Requirements 13.1
   and 13.2 name rather than an upstream artefact.
-- linux-ref: e07116b9a3913940052972aabb70b28e36b04481 (branch `main`)
+- linux-ref: 07d3222c941f2b857fb65cb0ac6750d21c907a9a (branch `main`)
 - comparison-date: 2026-09-14
 
 ## Status definitions (Requirement 13.7)
@@ -72,7 +72,7 @@ every `N. ` line as a build-order item.
 | category | status | linux-components | priority | rationale | macos-framework | linux-replacement |
 |---|---|---|---|---|---|---|
 | clips | present | core::EditCommands, services::ToolRegistry timeline.add_clip/delete_clip/move_clip/trim_clip/split_clip/reorder_clips/ripple_delete/ripple_trim/close_gap | - | - | - | - |
-| timeline | partial | core::TimelineEngine, services::ToolRegistry timeline.read/add_track/remove_track/set_track_muted, edit.undo, edit.redo, ui::TimelinePanel, ui::TimelineGraphView | should | Read, track add/remove/mute, undo/redo, a scrub/step/timecode playhead, track actions and Ctrl+wheel zoom (keeps playhead visible) are reachable from Timeline_Panel/GraphView; no marker tool exists. | - | - |
+| timeline | present | core::TimelineEngine, core::Marker, core::MarkerEditCommands, services::ToolRegistry timeline.read/add_track/remove_track/set_track_muted/add_marker/remove_marker, edit.undo, edit.redo, ui::TimelinePanel, ui::TimelineGraphView | - | - | - | - |
 | texts | present | core::TextStyle, core::Clip::textStyle, services::ToolRegistry timeline.add_text_clip/set_text_content/set_text_style, gpu::Compositor, ui::QtTextRasterizer | - | - | - | - |
 | captions | partial | core::TrackKind::Caption, core::Clip::captionText, services::ToolRegistry timeline.add_caption_cue/set_caption_text/retime_caption_cue/remove_caption_cue/transcribe_to_captions, gpu::Compositor, services::CaptionExport | should | core::TrackKind::Caption, Clip::captionText and four cue tools plus burn-in and sidecar SRT export all work; transcribe_to_captions always reports Unsupported, since no recognizer is bundled. | - | - |
 | transcription | partial | services::TranscriptionService, services::ToolRegistry timeline.transcribe_to_captions | should | services::TranscriptionService is now constructed and reachable through timeline.transcribe_to_captions, but no recognizer backend is bundled or pluggable, so it always reports Unsupported by name. | - | - |
@@ -113,13 +113,13 @@ every `N. ` line as a build-order item.
 
 ## Build order (Requirement 13.9)
 
-Exactly the `absent` and `partial` entries of both tables — 18 of the 34 — sorted `must` before
+Exactly the `absent` and `partial` entries of both tables — 17 of the 34 — sorted `must` before
 `should` before `later`. This list is a **projection** of the two tables and carries no
 independent facts: an entry appears here if and only if its status above is `absent` or `partial`,
-with the priority recorded above. The sixteen omitted entries are the sixteen `present` ones —
+with the priority recorded above. The seventeen omitted entries are the seventeen `present` ones —
 `import`, `export`, `projects`, `generate`, `clips`, `effects`, `project settings`, `texts`,
-`capture frame`, `layout`, `color` and `denoise` (all table 1; the last two as of the
-colour-wheel/secondary-grade and denoise work respectively), plus
+`capture frame`, `layout`, `color`, `denoise` and `timeline` (all table 1; the last three as of
+the colour-wheel/secondary-grade, denoise and marker work respectively), plus
 `generation and upscaling`, `timeline editing`, `audio scrub and metering` and
 `color and effects` (all capability
 areas; the second as of usable-editor task 11, the third as of monitoring-and-grading tasks 1
@@ -128,26 +128,25 @@ to 3, and the fourth as of the same denoise and colour-wheel work).
 Each item is written `<name> (<table>) — <priority>` because `multicam` appears in both tables.
 
 1. MCP and agent chat (capability area) — must
-2. timeline (tool category) — should
-3. captions (tool category) — should
-4. transcription (tool category) — should
-5. multicam (tool category) — should
-6. media (tool category) — should
-7. multicam (capability area) — should
-8. transcription and captions (capability area) — should
-9. text and graphics (capability area) — should
-10. settings (capability area) — should
-11. organize (tool category) — later
-12. search (tool category) — later
-13. sync (tool category) — later
-14. beats (tool category) — later
-15. words (tool category) — later
-16. project browser and search (capability area) — later
-17. telemetry (capability area) — later
-18. auto-update (capability area) — later
+2. captions (tool category) — should
+3. transcription (tool category) — should
+4. multicam (tool category) — should
+5. media (tool category) — should
+6. multicam (capability area) — should
+7. transcription and captions (capability area) — should
+8. text and graphics (capability area) — should
+9. settings (capability area) — should
+10. organize (tool category) — later
+11. search (tool category) — later
+12. sync (tool category) — later
+13. beats (tool category) — later
+14. words (tool category) — later
+15. project browser and search (capability area) — later
+16. telemetry (capability area) — later
+17. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 16 `present`, 12 `partial`, 6 `absent`; 18 in this list, of which 1 `must`, 9 `should` and 8 `later`. Per table:
-table 1 holds 22 entries (12 `present`, 6 `partial`, 4 `absent`, so 10 appear below) and table 2
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 17 `present`, 11 `partial`, 6 `absent`; 17 in this list, of which 1 `must`, 8 `should` and 8 `later`. Per table:
+table 1 holds 22 entries (13 `present`, 5 `partial`, 4 `absent`, so 9 appear below) and table 2
 holds 12 (4 `present`, 6 `partial`, 2 `absent`, so 8 appear below).
 
 ## Known limits of this comparison
@@ -374,3 +373,24 @@ those claims rest on weaker evidence than the rest.
   Nothing else was re-read, so no other row's status or rationale changed. The build-order
   projection and its counts were recomputed from the tables rather than edited: 34 entries, now
   16 `present`, 12 `partial`, 6 `absent`, with 18 in the list (1 `must`, 9 `should`, 8 `later`).
+
+- **2026-09-14 re-check (timeline markers).** `timeline` (tool category) moves from `partial` to
+  `present`: the row's own rationale named a single remaining gap, "no marker tool exists", and
+  that gap is closed. `core::Marker` is a stable id, an absolute timeline position and a label —
+  deliberately NOT a track or clip property, so a marker survives clips being moved, trimmed or
+  deleted around it, the same way a marker in every other NLE does. `core::AddMarkerCommand` and
+  `core::RemoveMarkerCommand` follow `AddTrackCommand`/`RemoveTrackCommand`'s own apply/revert
+  contract exactly, so a marker edit is atomic and undoable through the identical path every other
+  edit uses. `timeline.add_marker` and `timeline.remove_marker` publish this on the Tool_Surface;
+  a marker is not a third tool but a field: `timeline.read`'s existing result now reports
+  `markers`, the same way it already reports `tracks` and `assets`.
+
+  Persisted at schema 1.9, following the additive-and-ignorable pattern `MediaAssetRef::tags`
+  established at 1.4 rather than the reject-on-unknown-kind pattern a new track or effect kind
+  follows: a project carrying no `"markers"` key at all (every 1.0-1.8 document) reads with an
+  empty list, and an older reader that does not recognise the key simply ignores it, because
+  dropping a marker loses an annotation rather than changing how anything renders or plays.
+
+  Nothing else was re-read, so no other row's status or rationale changed. The build-order
+  projection and its counts were recomputed from the tables rather than edited: 34 entries, now
+  17 `present`, 11 `partial`, 6 `absent`, with 17 in the list (1 `must`, 8 `should`, 8 `later`).

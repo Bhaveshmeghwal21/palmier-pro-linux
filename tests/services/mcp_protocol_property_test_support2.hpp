@@ -213,6 +213,21 @@ struct Invocation {
         args.set("muted", Json(*rc::gen::arbitrary<bool>()));
         return Invocation{name, std::move(args)};
     }
+    // Upstream parity: the `timeline` tool category's marker gap. `add_marker` needs
+    // no pre-existing state; `remove_marker` draws the guaranteed seed marker (see
+    // drawSeedProject()) the same way kRemoveCaptionCue above draws its guaranteed cue.
+    if (name == kAddMarker) {
+        args.set("timelineNs", Json(projectEndNs(project)));
+        if (*rc::gen::arbitrary<bool>()) {
+            args.set("label", Json(drawAsciiText(1 + drawIndex(24))));
+        }
+        return Invocation{name, std::move(args)};
+    }
+    if (name == kRemoveMarker) {
+        const Marker& marker = project.markers[drawIndex(project.markers.size())];
+        args.set("markerId", Json(marker.id.toString()));
+        return Invocation{name, std::move(args)};
+    }
     if (name == kAddClip) {
         const Track& track = project.tracks[drawIndex(project.tracks.size())];
         args.set("trackId", Json(track.id.toString()));

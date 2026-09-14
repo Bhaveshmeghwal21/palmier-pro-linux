@@ -14,6 +14,7 @@
 //   * assets      — the table of referenced media; every Clip.assetRef resolves here.
 //   * clipGroups  — clips that a later multicam ripple trim will keep in sync;
 //                   reserved by schema 1.1 and not interpreted by any edit today.
+//   * markers     — named points on the shared timeline (schema 1.9).
 //   * version     — the .palmier schema version (must be a supported version).
 //
 // Validation rules are enforced by ProjectValidation (validateProject): a valid
@@ -29,6 +30,7 @@
 #include "core/ClipGroup.hpp"
 #include "core/ColorSpace.hpp"
 #include "core/FrameRate.hpp"
+#include "core/Marker.hpp"
 #include "core/MediaAssetRef.hpp"
 #include "core/Resolution.hpp"
 #include "core/SchemaVersion.hpp"
@@ -46,6 +48,7 @@ struct Project {
     std::vector<Track>         tracks;
     std::vector<MediaAssetRef> assets;
     std::vector<ClipGroup>     clipGroups; ///< Reserved for multicam ripple trim.
+    std::vector<Marker>        markers;    ///< Named points on the shared timeline (1.9).
     SchemaVersion              version = SchemaVersion::current();
 };
 

@@ -89,6 +89,7 @@ set(PALMIER_TOOL_SURFACE_SOURCES
     "${PROJECT_SOURCE_DIR}/src/services/ProjectTools.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/MediaTools.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/TrackTools.cpp"
+    "${PROJECT_SOURCE_DIR}/src/services/TimelineMarkerTools.cpp"
     "${PROJECT_SOURCE_DIR}/src/services/GenerationExportTools.cpp")
 
 

@@ -24,6 +24,7 @@
 #include "core/ClipGroup.hpp"
 #include "core/ColorSpace.hpp"
 #include "core/Duration.hpp"
+#include "core/Marker.hpp"
 #include "core/Effect.hpp"
 #include "core/FrameRate.hpp"
 #include "core/MediaAssetRef.hpp"
@@ -99,6 +100,12 @@ Project makeSampleProject() {
     // though no edit interprets it yet.
     p.clipGroups.push_back(ClipGroup{Uuid::generateV4(), {c1.id, c2.id}});
     p.clipGroups.push_back(ClipGroup{Uuid::generateV4(), {}});
+
+    // Schema 1.9: named points on the shared timeline. Added to the shared fixture
+    // rather than only to a dedicated test, so every existing round-trip case in this
+    // file covers markers too, the same reasoning resourcePath's own comment gives below.
+    p.markers.push_back(Marker{Uuid::generateV4(), Duration::fromMilliseconds(1500), "Sync"});
+    p.markers.push_back(Marker{Uuid::generateV4(), Duration::zero(), ""});
     return p;
 }
 
@@ -150,6 +157,13 @@ void expectSameProject(const Project& a, const Project& b) {
     for (std::size_t g = 0; g < a.clipGroups.size(); ++g) {
         EXPECT_EQ(a.clipGroups[g].id, b.clipGroups[g].id);
         EXPECT_EQ(a.clipGroups[g].clipIds, b.clipGroups[g].clipIds);
+    }
+
+    ASSERT_EQ(a.markers.size(), b.markers.size());
+    for (std::size_t m = 0; m < a.markers.size(); ++m) {
+        EXPECT_EQ(a.markers[m].id, b.markers[m].id);
+        EXPECT_EQ(a.markers[m].timelineNs.ticks(), b.markers[m].timelineNs.ticks());
+        EXPECT_EQ(a.markers[m].label, b.markers[m].label);
     }
 
     ASSERT_EQ(a.tracks.size(), b.tracks.size());
@@ -305,10 +319,10 @@ std::string withDeclaredVersion(const Project& p, const std::string& version) {
 }
 
 TEST(ProjectStore, WritesTheCurrentSchemaVersion) {
-    // Schema 1.5 is what this build writes (monitoring-and-grading task 7; the addition
-    // over 1.4 is Effect::resourcePath).
-    EXPECT_EQ(SchemaVersion::current(), SchemaVersion(1, 8));
-    EXPECT_NE(serializeProject(makeSampleProject()).find("\"version\": \"1.8\""),
+    // Schema 1.9 is what this build writes; the addition over 1.8 is Project::markers
+    // (core/Marker.hpp; upstream parity, the `timeline` tool category's marker gap).
+    EXPECT_EQ(SchemaVersion::current(), SchemaVersion(1, 9));
+    EXPECT_NE(serializeProject(makeSampleProject()).find("\"version\": \"1.9\""),
               std::string::npos);
 }
 
@@ -456,6 +470,8 @@ TEST(ProjectStore, ReadsSchema10DocumentApplyingDocumentedDefaults) {
     ASSERT_EQ(p.tracks.size(), 1u);
     EXPECT_EQ(p.tracks[0].name, "");
     EXPECT_TRUE(p.clipGroups.empty());
+    // The 1.9 default: no "markers" key at all in this verbatim 1.0 document.
+    EXPECT_TRUE(p.markers.empty());
 
     // Everything 1.0 did carry is unchanged.
     EXPECT_EQ(p.name, "legacy");

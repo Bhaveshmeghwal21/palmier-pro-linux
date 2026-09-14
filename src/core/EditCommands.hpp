@@ -20,6 +20,7 @@
 //   * core/EffectEditCommands.hpp          - effects, per-clip properties, transforms and transitions
 //   * core/TextCaptionEditCommands.hpp     - text clips and caption cues
 //   * core/ProjectSettingsEditCommands.hpp - project-wide settings
+//   * core/MarkerEditCommands.hpp          - adding and removing timeline markers
 //
 // Atomicity / invariants: the TimelineEngine snapshots the project before every
 // apply() and rolls back on failure or on any timeline-invariant violation (no
@@ -39,5 +40,6 @@
 #include "core/EffectEditCommands.hpp"
 #include "core/TextCaptionEditCommands.hpp"
 #include "core/ProjectSettingsEditCommands.hpp"
+#include "core/MarkerEditCommands.hpp"
 
 #endif  // PALMIER_CORE_EDITCOMMANDS_HPP

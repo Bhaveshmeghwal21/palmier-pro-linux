@@ -378,9 +378,13 @@ TEST(ParityCheckFalsifiability, DetectsADuplicatedEntry) {
 }
 
 TEST(ParityCheckFalsifiability, DetectsAStatusOutsideItsValueSet) {
+    // Anchored on `telemetry`, the same documented deliberate non-goal used above:
+    // it stays `absent` across re-scores, so it is a stable mutation target. This
+    // previously anchored on `timeline`, and closing that gap (the marker tool) broke
+    // it -- the same lesson the other two anchors on this page already learned.
     const std::vector<Defect> defects =
-        checkParity(mutated(parityMarkdown(), "| timeline | partial |", "| timeline | mostly |"));
-    EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::InvalidStatus, "timeline"))
+        checkParity(mutated(parityMarkdown(), "| telemetry | absent |", "| telemetry | mostly |"));
+    EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::InvalidStatus, "telemetry"))
         << testsupport::toString(defects);
 }
 

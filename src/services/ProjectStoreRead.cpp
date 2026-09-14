@@ -119,6 +119,25 @@ std::vector<ClipGroup> readClipGroups(const JsonValue& projectObj) {
     return groups;
 }
 
+Marker readMarker(const JsonValue& v) {
+    requireObject(v, "marker");
+    Marker marker;
+    marker.id = requireUuid(v, "id");
+    marker.timelineNs = readDuration(v, "timelineNs");
+    marker.label = optionalString(v, "label", "");
+    return marker;
+}
+
+std::vector<Marker> readMarkers(const JsonValue& projectObj) {
+    const JsonValue* v = projectObj.find("markers");
+    if (v == nullptr || v->isNull()) return {};  // pre-1.9 default
+    requireArray(*v, "markers");
+    std::vector<Marker> markers;
+    markers.reserve(v->array.size());
+    for (const JsonValue& m : v->array) markers.push_back(readMarker(m));
+    return markers;
+}
+
 MediaAssetRef readMediaAssetRef(const JsonValue& v) {
     requireObject(v, "assetRef");
     MediaAssetRef ref;
@@ -321,6 +340,7 @@ Project readProject(const JsonValue& v) {
     for (const JsonValue& a : assets.array) p.assets.push_back(readMediaAssetRef(a));
 
     p.clipGroups = readClipGroups(v);  // schema 1.1; default []
+    p.markers = readMarkers(v);        // schema 1.9; default []
 
     return p;
 }

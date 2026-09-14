@@ -209,6 +209,16 @@ void writeClipGroup(JsonWriter& w, const ClipGroup& group) {
     w.endObject();
 }
 
+void writeMarker(JsonWriter& w, const Marker& marker) {
+    w.beginObject();
+    writeUuid(w, "id", marker.id);
+    w.key("timelineNs");
+    w.valueInt(marker.timelineNs.nanoseconds());
+    w.key("label");
+    w.valueString(marker.label);
+    w.endObject();
+}
+
 void writeProject(JsonWriter& w, const Project& p) {
     w.beginObject();
     writeUuid(w, "id", p.id);
@@ -243,6 +253,12 @@ void writeProject(JsonWriter& w, const Project& p) {
     w.key("clipGroups");
     w.beginArray();
     for (const ClipGroup& group : p.clipGroups) writeClipGroup(w, group);
+    w.endArray();
+
+    // Schema 1.9: always written, optional on read (default []) — see core/Marker.hpp.
+    w.key("markers");
+    w.beginArray();
+    for (const Marker& marker : p.markers) writeMarker(w, marker);
     w.endArray();
     w.endObject();
 }

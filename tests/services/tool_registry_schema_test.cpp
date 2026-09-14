@@ -169,6 +169,13 @@ std::vector<ToolExpectation> expectedSurface() {
         // documented "mute track N" / "unmute track N" phrases resolve to a tool
         // that is really in the surface (Requirements 11.2, 11.3).
         {"timeline.set_track_muted", {{"trackId", "string", true}, {"muted", "boolean", true}}},
+        // Upstream parity: the `timeline` tool category's marker gap. Argument order
+        // matches makeAddMarkerTool/makeRemoveMarkerTool's schema declarations exactly.
+        {"timeline.add_marker",
+         {{"timelineNs", "integer", true},
+          {"label", "string", false},
+          {"markerId", "string", false}}},
+        {"timeline.remove_marker", {{"markerId", "string", true}}},
         {"timeline.add_clip",
          {{"trackId", "string", true},
           {"assetId", "string", true},

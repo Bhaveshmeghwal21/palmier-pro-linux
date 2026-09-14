@@ -145,6 +145,16 @@ Json serializeProject(const Project& project) {
     }
     out.set("assets", std::move(assets));
 
+    Json markers = Json::array();
+    for (const Marker& m : project.markers) {
+        Json entry = Json::object();
+        entry.set("markerId", m.id.toString());
+        entry.set("timelineNs", static_cast<std::int64_t>(m.timelineNs.nanoseconds()));
+        entry.set("label", m.label);
+        markers.push_back(std::move(entry));
+    }
+    out.set("markers", std::move(markers));
+
     out.set("durationNs", static_cast<std::int64_t>(timelineDuration(project).nanoseconds()));
     return out;
 }

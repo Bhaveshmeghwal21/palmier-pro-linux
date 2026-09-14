@@ -67,6 +67,7 @@ add_library(palmier_core STATIC
     EffectEditCommands.cpp
     TextCaptionEditCommands.cpp
     ProjectSettingsEditCommands.cpp
+    MarkerEditCommands.cpp
     MediaManager.cpp
     ToneCurve.cpp
     Logging.cpp)

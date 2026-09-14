@@ -118,6 +118,9 @@ ToolRegistry buildDefaultToolRegistry(ProjectSession* session, ToolRegistryHooks
     registry.add(detail::makeAddTrackTool(session));
     registry.add(detail::makeRemoveTrackTool(session));
     registry.add(detail::makeSetTrackMutedTool(session));
+    // Timeline markers sit with the track tools they complement.
+    registry.add(detail::makeAddMarkerTool(session));
+    registry.add(detail::makeRemoveMarkerTool(session));
     registry.add(detail::makeAddClipTool(session));
     registry.add(detail::makeDeleteClipTool(session));
     registry.add(detail::makeMoveClipTool(session));

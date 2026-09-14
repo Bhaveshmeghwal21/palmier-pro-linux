@@ -403,6 +403,17 @@ private:
     observer.run("timeline.remove_track",
                  with("trackId", services::Json(spareTrack.stringOr("trackId"))));
 
+    // Markers, added and removed the same way the spare track was: create one,
+    // observe `timeline.add_marker`'s result, then remove it so
+    // `timeline.remove_marker`'s result is observed too without leaving a marker
+    // behind for the rest of the scenario to account for.
+    services::Json addMarkerArgs = object();
+    addMarkerArgs.set("timelineNs", static_cast<std::int64_t>(0));
+    addMarkerArgs.set("label", std::string{"scenario marker"});
+    const services::Json marker = observer.run("timeline.add_marker", addMarkerArgs);
+    observer.run("timeline.remove_marker",
+                 with("markerId", services::Json(marker.stringOr("markerId"))));
+
     constexpr std::int64_t kSecond = 1'000'000'000;
     const auto addClip = [&](const Uuid& assetId, std::int64_t startNs, std::int64_t lengthNs) {
         services::Json args = object();
