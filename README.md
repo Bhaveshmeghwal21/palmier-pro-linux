@@ -137,7 +137,7 @@ make test-verbose      # per-test output, JUnit XML, generated summary
 make coverage          # instrumented build, gcovr line-coverage report
 ```
 
-The suite holds more than 1800 GoogleTest and RapidCheck cases across 90 test executables, run
+The suite holds more than 1900 GoogleTest and RapidCheck cases across 90 test executables, run
 by CI on every
 push and pull request against `main`. Beyond unit tests: property tests over generated
 timelines, round-trip tests over the project file format, agent/UI edit-equivalence tests, and
