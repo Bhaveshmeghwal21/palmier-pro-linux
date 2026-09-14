@@ -53,8 +53,6 @@ constexpr std::size_t kMaxLines = 1000;
 /// gtest_discover_tests registers identical names and the suite's case count is preserved.
 const std::map<std::string, std::size_t>& allowlist() {
     static const std::map<std::string, std::size_t> pinned = {
-        {"tests/docs/documentation_consistency_property_test.cpp", 1968},
-        {"tests/services/mcp_protocol_property_test.cpp", 1883},
         {"tests/ui/shell_unit_test.cpp", 1846},
         {"tests/docs/suite_hygiene_property_test.cpp", 1441},
         {"tests/services/offline_mode_availability_test.cpp", 1414},

@@ -3202,8 +3202,8 @@ target_sources(palmier_docs_tests PRIVATE
 # leave the documentation unmodified" asserted rather than assumed.
 # ---------------------------------------------------------------------------
 target_sources(palmier_docs_tests PRIVATE
-    docs/documentation_consistency_property_test.cpp)
-
+    docs/documentation_consistency_property_test.cpp
+    docs/documentation_consistency_property_test_part2.cpp)
 palmier_register_test(palmier_docs_tests)
 
 
