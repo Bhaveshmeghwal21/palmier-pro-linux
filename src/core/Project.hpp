@@ -48,7 +48,7 @@ struct Project {
     std::vector<Track>         tracks;
     std::vector<MediaAssetRef> assets;
     std::vector<ClipGroup>     clipGroups; ///< Reserved for multicam ripple trim.
-    std::vector<Marker>        markers;    ///< Named points on the shared timeline (1.9).
+    std::vector<Marker> markers;           ///< Named points on the shared timeline (1.9).
     SchemaVersion              version = SchemaVersion::current();
 };
 

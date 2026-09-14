@@ -27,11 +27,11 @@
 namespace palmier {
 
 struct Marker {
-    Uuid     id;                    ///< Stable per-marker identity.
+    Uuid id;                                 ///< Stable per-marker identity.
     Duration timelineNs = Duration::zero();  ///< Absolute timeline position.
-    std::string label;              ///< Human-readable annotation; may be empty.
+    std::string label;                       ///< Human-readable annotation; may be empty.
 };
 
-} // namespace palmier
+}  // namespace palmier
 
-#endif // PALMIER_CORE_MARKER_HPP
+#endif  // PALMIER_CORE_MARKER_HPP

@@ -41,7 +41,7 @@ Json markerArgs(std::int64_t timelineNs, const std::string& label) {
 }
 
 TEST(TimelineMarkerTools, AddMarkerReportsTheGeneratedIdAndPersistsTheMarker) {
-    ProjectSession     session;
+    ProjectSession session;
     const ToolRegistry registry = buildDefaultToolRegistry(session);
 
     const Json result = invokeOk(registry, "timeline.add_marker", markerArgs(1500, "Sync point"));
@@ -56,7 +56,7 @@ TEST(TimelineMarkerTools, AddMarkerReportsTheGeneratedIdAndPersistsTheMarker) {
 }
 
 TEST(TimelineMarkerTools, AddMarkerDefaultsTheLabelToEmpty) {
-    ProjectSession     session;
+    ProjectSession session;
     const ToolRegistry registry = buildDefaultToolRegistry(session);
 
     Json args = Json::object();
@@ -68,9 +68,9 @@ TEST(TimelineMarkerTools, AddMarkerDefaultsTheLabelToEmpty) {
 }
 
 TEST(TimelineMarkerTools, AddMarkerAcceptsAnExplicitMarkerId) {
-    ProjectSession     session;
+    ProjectSession session;
     const ToolRegistry registry = buildDefaultToolRegistry(session);
-    const Uuid         explicitId = Uuid::generateV4();
+    const Uuid explicitId = Uuid::generateV4();
 
     Json args = markerArgs(0, "explicit");
     args.set("markerId", explicitId.toString());
@@ -81,7 +81,7 @@ TEST(TimelineMarkerTools, AddMarkerAcceptsAnExplicitMarkerId) {
 }
 
 TEST(TimelineMarkerTools, AddMarkerRejectsANegativePosition) {
-    ProjectSession     session;
+    ProjectSession session;
     const ToolRegistry registry = buildDefaultToolRegistry(session);
 
     invokeErr(registry, "timeline.add_marker", markerArgs(-1, "before zero"));
@@ -89,7 +89,7 @@ TEST(TimelineMarkerTools, AddMarkerRejectsANegativePosition) {
 }
 
 TEST(TimelineMarkerTools, RemoveMarkerDropsExactlyTheNamedMarker) {
-    ProjectSession     session;
+    ProjectSession session;
     const ToolRegistry registry = buildDefaultToolRegistry(session);
 
     const Json a = invokeOk(registry, "timeline.add_marker", markerArgs(0, "a"));
@@ -106,7 +106,7 @@ TEST(TimelineMarkerTools, RemoveMarkerDropsExactlyTheNamedMarker) {
 }
 
 TEST(TimelineMarkerTools, RemoveMarkerRejectsAnUnknownIdAndChangesNothing) {
-    ProjectSession     session;
+    ProjectSession session;
     const ToolRegistry registry = buildDefaultToolRegistry(session);
     invokeOk(registry, "timeline.add_marker", markerArgs(0, "kept"));
 
@@ -119,7 +119,7 @@ TEST(TimelineMarkerTools, RemoveMarkerRejectsAnUnknownIdAndChangesNothing) {
 }
 
 TEST(TimelineMarkerTools, MarkerToolsAreUndoableThroughTheOrdinaryEditPath) {
-    ProjectSession     session;
+    ProjectSession session;
     const ToolRegistry registry = buildDefaultToolRegistry(session);
 
     invokeOk(registry, "timeline.add_marker", markerArgs(0, "undo me"));
@@ -134,7 +134,7 @@ TEST(TimelineMarkerTools, MarkerToolsAreUndoableThroughTheOrdinaryEditPath) {
 }
 
 TEST(TimelineMarkerTools, TimelineReadReportsEveryMarker) {
-    ProjectSession     session;
+    ProjectSession session;
     const ToolRegistry registry = buildDefaultToolRegistry(session);
 
     invokeOk(registry, "timeline.add_marker", markerArgs(1000, "one"));

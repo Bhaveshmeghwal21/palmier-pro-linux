@@ -33,9 +33,8 @@ Result<void> AddMarkerCommand::apply(Project& project) {
     if (markerId_.isNil()) {
         return err(invalidArgument("AddMarkerCommand: marker id must not be nil"));
     }
-    const bool exists =
-        std::any_of(project.markers.begin(), project.markers.end(),
-                   [&](const Marker& m) { return m.id == markerId_; });
+    const bool exists = std::any_of(project.markers.begin(), project.markers.end(),
+                                    [&](const Marker& m) { return m.id == markerId_; });
     if (exists) {
         return err(failedPrecondition("AddMarkerCommand: marker " + idLabel(markerId_) +
                                       " is already present in the project"));
@@ -88,8 +87,7 @@ Result<void> RemoveMarkerCommand::revert(Project& project) {
         return err(failedPrecondition("RemoveMarkerCommand: revert before a successful apply"));
     }
     const std::size_t index = std::min(index_, project.markers.size());
-    project.markers.insert(project.markers.begin() + static_cast<std::ptrdiff_t>(index),
-                           *removed_);
+    project.markers.insert(project.markers.begin() + static_cast<std::ptrdiff_t>(index), *removed_);
     return ok();
 }
 
