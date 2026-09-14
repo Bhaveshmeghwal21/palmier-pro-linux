@@ -175,6 +175,33 @@ of this project's own sandbox and CI host — libavcodec built with no `libx264`
 A partially written file is removed rather than left behind. [`HARDWARE_ENCODE.md`](HARDWARE_ENCODE.md)
 explains how to confirm this and what to install.
 
+## Grading and monitoring in the shell
+
+The walkthrough above drives everything through the agent surface. Three parts of the grade are
+worth knowing as *shell* features too, because they are where you judge the result rather than
+just apply it.
+
+**The tone curve.** `timeline.edit_curve_point` adds, moves and removes control points on a
+master curve plus independent red, green and blue curves. The points are interpolated once, on
+the host, in double precision, and baked by `bakeToneCurve` into a 256-entry `ToneCurveTable` per
+channel — the set of four is a `ToneCurveTables`. Both render paths then do nothing but index that
+table, which is why the GPU and CPU results are identical rather than merely close: the pipeline
+is 8-bit, so 256 entries is not an approximation of the transfer function, it *is* the transfer
+function. In the shell the same points are dragged in the Curve Editor, whose logic lives in
+`CurveEditorViewModel` so it can be tested without a display.
+
+**The scopes.** A histogram, a luma waveform and a vectorscope sit beside the Preview, each
+computed from the same composited frame the Preview is showing — not from a second, separately
+resolved render. `ScopesViewModel` owns which of them are visible (a `ScopeKind` each) and
+recomputes against a cost budget, so leaving all three open cannot starve playback. Visibility
+persists between sessions.
+
+**Colour wheels and secondary grading.** A `color_grade` effect carries three colour wheels —
+shadows, midtones and highlights — set as a hue and an amount each, and a `secondary_grade`
+applies the identical correction only where its HSL qualifier selects. Both are in the Inspector
+and on the tool surface; the parameters and their exact semantics are in
+[`TOOLS.md`](TOOLS.md).
+
 ## Remediation
 
 ### No compatible GPU
