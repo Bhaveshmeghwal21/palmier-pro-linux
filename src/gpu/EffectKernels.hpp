@@ -65,16 +65,17 @@ enum class EffectKernel {
     InvertColors,
     ToneCurve,
     Lut,
+    Denoise,
+    SecondaryGrade,
     Transition,
 };
 
 /// All kernels, in a stable order (handy for iterating / registering).
-[[nodiscard]] constexpr std::array<EffectKernel, 9> allEffectKernels() noexcept {
-    return {EffectKernel::Brightness,   EffectKernel::Contrast,
-            EffectKernel::Blur,         EffectKernel::CropTransform,
-            EffectKernel::ColorGrade,   EffectKernel::InvertColors,
-            EffectKernel::ToneCurve,    EffectKernel::Lut,
-            EffectKernel::Transition};
+[[nodiscard]] constexpr std::array<EffectKernel, 11> allEffectKernels() noexcept {
+    return {EffectKernel::Brightness,     EffectKernel::Contrast,   EffectKernel::Blur,
+            EffectKernel::CropTransform,  EffectKernel::ColorGrade, EffectKernel::InvertColors,
+            EffectKernel::ToneCurve,      EffectKernel::Lut,        EffectKernel::Denoise,
+            EffectKernel::SecondaryGrade, EffectKernel::Transition};
 }
 
 /// Stable, human-readable kernel name (for logs / diagnostics / the shaderc
@@ -148,6 +149,6 @@ private:
     std::map<EffectKernel, SpirvModule> modules_{};
 };
 
-} // namespace palmier::gpu
+}  // namespace palmier::gpu
 
-#endif // PALMIER_GPU_EFFECTKERNELS_HPP
+#endif  // PALMIER_GPU_EFFECTKERNELS_HPP

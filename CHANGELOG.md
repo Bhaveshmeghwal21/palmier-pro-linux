@@ -6,10 +6,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 This file starts at `v0.1.0`. Development before that tag is recorded in the commit
-history and in the per-task records under `.kiro/specs/*/tasks.md`, which note each
-task's completion commit, its CI run and the suite size at that point.
+history, which notes each change's completion commit and its CI run.
 
 ## [Unreleased]
+
+### Added
+
+- **Edge-preserving denoise** (`timeline.add_effect` with `type: "denoise"`). A bilateral
+  average, not a blur: each neighbour is weighted by a Gaussian of its Rec.601 luma distance
+  from the centre pixel, so flat noise averages away while edges keep their contrast.
+  Parameters are `strength` (0–1, `0.0` is an exact no-op) and `radius` (clamped to 16,
+  because cost grows with `radius²`). Renders on both the software and GPU paths.
+- **Qualifier-masked secondary grading** (`type: "secondary_grade"`). The same
+  gain/lift/gamma/saturation correction `color_grade` applies, restricted to the pixels an
+  HSL qualifier selects — a hue arc, a saturation band, a luma band and a `softness` that
+  feathers all three. The qualifier is evaluated on the ungraded pixel, so a correction
+  cannot widen its own selection, and its defaults select the whole frame so that an unset
+  qualifier narrows nothing rather than selecting nothing.
+- **Three colour wheels** on `color_grade` and `secondary_grade`: `shadowsHue`/`shadowsAmount`
+  drive lift, `midtonesHue`/`midtonesAmount` drive gamma, and
+  `highlightsHue`/`highlightsAmount` drive gain. Each wheel's per-channel offsets sum to zero,
+  making it a colour balance rather than a second brightness control. They are folded into the
+  nine grade values before rendering, so no shader changed to add them and both render paths
+  inherit them identically. Exposed in the Inspector as well as on the tool surface.
+
+### Changed
+
+- `docs/UPSTREAM_PARITY.md` re-scored: `denoise` (tool category) moves from `absent` to
+  `present`, and `color` (tool category) and `color and effects` (capability area) from
+  `partial` to `present`. 34 measured entries are now 16 `present`, 12 `partial`, 6 `absent`.
+- The planning material under `.kiro/` is no longer distributed. It was never a build input;
+  the two documentation properties that compared the checked reports against `requirements.md`
+  now skip themselves when it is absent, so a clone without it is fully green.
 
 ## [0.4.0] — 2026-09-13
 

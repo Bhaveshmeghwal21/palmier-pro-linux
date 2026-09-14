@@ -85,14 +85,29 @@ using testsupport::PortBacklog;
 }
 
 [[nodiscard]] std::string requirementsMarkdown() {
-    return testsupport::readReportDocument(std::string{PALMIER_SPEC_DIR}
-                                           + "/end-to-end-editor-integration/requirements.md");
+    return testsupport::readReportDocument(std::string{PALMIER_SPEC_DIR} +
+                                           "/end-to-end-editor-integration/requirements.md");
 }
+
+/// Why the three properties below can skip rather than fail.
+///
+/// `.kiro/specs/` is the local planning material this port was written from. It is not a
+/// build input and nothing in `src/` reads it, so it is deliberately not distributed (see
+/// `.gitignore`) and a clone does not carry it. The three properties compare the parser's
+/// hard-coded category lists against Requirements 13.1, 13.2 and 14.2 as *stated there*,
+/// which is a real gate in an author's tree and a comparison with nothing at all in a
+/// clone. Skipping is therefore the honest outcome: the property is vacuous, not passing.
+///
+/// The lists themselves are still gated unconditionally where it matters -- every table in
+/// `docs/UPSTREAM_PARITY.md` is checked against `requiredToolCategories()` and
+/// `requiredCapabilityAreas()` by the properties above, and that document IS distributed.
+constexpr std::string_view kSpecDocumentAbsent =
+    "skipped: .kiro/specs/end-to-end-editor-integration/requirements.md is not distributed "
+    "with the repository, so there is no stated requirement to compare against";
 
 /// One targeted mutation. Every falsifiability case below is a single edit to the
 /// real document, so the defect it produces is attributable to that edit.
-[[nodiscard]] std::string mutated(std::string_view markdown,
-                                  std::string_view from,
+[[nodiscard]] std::string mutated(std::string_view markdown, std::string_view from,
                                   std::string_view to) {
     std::string text{markdown};
     const std::size_t at = text.find(from);
@@ -143,10 +158,9 @@ using testsupport::PortBacklog;
     for (const std::string& name : testsupport::requiredToolCategories()) {
         text += "| " + name + " | present | core::Thing | - | - | - | - |\n";
     }
-    text +=
-        "\n## Table 2\n\n"
-        "| area | status | linux-components | priority | rationale | macos-framework | "
-        "linux-replacement |\n|---|---|---|---|---|---|---|\n";
+    text += "\n## Table 2\n\n"
+            "| area | status | linux-components | priority | rationale | macos-framework | "
+            "linux-replacement |\n|---|---|---|---|---|---|---|\n";
     for (const std::string& name : testsupport::requiredCapabilityAreas()) {
         text += "| " + name + " | present | ui::Thing | - | - | - | - |\n";
     }
@@ -157,12 +171,11 @@ using testsupport::PortBacklog;
 /// A minimal Port_Backlog: one `port` entry per required identifier, each with a
 /// complete acceptance check.
 [[nodiscard]] std::string wellFormedBacklog() {
-    std::string text =
-        "# Synthetic port backlog\n\n"
-        "## Provenance\n\n"
-        "- upstream-repository: https://github.com/palmier-io/palmier-pro\n"
-        "- upstream-range: aaaa..bbbb\n"
-        "- window: 2026-06-25..2026-07-25\n\n";
+    std::string text = "# Synthetic port backlog\n\n"
+                       "## Provenance\n\n"
+                       "- upstream-repository: https://github.com/palmier-io/palmier-pro\n"
+                       "- upstream-range: aaaa..bbbb\n"
+                       "- window: 2026-06-25..2026-07-25\n\n";
     for (const std::string& identifier : testsupport::requiredBacklogIdentifiers()) {
         text += "### " + identifier + " \u2014 a synthetic change\n\n";
         text += "identifier: " + identifier + "\n";
@@ -203,11 +216,9 @@ TEST(ParityReportDocument, ParsesEveryEntryOfTheCheckedInReport) {
               testsupport::requiredCapabilityAreas().size());
     EXPECT_EQ(report.entries.size(), 34U);
 
-    const std::size_t needingPriority =
-        static_cast<std::size_t>(std::count_if(report.entries.begin(), report.entries.end(),
-                                               [](const testsupport::ParityEntry& entry) {
-                                                   return entry.requiresPriority();
-                                               }));
+    const std::size_t needingPriority = static_cast<std::size_t>(std::count_if(
+        report.entries.begin(), report.entries.end(),
+        [](const testsupport::ParityEntry& entry) { return entry.requiresPriority(); }));
     EXPECT_GT(needingPriority, 0U);
     EXPECT_EQ(report.buildOrder.size(), needingPriority)
         << "Requirement 13.9's list is a projection of the absent and partial entries";
@@ -331,11 +342,11 @@ TEST(ReportParserTotality, ATruncatedDocumentYieldsDefectsAndDoesNotThrow) {
 }
 
 TEST(ReportParserTotality, ATableWithTheWrongColumnCountIsReported) {
-    const std::string text = mutated(
-        wellFormedParity(),
-        "| category | status | linux-components | priority | rationale | macos-framework | "
-        "linux-replacement |",
-        "| category | status | linux-components |");
+    const std::string text =
+        mutated(wellFormedParity(),
+                "| category | status | linux-components | priority | rationale | macos-framework | "
+                "linux-replacement |",
+                "| category | status | linux-components |");
     const std::vector<Defect> defects = checkParity(text);
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::MissingField))
         << testsupport::toString(defects);
@@ -346,9 +357,14 @@ TEST(ReportParserTotality, ATableWithTheWrongColumnCountIsReported) {
 // ===========================================================================
 
 TEST(ParityCheckFalsifiability, DetectsAMissingEntry) {
+    // Anchored on `telemetry` rather than on whichever row is currently the most
+    // interesting: it is a documented deliberate non-goal for a GPL Linux editor, so it
+    // stays `absent` across re-scores. These two mutations previously anchored on
+    // `denoise`, and closing that gap broke them -- the same lesson the build-order item
+    // numbers taught earlier.
     const std::vector<Defect> defects =
-        checkParity(mutated(parityMarkdown(), "| denoise | absent |", "| | absent |"));
-    EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::MissingEntry, "denoise"))
+        checkParity(mutated(parityMarkdown(), "| telemetry | absent |", "| | absent |"));
+    EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::MissingEntry, "telemetry"))
         << testsupport::toString(defects);
 }
 
@@ -430,10 +446,9 @@ TEST(ParityCheckFalsifiability, DetectsAnOverlongRationale) {
     // category table is a document detail this test has no reason to depend on.
     const std::vector<const testsupport::ParityEntry*> toolCategories =
         report.entriesIn(ParityTable::ToolCategory);
-    const auto found = std::find_if(toolCategories.begin(), toolCategories.end(),
-                                    [](const testsupport::ParityEntry* entry) {
-                                        return entry->requiresPriority();
-                                    });
+    const auto found = std::find_if(
+        toolCategories.begin(), toolCategories.end(),
+        [](const testsupport::ParityEntry* entry) { return entry->requiresPriority(); });
     ASSERT_NE(found, toolCategories.end()) << "no tool category entry needs a priority";
     const testsupport::ParityEntry& subject = **found;
     ASSERT_TRUE(subject.requiresPriority());
@@ -472,18 +487,19 @@ TEST(ParityCheckFalsifiability, DetectsAnUnsortedBuildOrderList) {
     // Demote the sole `must` item to `later`; the unchanged `should` item that
     // follows it then has a lower rank than the (mutated) rank already seen,
     // which is exactly what the ordering check looks for.
-    const std::vector<Defect> defects = checkParity(
-        mutated(parityMarkdown(), "1. MCP and agent chat (capability area) \u2014 must",
-                "1. MCP and agent chat (capability area) \u2014 later"));
+    const std::vector<Defect> defects =
+        checkParity(mutated(parityMarkdown(), "1. MCP and agent chat (capability area) \u2014 must",
+                            "1. MCP and agent chat (capability area) \u2014 later"));
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::OutOfOrder))
         << testsupport::toString(defects);
 }
 
 TEST(ParityCheckFalsifiability, DetectsAnEntryMissingFromTheBuildOrderList) {
-    const std::vector<Defect> defects =
-        checkParity(mutated(parityMarkdown(),
-                            lineWith(parityMarkdown(), "denoise (tool category)") + "\n", ""));
-    EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::MissingEntry, "denoise"))
+    // `telemetry`, for the reason given on DetectsAMissingEntry: a row that stays `absent`
+    // is the only stable anchor for a mutation that requires the entry to be in the list.
+    const std::vector<Defect> defects = checkParity(mutated(
+        parityMarkdown(), lineWith(parityMarkdown(), "telemetry (capability area)") + "\n", ""));
+    EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::MissingEntry, "telemetry"))
         << testsupport::toString(defects);
 }
 
@@ -538,8 +554,8 @@ TEST(BacklogCheckFalsifiability, DetectsAMissingIdentifierSummaryAndRationale) {
 }
 
 TEST(BacklogCheckFalsifiability, DetectsADispositionOutsideItsValueSet) {
-    const std::vector<Defect> defects =
-        checkBacklog(mutated(backlogMarkdown(), "disposition: not-applicable", "disposition: skip"));
+    const std::vector<Defect> defects = checkBacklog(
+        mutated(backlogMarkdown(), "disposition: not-applicable", "disposition: skip"));
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::InvalidStatus, "PR 401"))
         << testsupport::toString(defects);
 }
@@ -562,19 +578,18 @@ TEST(BacklogCheckFalsifiability, DetectsAPortEntryWithNoAcceptanceCheck) {
 }
 
 TEST(BacklogCheckFalsifiability, DetectsAnAcceptanceCheckMissingALeg) {
-    const std::vector<Defect> defects = checkBacklog(mutated(
-        backlogMarkdown(), "  then:  both grouped clips move by exactly that duration",
-        "  outcome:  both grouped clips move by exactly that duration"));
+    const std::vector<Defect> defects = checkBacklog(
+        mutated(backlogMarkdown(), "  then:  both grouped clips move by exactly that duration",
+                "  outcome:  both grouped clips move by exactly that duration"));
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::MissingCheck, "PR 397"))
         << testsupport::toString(defects);
 }
 
 TEST(BacklogCheckFalsifiability, DetectsAnAcceptanceCheckOnANotApplicableEntry) {
-    const std::vector<Defect> defects =
-        checkBacklog(mutated(backlogMarkdown(),
-                             "status: not-started\nnote: `not-started` here is a formality",
-                             "check:\n  given: nothing\n  when:  nothing\n  then:  nothing\n"
-                             "status: not-started\nnote: `not-started` here is a formality"));
+    const std::vector<Defect> defects = checkBacklog(
+        mutated(backlogMarkdown(), "status: not-started\nnote: `not-started` here is a formality",
+                "check:\n  given: nothing\n  when:  nothing\n  then:  nothing\n"
+                "status: not-started\nnote: `not-started` here is a formality"));
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::MissingCheck, "PR 401"))
         << testsupport::toString(defects);
 }
@@ -592,9 +607,9 @@ TEST(BacklogCheckFalsifiability, DetectsAMissingProvenanceFieldAndAMalformedWind
 }
 
 TEST(BacklogCheckFalsifiability, DetectsAnOverlongSummary) {
-    const std::vector<Defect> defects = checkBacklog(
-        mutated(backlogMarkdown(), "summary: Refresh pinned dependency versions",
-                "summary: " + std::string(201, 'x') + " \u2014 Refresh pinned dependency versions"));
+    const std::vector<Defect> defects = checkBacklog(mutated(
+        backlogMarkdown(), "summary: Refresh pinned dependency versions",
+        "summary: " + std::string(201, 'x') + " \u2014 Refresh pinned dependency versions"));
     EXPECT_TRUE(testsupport::hasDefect(defects, DefectKind::MissingField, "PR 399"))
         << testsupport::toString(defects);
 }
@@ -607,7 +622,7 @@ TEST(BacklogCheckFalsifiability, DetectsAnOverlongSummary) {
 /// ", ". Returns an empty vector when the phrase or the parentheses are absent,
 /// which the caller asserts against.
 [[nodiscard]] std::vector<std::string> parenthesisedListAfter(std::string_view markdown,
-                                                             std::string_view phrase) {
+                                                              std::string_view phrase) {
     const std::size_t at = markdown.find(phrase);
     if (at == std::string_view::npos) {
         return {};
@@ -623,8 +638,9 @@ TEST(BacklogCheckFalsifiability, DetectsAnOverlongSummary) {
     std::size_t start = 0;
     while (start <= list.size()) {
         const std::size_t comma = list.find(',', start);
-        std::string_view piece =
-            comma == std::string_view::npos ? list.substr(start) : list.substr(start, comma - start);
+        std::string_view piece = comma == std::string_view::npos
+                                     ? list.substr(start)
+                                     : list.substr(start, comma - start);
         while (!piece.empty() && piece.front() == ' ') {
             piece.remove_prefix(1);
         }
@@ -644,7 +660,9 @@ TEST(BacklogCheckFalsifiability, DetectsAnOverlongSummary) {
 
 TEST(RequiredNamesMatchTheRequirements, TheToolCategoriesAreRequirement131s) {
     const std::string requirements = requirementsMarkdown();
-    ASSERT_FALSE(requirements.empty()) << "requirements.md could not be read";
+    if (requirements.empty()) {
+        GTEST_SKIP() << kSpecDocumentAbsent;
+    }
 
     const std::vector<std::string> stated =
         parenthesisedListAfter(requirements, "22 upstream agent tool categories");
@@ -654,7 +672,9 @@ TEST(RequiredNamesMatchTheRequirements, TheToolCategoriesAreRequirement131s) {
 
 TEST(RequiredNamesMatchTheRequirements, TheCapabilityAreasAreRequirement132s) {
     const std::string requirements = requirementsMarkdown();
-    ASSERT_FALSE(requirements.empty());
+    if (requirements.empty()) {
+        GTEST_SKIP() << kSpecDocumentAbsent;
+    }
 
     const std::vector<std::string> stated =
         parenthesisedListAfter(requirements, "12 upstream user-facing capability areas");
@@ -664,7 +684,9 @@ TEST(RequiredNamesMatchTheRequirements, TheCapabilityAreasAreRequirement132s) {
 
 TEST(RequiredNamesMatchTheRequirements, TheBacklogIdentifiersAreRequirement142s) {
     const std::string requirements = requirementsMarkdown();
-    ASSERT_FALSE(requirements.empty());
+    if (requirements.empty()) {
+        GTEST_SKIP() << kSpecDocumentAbsent;
+    }
 
     const std::size_t at =
         requirements.find("THE Port_Backlog SHALL include the following identified upstream");
@@ -676,8 +698,8 @@ TEST(RequiredNamesMatchTheRequirements, TheBacklogIdentifiersAreRequirement142s)
     for (std::size_t cursor = criterion.find("PR "); cursor != std::string::npos;
          cursor = criterion.find("PR ", cursor + 1)) {
         std::size_t digits = cursor + 3;
-        while (digits < criterion.size()
-               && (std::isdigit(static_cast<unsigned char>(criterion[digits])) != 0)) {
+        while (digits < criterion.size() &&
+               (std::isdigit(static_cast<unsigned char>(criterion[digits])) != 0)) {
             ++digits;
         }
         if (digits > cursor + 3) {

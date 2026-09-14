@@ -125,11 +125,11 @@ const std::string kNotAUuid = "not-a-uuid";
 struct ArgExpectation {
     const char* name;
     const char* type;
-    bool        required;
+    bool required;
 };
 
 struct ToolExpectation {
-    const char*                 tool;
+    const char* tool;
     std::vector<ArgExpectation> args;
 };
 
@@ -418,13 +418,14 @@ TEST(ToolRegistrySchema, UndeclaredArgumentsAreRejectedByEveryTool) {
                     // A declared minimum length is part of "its own required
                     // arguments": `project.create`'s name and the path arguments
                     // declare one, so the filler honours it.
-                    unknown.set(spec.name,
-                                spec.uuid ? Uuid::generateV4().toString()
-                                          : (spec.enumValues.empty()
-                                                 ? std::string(std::max<std::size_t>(
-                                                                   spec.minLength.value_or(1), 1),
-                                                               'x')
-                                                 : spec.enumValues.front()));
+                    unknown.set(
+                        spec.name,
+                        spec.uuid
+                            ? Uuid::generateV4().toString()
+                            : (spec.enumValues.empty()
+                                   ? std::string(
+                                         std::max<std::size_t>(spec.minLength.value_or(1), 1), 'x')
+                                   : spec.enumValues.front()));
                     break;
                 case JsonKind::Integer:
                     // Likewise for a declared lower bound (`project.create`'s canvas
@@ -434,7 +435,9 @@ TEST(ToolRegistrySchema, UndeclaredArgumentsAreRejectedByEveryTool) {
                 case JsonKind::Number:
                     unknown.set(spec.name, std::max<double>(spec.minNum.value_or(1.0), 1.0));
                     break;
-                case JsonKind::Bool:    unknown.set(spec.name, true); break;
+                case JsonKind::Bool:
+                    unknown.set(spec.name, true);
+                    break;
                 case JsonKind::Array: {
                     // As for a string's minimum length, a declared minimum item count is part of
                     // "its own required arguments": timeline.apply_layout's clipIds declares
@@ -449,7 +452,9 @@ TEST(ToolRegistrySchema, UndeclaredArgumentsAreRejectedByEveryTool) {
                     unknown.set(spec.name, std::move(items));
                     break;
                 }
-                case JsonKind::Object:  unknown.set(spec.name, Json::object()); break;
+                case JsonKind::Object:
+                    unknown.set(spec.name, Json::object());
+                    break;
             }
         }
         ASSERT_TRUE(tool.schema.validate(unknown).isOk())
@@ -458,8 +463,7 @@ TEST(ToolRegistrySchema, UndeclaredArgumentsAreRejectedByEveryTool) {
         unknown.set("definitelyNotAnArgument", true);
         const Result<void> rejected = tool.schema.validate(unknown);
         ASSERT_TRUE(rejected.isError()) << tool.name;
-        EXPECT_NE(rejected.error().message().find("definitelyNotAnArgument"),
-                  std::string::npos)
+        EXPECT_NE(rejected.error().message().find("definitelyNotAnArgument"), std::string::npos)
             << tool.name;
     }
 }
@@ -480,19 +484,28 @@ TEST(ToolRegistrySchema, IdentifierArgumentsPublishAndEnforceTheUuidFormat) {
         const char* arg;
     };
     const Case cases[] = {
-        {"timeline.add_clip", "trackId"},      {"timeline.add_clip", "assetId"},
-        {"timeline.add_clip", "clipId"},       {"timeline.delete_clip", "clipId"},
-        {"timeline.move_clip", "clipId"},      {"timeline.trim_clip", "clipId"},
-        {"timeline.split_clip", "clipId"},     {"timeline.reorder_clips", "trackId"},
-        {"timeline.add_effect", "clipId"},     {"timeline.remove_effect", "effectId"},
-        {"timeline.reorder_effects", "clipId"}, {"timeline.set_effect_parameter", "effectId"},
-        {"timeline.edit_curve_point", "clipId"}, {"timeline.edit_curve_point", "effectId"},
+        {"timeline.add_clip", "trackId"},
+        {"timeline.add_clip", "assetId"},
+        {"timeline.add_clip", "clipId"},
+        {"timeline.delete_clip", "clipId"},
+        {"timeline.move_clip", "clipId"},
+        {"timeline.trim_clip", "clipId"},
+        {"timeline.split_clip", "clipId"},
+        {"timeline.reorder_clips", "trackId"},
+        {"timeline.add_effect", "clipId"},
+        {"timeline.remove_effect", "effectId"},
+        {"timeline.reorder_effects", "clipId"},
+        {"timeline.set_effect_parameter", "effectId"},
+        {"timeline.edit_curve_point", "clipId"},
+        {"timeline.edit_curve_point", "effectId"},
         {"timeline.set_effect_resource", "clipId"},
         {"timeline.set_effect_resource", "effectId"},
         {"timeline.add_transition", "clipId"},
-        {"timeline.ripple_delete", "clipId"},  {"timeline.ripple_trim", "clipId"},
+        {"timeline.ripple_delete", "clipId"},
+        {"timeline.ripple_trim", "clipId"},
         {"timeline.close_gap", "clipId"},
-        {"generation.generate", "trackId"},    {"generation.generate", "sourceAssetId"},
+        {"generation.generate", "trackId"},
+        {"generation.generate", "sourceAssetId"},
     };
 
     for (const Case& c : cases) {
@@ -530,23 +543,21 @@ TEST(ToolRegistrySchema, ClosedValueSetsArePublished) {
 
     const Json transition = registry.find("timeline.add_transition")->inputSchema();
     EXPECT_EQ(enumValues(*transition.find("properties")->find("kind")),
-              (std::vector<std::string>{"crossfade", "dip_to_color", "wipe", "slide",
-                                        "fade"}));
+              (std::vector<std::string>{"crossfade", "dip_to_color", "wipe", "slide", "fade"}));
 
     // Requirement 14.4 — the ported invert-colors effect is an accepted type.
     const Json effect = registry.find("timeline.add_effect")->inputSchema();
     EXPECT_EQ(enumValues(*effect.find("properties")->find("type")),
               (std::vector<std::string>{"brightness", "contrast", "blur", "crop_transform",
-                                        "color_grade", "invert_colors", "tone_curve",
-                                        "lut", "custom"}));
+                                        "color_grade", "invert_colors", "tone_curve", "lut",
+                                        "denoise", "secondary_grade", "custom"}));
 
     // Requirement 8.1: the advertised set must be EXACTLY the core's set. The list above pins
     // the names and their order; this pins the COUNT against the enum itself, so adding an
     // enumerator without adding its name fails here rather than shipping an effect type that
     // renders but cannot be created through any tool -- invisible to the agent surface and to
     // every scripted workflow, with nothing failing to say so.
-    EXPECT_EQ(enumValues(*effect.find("properties")->find("type")).size(),
-              kAllEffectTypes.size())
+    EXPECT_EQ(enumValues(*effect.find("properties")->find("type")).size(), kAllEffectTypes.size())
         << "every core::EffectType must be creatable through timeline.add_effect";
 
     // Requirement 5.7 — both closed sets on the curve-point tool. Asserted here, where
@@ -734,7 +745,7 @@ TEST(ToolRegistrySchema, ExportPublishesTheRequirement72ArgumentsAndTheirRanges)
 
     const Tool* exportTool = registry.find("timeline.export");
     ASSERT_NE(exportTool, nullptr);
-    const Json  schema = exportTool->inputSchema();
+    const Json schema = exportTool->inputSchema();
     const Json* props = schema.find("properties");
     ASSERT_NE(props, nullptr);
 
@@ -749,8 +760,7 @@ TEST(ToolRegistrySchema, ExportPublishesTheRequirement72ArgumentsAndTheirRanges)
     EXPECT_EQ(props->find("bitrateKbps")->find("maximum")->asInt(), 200'000);
 
     // The three codecs the Encoder_Selector supports (Requirement 8.2).
-    EXPECT_EQ(enumValues(*props->find("codec")),
-              (std::vector<std::string>{"h264", "hevc", "vp9"}));
+    EXPECT_EQ(enumValues(*props->find("codec")), (std::vector<std::string>{"h264", "hevc", "vp9"}));
 
     // Only `outputPath` and `format` are required: nothing task 9.7 added is.
     EXPECT_EQ(requiredNames(schema), (std::vector<std::string>{"outputPath", "format"}));

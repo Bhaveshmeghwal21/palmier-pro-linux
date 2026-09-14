@@ -43,15 +43,28 @@ namespace {
 
 QString effectTypeName(EffectType type) {
     switch (type) {
-        case EffectType::Brightness:    return QStringLiteral("Brightness");
-        case EffectType::Contrast:      return QStringLiteral("Contrast");
-        case EffectType::Blur:          return QStringLiteral("Blur");
-        case EffectType::CropTransform: return QStringLiteral("Crop / Transform");
-        case EffectType::ColorGrade:    return QStringLiteral("Color Grade");
-        case EffectType::InvertColors:  return QStringLiteral("Invert Colors");
-        case EffectType::ToneCurve:     return QStringLiteral("Tone Curve");
-        case EffectType::Lut:           return QStringLiteral("LUT");
-        case EffectType::Custom:        return QStringLiteral("Custom");
+        case EffectType::Brightness:
+            return QStringLiteral("Brightness");
+        case EffectType::Contrast:
+            return QStringLiteral("Contrast");
+        case EffectType::Blur:
+            return QStringLiteral("Blur");
+        case EffectType::CropTransform:
+            return QStringLiteral("Crop / Transform");
+        case EffectType::ColorGrade:
+            return QStringLiteral("Color Grade");
+        case EffectType::InvertColors:
+            return QStringLiteral("Invert Colors");
+        case EffectType::ToneCurve:
+            return QStringLiteral("Tone Curve");
+        case EffectType::Lut:
+            return QStringLiteral("LUT");
+        case EffectType::Denoise:
+            return QStringLiteral("Denoise");
+        case EffectType::SecondaryGrade:
+            return QStringLiteral("Secondary Grade");
+        case EffectType::Custom:
+            return QStringLiteral("Custom");
     }
     return QStringLiteral("Effect");
 }
@@ -64,14 +77,17 @@ constexpr TextAlignment kAlignmentOrder[] = {TextAlignment::Left, TextAlignment:
 
 QString alignmentLabel(TextAlignment alignment) {
     switch (alignment) {
-        case TextAlignment::Left:   return QStringLiteral("Left");
-        case TextAlignment::Center: return QStringLiteral("Center");
-        case TextAlignment::Right:  return QStringLiteral("Right");
+        case TextAlignment::Left:
+            return QStringLiteral("Left");
+        case TextAlignment::Center:
+            return QStringLiteral("Center");
+        case TextAlignment::Right:
+            return QStringLiteral("Right");
     }
     return QStringLiteral("Center");
 }
 
-} // namespace
+}  // namespace
 
 InspectorPanel::InspectorPanel(InspectorViewModel& model, QWidget* parent)
     : QWidget(parent), model_(model) {
@@ -96,9 +112,7 @@ InspectorPanel::~InspectorPanel() {
     model_.setOnChanged({});
 }
 
-void InspectorPanel::buildEmptyState() {
-    header_->setText(QStringLiteral("No clip selected"));
-}
+void InspectorPanel::buildEmptyState() { header_->setText(QStringLiteral("No clip selected")); }
 
 void InspectorPanel::moveEffect(std::size_t from, std::size_t to) {
     const std::optional<ClipInspectorView> view = model_.selectedClip();
@@ -195,10 +209,9 @@ void InspectorPanel::rebuild() {
         textPointSizeSpin_->setValue(text.pointSize);
         QObject::connect(textPointSizeSpin_, &QDoubleSpinBox::editingFinished, this, [this] {
             if (textPointSizeSpin_ != nullptr) {
-                (void)model_.setTextStyle(std::nullopt, textPointSizeSpin_->value(),
-                                          std::nullopt, std::nullopt, std::nullopt,
-                                          std::nullopt, std::nullopt, std::nullopt,
-                                          std::nullopt);
+                (void)model_.setTextStyle(std::nullopt, textPointSizeSpin_->value(), std::nullopt,
+                                          std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+                                          std::nullopt, std::nullopt);
             }
         });
         textForm->addRow(QStringLiteral("Point size"), textPointSizeSpin_);
@@ -215,16 +228,15 @@ void InspectorPanel::rebuild() {
         // Qt6's QComboBox::currentIndexChanged has only the int overload (the
         // QString overload Qt5 also had is gone), so no disambiguating cast is
         // needed here, unlike some other Qt5-era signal/slot connections.
-        QObject::connect(textAlignmentCombo_, &QComboBox::currentIndexChanged, this,
-                         [this](int index) {
-                             if (index < 0 || index >= 3) {
-                                 return;
-                             }
-                             (void)model_.setTextStyle(std::nullopt, std::nullopt, std::nullopt,
-                                                       std::nullopt, std::nullopt, std::nullopt,
-                                                       kAlignmentOrder[index], std::nullopt,
-                                                       std::nullopt);
-                         });
+        QObject::connect(
+            textAlignmentCombo_, &QComboBox::currentIndexChanged, this, [this](int index) {
+                if (index < 0 || index >= 3) {
+                    return;
+                }
+                (void)model_.setTextStyle(std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+                                          std::nullopt, std::nullopt, kAlignmentOrder[index],
+                                          std::nullopt, std::nullopt);
+            });
         textForm->addRow(QStringLiteral("Alignment"), textAlignmentCombo_);
 
         rootLayout_->addWidget(textContainer_);
@@ -278,17 +290,15 @@ void InspectorPanel::rebuild() {
         auto* upButton = new QPushButton(QStringLiteral("\u2191"), header);
         upButton->setEnabled(position > 0);
         upButton->setToolTip(QStringLiteral("Move up (changes render order)"));
-        QObject::connect(upButton, &QPushButton::clicked, this, [this, position] {
-            moveEffect(position, position - 1);
-        });
+        QObject::connect(upButton, &QPushButton::clicked, this,
+                         [this, position] { moveEffect(position, position - 1); });
         headerLayout->addWidget(upButton);
 
         auto* downButton = new QPushButton(QStringLiteral("\u2193"), header);
         downButton->setEnabled(position + 1 < view->effects.size());
         downButton->setToolTip(QStringLiteral("Move down (changes render order)"));
-        QObject::connect(downButton, &QPushButton::clicked, this, [this, position] {
-            moveEffect(position, position + 1);
-        });
+        QObject::connect(downButton, &QPushButton::clicked, this,
+                         [this, position] { moveEffect(position, position + 1); });
         headerLayout->addWidget(downButton);
 
         auto* removeButton = new QPushButton(QStringLiteral("Remove"), header);
@@ -339,17 +349,16 @@ void InspectorPanel::rebuild() {
                     (void)model_.editCurvePoint(effectId, channel, request.operation(),
                                                 request.index, request.point);
                 });
-            QObject::connect(channelChooser, &QComboBox::currentIndexChanged, curve,
-                             [curve, params](int index) {
-                                 if (index < 0 ||
-                                     static_cast<std::size_t>(index) >= kCurveChannels.size()) {
-                                     return;
-                                 }
-                                 curve->setChannel(kCurveChannels[static_cast<std::size_t>(index)]);
-                                 // setChannel clears the points, so the new channel's must
-                                 // be supplied straight after or the plot reads as empty.
-                                 curve->setParameters(params);
-                             });
+            QObject::connect(
+                channelChooser, &QComboBox::currentIndexChanged, curve, [curve, params](int index) {
+                    if (index < 0 || static_cast<std::size_t>(index) >= kCurveChannels.size()) {
+                        return;
+                    }
+                    curve->setChannel(kCurveChannels[static_cast<std::size_t>(index)]);
+                    // setChannel clears the points, so the new channel's must
+                    // be supplied straight after or the plot reads as empty.
+                    curve->setParameters(params);
+                });
 
             form->addRow(QStringLiteral("Curve"), channelChooser);
             form->addRow(curve);
@@ -387,10 +396,37 @@ void InspectorPanel::rebuild() {
                 const QString name = QString::fromStdString(parameterName);
                 QObject::connect(spin, &QDoubleSpinBox::editingFinished, this,
                                  [this, effectId, name, spin] {
-                                     (void)model_.setEffectParameter(
-                                         effectId, name.toStdString(), spin->value());
+                                     (void)model_.setEffectParameter(effectId, name.toStdString(),
+                                                                     spin->value());
                                  });
                 form->addRow(QString::fromLatin1(rows[i].first), spin);
+            }
+
+            // The three colour wheels, as the two polar coordinates each one is: an angle
+            // picking a hue and a distance from the centre picking how far. Listed
+            // explicitly rather than left to the generic parameter loop below, because an
+            // unset parameter has no entry on the effect at all -- so the generic loop
+            // cannot show a wheel that has never been touched, which is precisely when a
+            // user needs to find it.
+            const std::array<const char*, 6> wheelLabels{{"Shadows Hue", "Shadows Amount",
+                                                          "Midtones Hue", "Midtones Amount",
+                                                          "Highlights Hue", "Highlights Amount"}};
+            for (std::size_t i = 0; i < kColorWheelParameterNames.size(); ++i) {
+                const std::string parameterName = kColorWheelParameterNames[i];
+                shown.insert(parameterName);
+
+                const auto stored = params.find(parameterName);
+                auto* spin = new QDoubleSpinBox(frame);
+                spin->setRange(-1000.0, 1000.0);
+                spin->setDecimals(4);
+                spin->setValue(stored == params.end() ? 0.0 : stored->second);
+                const QString name = QString::fromStdString(parameterName);
+                QObject::connect(spin, &QDoubleSpinBox::editingFinished, this,
+                                 [this, effectId, name, spin] {
+                                     (void)model_.setEffectParameter(effectId, name.toStdString(),
+                                                                     spin->value());
+                                 });
+                form->addRow(QString::fromLatin1(wheelLabels[i]), spin);
             }
         }
 
@@ -403,11 +439,10 @@ void InspectorPanel::rebuild() {
             spin->setDecimals(4);
             spin->setValue(param.value);
             const QString name = QString::fromStdString(param.name);
-            QObject::connect(spin, &QDoubleSpinBox::editingFinished, this,
-                             [this, effectId, name, spin] {
-                                 (void)model_.setEffectParameter(
-                                     effectId, name.toStdString(), spin->value());
-                             });
+            QObject::connect(
+                spin, &QDoubleSpinBox::editingFinished, this, [this, effectId, name, spin] {
+                    (void)model_.setEffectParameter(effectId, name.toStdString(), spin->value());
+                });
             form->addRow(name, spin);
         }
         effectsLayout->addWidget(frame);
@@ -424,6 +459,6 @@ void InspectorPanel::rebuild() {
     refreshing_ = false;
 }
 
-} // namespace palmier::ui
+}  // namespace palmier::ui
 
-#endif // PALMIER_HAVE_QT
+#endif  // PALMIER_HAVE_QT

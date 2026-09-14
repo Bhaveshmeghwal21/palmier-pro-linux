@@ -526,7 +526,7 @@ Append an effect to a clip's effect chain.
 | Argument | Type | Required | Accepted values |
 |---|---|---|---|
 | `clipId` | string *uuid* | **yes** | |
-| `type` | string | **yes** | `brightness`, `contrast`, `blur`, `crop_transform`, `color_grade`, `invert_colors`, `tone_curve`, `lut`, `custom` |
+| `type` | string | **yes** | `brightness`, `contrast`, `blur`, `crop_transform`, `color_grade`, `invert_colors`, `tone_curve`, `lut`, `denoise`, `secondary_grade`, `custom` |
 | `parameters` | object | no | named numeric effect parameters; non-numeric members are ignored |
 
 An unknown `type` is rejected rather than silently becoming `custom`.
@@ -552,13 +552,74 @@ had never been passed. The defaults below are what an absent parameter falls bac
 | | `gammaR` `gammaG` `gammaB` | 1.0 | Per-channel gamma. |
 | | `gainR` `gainG` `gainB` | 1.0 | Per-channel gain. |
 | | `saturation` | 1.0 | 0.0 is monochrome, 1.0 unchanged. |
+| | `shadowsHue` `shadowsAmount` | 0.0, 0.0 | Shadows colour wheel: hue in degrees, deflection 0.0–1.0. |
+| | `midtonesHue` `midtonesAmount` | 0.0, 0.0 | Midtones colour wheel. |
+| | `highlightsHue` `highlightsAmount` | 0.0, 0.0 | Highlights colour wheel. |
 | `invert_colors` | — | | No parameters. |
 | `tone_curve` | *(written by `timeline.edit_curve_point`)* | | Do not set these by hand. |
 | `lut` | *(the cube file is set by `timeline.set_effect_resource`)* | | An unreadable path renders un-graded. |
+| `denoise` | `strength` | 0.0 | Edge-preserving noise reduction, 0.0–1.0. `0.0` is an exact no-op. |
+| | `radius` | 1 | Window half-width in source pixels, rounded and clamped to 16. |
+| `secondary_grade` | *(every `color_grade` name)* | *(as above)* | The correction to apply where the qualifier selects. |
+| | `hueCenter` | 0.0 | Centre of the selected hue arc, in degrees. Wraps. |
+| | `hueWidth` | 360.0 | Width of that arc, in degrees. `360` selects every hue. |
+| | `satMin` `satMax` | 0.0, 1.0 | Selected saturation band (HSV saturation). |
+| | `lumaMin` `lumaMax` | 0.0, 1.0 | Selected luma band (Rec.601). |
+| | `softness` | 0.0 | Feathering outside each band, 0.0–1.0. `0.0` is a hard edge. |
 | `custom` | *(any)* | | Carries parameters for a kernel this build does not implement. |
 
 There is no `temperature`, `tint`, `scale`, `rotation` or `opacity` among these. Clip opacity is
 a property of the clip, set by `timeline.add_clip` or `timeline.set_clip_properties`.
+
+#### `denoise` is not `blur`
+
+Both average a `(2·radius+1)²` window, and that is where the similarity ends. `blur` weights every
+neighbour equally, so it removes noise and detail together. `denoise` weights each neighbour by a
+Gaussian of its luma distance from the centre pixel, so neighbours across an edge contribute almost
+nothing and the edge survives while noise in a flat region averages away.
+
+`strength` is that Gaussian's width: at `0.05` only near-identical pixels are mixed, and at `1.0`
+even strongly differing ones are. Cost grows with `radius²`, which is why `radius` is clamped to 16
+rather than rejected above it.
+
+#### The three colour wheels
+
+`shadowsHue`/`shadowsAmount`, `midtonesHue`/`midtonesAmount` and
+`highlightsHue`/`highlightsAmount` are a colour wheel expressed as its two polar coordinates: the
+hue is the angle, and the amount is the distance from the centre. Each wheel drives the control its
+band is conventionally shaped by — shadows through lift, midtones through gamma, highlights through
+gain — and no wheel touches another band's control.
+
+A wheel's three per-channel offsets always **sum to zero**, so it shifts the balance between
+channels without also changing overall level. That is what makes it a colour balance rather than a
+second brightness control.
+
+Wheels are folded into the nine `lift`/`gamma`/`gain` values before rendering, which has two
+consequences worth relying on: an `amount` of `0.0` resolves bit-for-bit to what the same project
+resolved to before wheels existed, and a wheel composes with an explicit `gainR` (or `liftR`)
+rather than replacing it. `secondary_grade` shares this correction vocabulary, so the wheels work
+inside a qualifier too.
+
+Set them with `timeline.set_effect_parameter`, one coordinate per call. There is no dedicated
+graphical wheel widget in the Inspector; the resolved per-channel values are what it displays.
+
+#### `secondary_grade` is `color_grade` with a qualifier
+
+It reads the same ten correction parameters and applies them the same way, in the same order, but
+only in proportion to how strongly its HSL qualifier selects each pixel. With the qualifier left at
+its defaults it selects everything, so a `secondary_grade` and a `color_grade` carrying identical
+correction parameters produce identical pixels — a test asserts that byte for byte.
+
+The defaults are the widest values on purpose. A qualifier's job is to *narrow* a correction, so an
+unset one means "not yet narrowed" rather than "selects nothing"; otherwise setting a gain and
+seeing no change would be indistinguishable from a broken effect.
+
+Two details worth knowing before relying on it:
+
+- The qualifier is evaluated on the **ungraded** pixel, so raising a gain cannot pull further pixels
+  into its own selection.
+- `softness` feathers each band outwards — 0–60° for hue, 0–0.5 for the saturation and luma bands —
+  so a selection fades out instead of showing the hard edge of its own boundary.
 
 #### `crop_transform` coordinates
 

@@ -289,21 +289,101 @@ void applyBlur(std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
     }
 }
 
+/// Edge-preserving bilateral denoise of RGB over a (2r+1)x(2r+1) window with
+/// edge-clamped sampling; alpha is preserved.
+///
+/// The difference from applyBlur is one term: each neighbour's contribution is weighted by
+/// a Gaussian of its LUMA DISTANCE from the centre pixel, so a neighbour across an edge
+/// contributes almost nothing while a neighbour differing only by noise contributes almost
+/// fully. That is what makes this noise reduction rather than softening.
+///
+/// Everything is computed in normalized [0,1] because the weight is non-linear: unlike the
+/// box average, byte-space and normalized-space arithmetic do NOT agree here, and the GLSL
+/// twin works in normalized space. Both sides therefore use the same units, the same Rec.601
+/// luma coefficients and the same sigma, so they land within property P5's tolerance.
+///
+/// noexcept: the immutable source copy could throw on OOM; caught, leaving the image
+/// untouched, exactly as blur does.
+void applyDenoise(std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
+                  const DenoiseValues& values) noexcept {
+    if (values.isIdentity()) return;
+
+    const int r = values.radius;
+    const int w = static_cast<int>(width);
+    const int h = static_cast<int>(height);
+
+    // Range sigma in normalized luma. The 0.25 scale maps the full strength range onto
+    // useful filtering: at strength 1 a mid-grey neighbour still contributes to a black
+    // centre pixel, and at 0.1 only near-identical pixels do. sigma cannot reach 0 here
+    // because isIdentity() already rejected strength <= 0, and even an extremely small
+    // sigma is safe: the centre pixel's own weight is exp(0) == 1, so wsum >= 1.
+    const double sigma = values.strength * 0.25;
+    const double denom = 2.0 * sigma * sigma;
+
+    const auto luma = [](double rr, double gg, double bb) noexcept {
+        return 0.299 * rr + 0.587 * gg + 0.114 * bb;
+    };
+
+    try {
+        // Read from an immutable copy so already-denoised output cannot feed back into
+        // later windows -- the same reason applyBlur copies.
+        const std::vector<std::uint8_t> src(rgba, rgba + static_cast<std::size_t>(w) * h * 4u);
+
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                const std::size_t centre = (static_cast<std::size_t>(y) * w + x) * 4u;
+                const double cr = static_cast<double>(src[centre + 0]) / 255.0;
+                const double cg = static_cast<double>(src[centre + 1]) / 255.0;
+                const double cb = static_cast<double>(src[centre + 2]) / 255.0;
+                const double centreLuma = luma(cr, cg, cb);
+
+                const int x0 = std::max(0, x - r);
+                const int x1 = std::min(w - 1, x + r);
+                const int y0 = std::max(0, y - r);
+                const int y1 = std::min(h - 1, y + r);
+
+                double sum[3] = {0.0, 0.0, 0.0};
+                double weightSum = 0.0;
+                for (int sy = y0; sy <= y1; ++sy) {
+                    for (int sx = x0; sx <= x1; ++sx) {
+                        const std::size_t s = (static_cast<std::size_t>(sy) * w + sx) * 4u;
+                        const double sr = static_cast<double>(src[s + 0]) / 255.0;
+                        const double sg = static_cast<double>(src[s + 1]) / 255.0;
+                        const double sb = static_cast<double>(src[s + 2]) / 255.0;
+                        const double d = luma(sr, sg, sb) - centreLuma;
+                        const double weight = std::exp(-(d * d) / denom);
+                        sum[0] += weight * sr;
+                        sum[1] += weight * sg;
+                        sum[2] += weight * sb;
+                        weightSum += weight;
+                    }
+                }
+                for (int c = 0; c < 3; ++c) {
+                    rgba[centre + c] = toByte(sum[c] / weightSum * 255.0);
+                }
+                // alpha (centre+3) preserved.
+            }
+        }
+    } catch (...) {
+        // Allocation failed; leave the image unchanged (no-op denoise).
+    }
+}
+
 /// Crop to a normalized [0,1] visible rectangle; pixels outside become
 /// transparent black. Bounds are half-open [x0,x1) x [y0,y1) in pixels, computed
 /// by rounding the normalized edges to pixel coordinates. A (0,0,1,1) rect is a
 /// no-op. The "transform" portion (scale/reposition) of a clip is applied by the
 /// compositor's blend stage; this kernel realizes the crop.
 void applyCropTransform(std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
-                        double cropLeft, double cropTop,
-                        double cropRight, double cropBottom) noexcept {
+                        double cropLeft, double cropTop, double cropRight,
+                        double cropBottom) noexcept {
     const double l = std::clamp(cropLeft, 0.0, 1.0);
     const double t = std::clamp(cropTop, 0.0, 1.0);
     const double rgt = std::clamp(cropRight, 0.0, 1.0);
     const double b = std::clamp(cropBottom, 0.0, 1.0);
 
     const auto toPx = [](double norm, std::uint32_t extent) -> std::uint32_t {
-        double v = norm * static_cast<double>(extent) + 0.5; // round to nearest
+        double v = norm * static_cast<double>(extent) + 0.5;  // round to nearest
         if (v <= 0.0) return 0;
         if (v >= static_cast<double>(extent)) return extent;
         return static_cast<std::uint32_t>(v);
@@ -326,7 +406,7 @@ void applyCropTransform(std::uint8_t* rgba, std::uint32_t width, std::uint32_t h
             rgba[o + 0] = 0;
             rgba[o + 1] = 0;
             rgba[o + 2] = 0;
-            rgba[o + 3] = 0; // transparent
+            rgba[o + 3] = 0;  // transparent
         }
     }
 }
@@ -361,8 +441,7 @@ void applyInvertColors(std::uint8_t* rgba, std::size_t pixels) noexcept {
 /// Takes the already-resolved core::ColorGradeValues rather than the effect, so the
 /// defaults — including Requirement 4.2's legacy-lift fallback — are stated in
 /// exactly one place, which the Inspector reads too.
-void applyColorGrade(std::uint8_t* rgba, std::size_t pixels,
-                     const ColorGradeValues& p) noexcept {
+void applyColorGrade(std::uint8_t* rgba, std::size_t pixels, const ColorGradeValues& p) noexcept {
     if (p.isIdentity()) return;
 
     const double liftShiftR = p.liftR * 255.0;
@@ -429,8 +508,8 @@ void applyLut(std::uint8_t* rgba, std::size_t pixels, const CubeLut& lut) {
     }
     for (std::size_t i = 0; i < pixels; ++i) {
         const LutEntry out = lut.sample(static_cast<float>(rgba[i * 4 + 0]) / 255.0f,
-                                       static_cast<float>(rgba[i * 4 + 1]) / 255.0f,
-                                       static_cast<float>(rgba[i * 4 + 2]) / 255.0f);
+                                        static_cast<float>(rgba[i * 4 + 1]) / 255.0f,
+                                        static_cast<float>(rgba[i * 4 + 2]) / 255.0f);
         rgba[i * 4 + 0] = toByte(static_cast<double>(out.r) * 255.0);
         rgba[i * 4 + 1] = toByte(static_cast<double>(out.g) * 255.0);
         rgba[i * 4 + 2] = toByte(static_cast<double>(out.b) * 255.0);
@@ -451,6 +530,76 @@ void applyToneCurve(std::uint8_t* rgba, std::size_t pixels,
     }
 }
 
+/// Secondary grade: exactly ColorGrade's correction, applied in proportion to how strongly
+/// an HSL qualifier selects each pixel.
+///
+/// The gain -> lift -> gamma -> saturation arithmetic below is deliberately the same as
+/// applyColorGrade's, written out rather than shared, and the two are held together by a
+/// test instead of by a common function: SecondaryGradeMatchesColorGradeWhenTheQualifier
+/// SelectsEverything compares them byte for byte. A checked equivalence is stronger than a
+/// shared helper, because it also pins the BLEND -- that a fully selected pixel is graded
+/// in full, not merely nearly.
+///
+/// A mask of exactly 1 writes the graded value directly rather than interpolating to it.
+/// That is what makes the equivalence exact rather than within a rounding step: computing
+/// `src + (graded - src) * 1.0` can land one ULP away from `graded`.
+///
+/// An unselected pixel is skipped entirely, so a narrow qualifier costs almost nothing
+/// beyond the mask itself.
+void applySecondaryGrade(std::uint8_t* rgba, std::size_t pixels,
+                         const SecondaryGradeValues& v) noexcept {
+    if (v.isIdentity()) return;
+
+    const ColorGradeValues& p = v.correction;
+    const double liftShiftR = p.liftR * 255.0;
+    const double liftShiftG = p.liftG * 255.0;
+    const double liftShiftB = p.liftB * 255.0;
+
+    const bool applyGamma = !p.isGammaIdentity();
+    const double kMinGamma = 1.0 / 1024.0;  // matches applyColorGrade and the kernel
+    const double invR = 1.0 / std::max(p.gammaR, kMinGamma);
+    const double invG = 1.0 / std::max(p.gammaG, kMinGamma);
+    const double invB = 1.0 / std::max(p.gammaB, kMinGamma);
+
+    for (std::size_t i = 0; i < pixels; ++i) {
+        const std::size_t o = i * 4u;
+        const double srcR = static_cast<double>(rgba[o + 0]);
+        const double srcG = static_cast<double>(rgba[o + 1]);
+        const double srcB = static_cast<double>(rgba[o + 2]);
+
+        // The qualifier reads the UNGRADED pixel: the selection is of the source image,
+        // so raising a gain cannot pull further pixels into its own selection.
+        const double mask = qualifierMask(srcR / 255.0, srcG / 255.0, srcB / 255.0, v.qualifier);
+        if (mask <= 0.0) continue;
+
+        double r = srcR * p.gainR + liftShiftR;
+        double g = srcG * p.gainG + liftShiftG;
+        double b = srcB * p.gainB + liftShiftB;
+
+        if (applyGamma) {
+            r = std::pow(std::max(r / 255.0, 0.0), invR) * 255.0;
+            g = std::pow(std::max(g / 255.0, 0.0), invG) * 255.0;
+            b = std::pow(std::max(b / 255.0, 0.0), invB) * 255.0;
+        }
+
+        const double luma = 0.299 * r + 0.587 * g + 0.114 * b;
+        r = luma + (r - luma) * p.saturation;
+        g = luma + (g - luma) * p.saturation;
+        b = luma + (b - luma) * p.saturation;
+
+        if (mask >= 1.0) {
+            rgba[o + 0] = toByte(r);
+            rgba[o + 1] = toByte(g);
+            rgba[o + 2] = toByte(b);
+        } else {
+            rgba[o + 0] = toByte(srcR + (r - srcR) * mask);
+            rgba[o + 1] = toByte(srcG + (g - srcG) * mask);
+            rgba[o + 2] = toByte(srcB + (b - srcB) * mask);
+        }
+        // alpha (o+3) preserved.
+    }
+}
+
 /// Requirement 10.3's fixed default burn-in style: white text, bottom-centred,
 /// a size proportional to neither font metrics nor canvas — TextRasterizer's
 /// own point-size field is an absolute value, so a single documented default
@@ -467,13 +616,13 @@ void applyToneCurve(std::uint8_t* rgba, std::size_t pixels,
     return style;
 }
 
-} // namespace
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Default software effect application (P5 reference).
 // ---------------------------------------------------------------------------
-void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba,
-                         std::uint32_t width, std::uint32_t height) noexcept {
+void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba, std::uint32_t width,
+                         std::uint32_t height) noexcept {
     if (rgba == nullptr || width == 0 || height == 0) return;
     const std::size_t pixels = static_cast<std::size_t>(width) * height;
 
@@ -488,10 +637,8 @@ void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba,
             applyBlur(rgba, width, height, paramOr(effect, "radius", 0.0));
             break;
         case EffectType::CropTransform:
-            applyCropTransform(rgba, width, height,
-                               paramOr(effect, "cropLeft", 0.0),
-                               paramOr(effect, "cropTop", 0.0),
-                               paramOr(effect, "cropRight", 1.0),
+            applyCropTransform(rgba, width, height, paramOr(effect, "cropLeft", 0.0),
+                               paramOr(effect, "cropTop", 0.0), paramOr(effect, "cropRight", 1.0),
                                paramOr(effect, "cropBottom", 1.0));
             break;
         case EffectType::InvertColors:
@@ -518,6 +665,19 @@ void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba,
             // renders un-graded -- Requirement 7.8.
             applyLut(rgba, pixels, lutForEffect(effect));
             break;
+        case EffectType::Denoise:
+            // Bilateral rather than box: the weighting is what preserves edges, and the
+            // defaults are resolved by core::denoiseValues so the Inspector and the GLSL
+            // push constants cannot disagree with what renders here.
+            applyDenoise(rgba, width, height, denoiseValues(effect));
+            break;
+        case EffectType::SecondaryGrade:
+            // The correction is ColorGrade's; the qualifier decides where it lands. Both
+            // are resolved by core::secondaryGradeValues, whose qualifier defaults select
+            // the whole frame -- so an unset qualifier narrows nothing rather than
+            // selecting nothing.
+            applySecondaryGrade(rgba, pixels, secondaryGradeValues(effect));
+            break;
         case EffectType::Custom:
             // A Custom effect's behavior comes entirely from a caller-registered
             // kernel/hook; there is no built-in reference transform for it.
@@ -525,9 +685,8 @@ void applyEffectSoftware(const Effect& effect, std::uint8_t* rgba,
     }
 }
 
-void applyTransitionSoftware(const std::uint8_t* a, const std::uint8_t* b,
-                             std::uint8_t* out, std::uint32_t width,
-                             std::uint32_t height, double progress) noexcept {
+void applyTransitionSoftware(const std::uint8_t* a, const std::uint8_t* b, std::uint8_t* out,
+                             std::uint32_t width, std::uint32_t height, double progress) noexcept {
     if (a == nullptr || b == nullptr || out == nullptr || width == 0 || height == 0) return;
     const double p = std::clamp(progress, 0.0, 1.0);
     const double inv = 1.0 - p;
@@ -615,8 +774,7 @@ std::vector<Compositor::VisibleLayer> Compositor::gatherVisibleCaptionCues(const
     for (std::size_t i = 0; i < project.tracks.size(); ++i) {
         const Track& track = project.tracks[i];
         if (track.kind != TrackKind::Caption || track.muted) continue;
-        if (const Clip* clip = clipAt(track, position);
-            clip != nullptr && clip->isCaptionCue()) {
+        if (const Clip* clip = clipAt(track, position); clip != nullptr && clip->isCaptionCue()) {
             visible.push_back(VisibleLayer{clip, i});
         }
     }
@@ -632,8 +790,8 @@ Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration posi
             invalidArgument("Compositor::renderAt: render target has zero dimensions"));
     }
     if (target.format != FrameFormat::RGBA8) {
-        return err<RenderedFrame>(unsupported(
-            "Compositor::renderAt: only RGBA8 render targets are supported"));
+        return err<RenderedFrame>(
+            unsupported("Compositor::renderAt: only RGBA8 render targets are supported"));
     }
 
     // Video, text and caption layers are gathered separately (each has nothing
@@ -651,14 +809,12 @@ Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration posi
     std::stable_sort(layers.begin(), layers.end(),
                      [](const VisibleLayer& a, const VisibleLayer& b) { return a.z < b.z; });
 
-    const bool anyVideoLayer =
-        std::any_of(layers.begin(), layers.end(), [](const VisibleLayer& l) {
-            return !l.clip->isTextClip() && !l.clip->isCaptionCue();
-        });
-    const bool anyRasterizedLayer =
-        std::any_of(layers.begin(), layers.end(), [](const VisibleLayer& l) {
-            return l.clip->isTextClip() || l.clip->isCaptionCue();
-        });
+    const bool anyVideoLayer = std::any_of(layers.begin(), layers.end(), [](const VisibleLayer& l) {
+        return !l.clip->isTextClip() && !l.clip->isCaptionCue();
+    });
+    const bool anyRasterizedLayer = std::any_of(
+        layers.begin(), layers.end(),
+        [](const VisibleLayer& l) { return l.clip->isTextClip() || l.clip->isCaptionCue(); });
     if (anyVideoLayer && !provider_) {
         return err<RenderedFrame>(failedPrecondition(
             "Compositor::renderAt: visible clips present but no frame provider is installed"));
@@ -678,7 +834,8 @@ Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration posi
 
     auto* out = static_cast<std::uint8_t*>(lease.frame().hostData());
     if (out == nullptr) {
-        return err<RenderedFrame>(makeError(ErrorCode::Internal,
+        return err<RenderedFrame>(makeError(
+            ErrorCode::Internal,
             "Compositor::renderAt: pooled frame has no host backing for software compositing"));
     }
 
@@ -710,11 +867,10 @@ Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration posi
             // Per-clip effects still apply to either kind of layer exactly as
             // they do to a video layer: nothing about applyEffectSoftware
             // assumes decoded video pixels.
-            const TextStyle style =
-                layer.clip->isTextClip() ? *layer.clip->textStyle
+            const TextStyle style = layer.clip->isTextClip()
+                                        ? *layer.clip->textStyle
                                         : captionCueStyle(*layer.clip->captionText);
-            Result<SourceFrame> textResult =
-                textRasterizer_(style, target.width, target.height);
+            Result<SourceFrame> textResult = textRasterizer_(style, target.width, target.height);
             if (textResult.isError()) {
                 return err<RenderedFrame>(std::move(textResult).error());
             }
@@ -729,8 +885,9 @@ Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration posi
             frame = std::move(srcResult).value();
         }
         if (!frame.valid()) {
-            return err<RenderedFrame>(makeError(ErrorCode::Internal,
-                "Compositor::renderAt: a frame source returned an invalid source frame"));
+            return err<RenderedFrame>(
+                makeError(ErrorCode::Internal,
+                          "Compositor::renderAt: a frame source returned an invalid source frame"));
         }
 
         // Apply the clip's per-clip effects (design "dispatchEffectKernel"),
@@ -748,4 +905,4 @@ Result<RenderedFrame> Compositor::renderAt(const Project& project, Duration posi
     return RenderedFrame{std::move(lease), position, layers.size()};
 }
 
-} // namespace palmier::gpu
+}  // namespace palmier::gpu

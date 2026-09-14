@@ -180,6 +180,7 @@ add_executable(palmier_gpu_tests
     gpu_compositor_test.cpp
     gpu_layer_placement_test.cpp
     gpu_effect_kernels_test.cpp
+    gpu_secondary_grade_test.cpp
     gpu_video_scopes_test.cpp
     gpu_cube_lut_test.cpp
     gpu_lut_cache_test.cpp)

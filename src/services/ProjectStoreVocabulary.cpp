@@ -99,6 +99,10 @@ std::string_view effectTypeKey(EffectType t) {
             return "tone_curve";
         case EffectType::Lut:
             return "lut";
+        case EffectType::Denoise:
+            return "denoise";
+        case EffectType::SecondaryGrade:
+            return "secondary_grade";
     }
     return "custom";
 }
@@ -113,6 +117,8 @@ std::optional<EffectType> effectTypeFromKey(std::string_view k) {
     if (k == "custom") return EffectType::Custom;
     if (k == "tone_curve") return EffectType::ToneCurve;
     if (k == "lut") return EffectType::Lut;
+    if (k == "denoise") return EffectType::Denoise;
+    if (k == "secondary_grade") return EffectType::SecondaryGrade;
     return std::nullopt;
 }
 

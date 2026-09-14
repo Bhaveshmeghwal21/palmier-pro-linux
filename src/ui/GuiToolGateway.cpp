@@ -25,15 +25,28 @@ namespace {
 /// copy of the identical mapping for the same reason.
 std::string_view effectTypeName(EffectType type) noexcept {
     switch (type) {
-        case EffectType::Brightness:    return "brightness";
-        case EffectType::Contrast:      return "contrast";
-        case EffectType::Blur:          return "blur";
-        case EffectType::CropTransform: return "crop_transform";
-        case EffectType::ColorGrade:    return "color_grade";
-        case EffectType::InvertColors:  return "invert_colors";
-        case EffectType::ToneCurve:     return "tone_curve";
-        case EffectType::Lut:           return "lut";
-        case EffectType::Custom:        return "custom";
+        case EffectType::Brightness:
+            return "brightness";
+        case EffectType::Contrast:
+            return "contrast";
+        case EffectType::Blur:
+            return "blur";
+        case EffectType::CropTransform:
+            return "crop_transform";
+        case EffectType::ColorGrade:
+            return "color_grade";
+        case EffectType::InvertColors:
+            return "invert_colors";
+        case EffectType::ToneCurve:
+            return "tone_curve";
+        case EffectType::Lut:
+            return "lut";
+        case EffectType::Denoise:
+            return "denoise";
+        case EffectType::SecondaryGrade:
+            return "secondary_grade";
+        case EffectType::Custom:
+            return "custom";
     }
     return "custom";
 }
@@ -42,11 +55,16 @@ std::string_view effectTypeName(EffectType type) noexcept {
 /// (transitionKindValues()).
 std::string_view transitionKindName(TransitionKind kind) noexcept {
     switch (kind) {
-        case TransitionKind::Crossfade:  return "crossfade";
-        case TransitionKind::DipToColor: return "dip_to_color";
-        case TransitionKind::Wipe:       return "wipe";
-        case TransitionKind::Slide:      return "slide";
-        case TransitionKind::Fade:       return "fade";
+        case TransitionKind::Crossfade:
+            return "crossfade";
+        case TransitionKind::DipToColor:
+            return "dip_to_color";
+        case TransitionKind::Wipe:
+            return "wipe";
+        case TransitionKind::Slide:
+            return "slide";
+        case TransitionKind::Fade:
+            return "fade";
     }
     return "crossfade";
 }
@@ -54,10 +72,14 @@ std::string_view transitionKindName(TransitionKind kind) noexcept {
 /// TrackKind -> the string the `add_track` tool declares (trackKindValues()).
 std::string_view trackKindName(TrackKind kind) noexcept {
     switch (kind) {
-        case TrackKind::Audio:   return "audio";
-        case TrackKind::Text:    return "text";
-        case TrackKind::Caption: return "caption";
-        case TrackKind::Video:   return "video";
+        case TrackKind::Audio:
+            return "audio";
+        case TrackKind::Text:
+            return "text";
+        case TrackKind::Caption:
+            return "caption";
+        case TrackKind::Video:
+            return "video";
     }
     return "video";
 }
@@ -79,8 +101,8 @@ Result<Json> GuiToolGateway::moveClip(ClipId id, Duration newStart) {
     return executor_.executeTool("timeline.move_clip", args, services::InvocationSource::Gui);
 }
 
-Result<Json> GuiToolGateway::trimClip(ClipId id, TrimClipCommand::Edge edge,
-                                      Duration newBoundary, Duration sourceDuration) {
+Result<Json> GuiToolGateway::trimClip(ClipId id, TrimClipCommand::Edge edge, Duration newBoundary,
+                                      Duration sourceDuration) {
     Json args = Json::object();
     args.set("clipId", id.toString());
     args.set("edge", std::string(edgeName(edge)));
@@ -141,7 +163,7 @@ Result<Json> GuiToolGateway::rippleDelete(ClipId id) {
 }
 
 Result<Json> GuiToolGateway::rippleTrim(ClipId id, RippleTrimCommand::Edge edge,
-                                       Duration newBoundary, Duration sourceDuration) {
+                                        Duration newBoundary, Duration sourceDuration) {
     Json args = Json::object();
     args.set("clipId", id.toString());
     args.set("edge", std::string(edgeName(edge)));
@@ -235,8 +257,7 @@ Result<Json> GuiToolGateway::editCurvePoint(ClipId clipId, Uuid effectId,
                                  services::InvocationSource::Gui);
 }
 
-Result<Json> GuiToolGateway::addTransition(ClipId clipId, TransitionKind kind,
-                                           Duration duration) {
+Result<Json> GuiToolGateway::addTransition(ClipId clipId, TransitionKind kind, Duration duration) {
     Json args = Json::object();
     args.set("clipId", clipId.toString());
     args.set("kind", std::string(transitionKindName(kind)));
@@ -274,14 +295,11 @@ Result<Json> GuiToolGateway::setTextContent(ClipId clipId, const std::string& co
                                  services::InvocationSource::Gui);
 }
 
-Result<Json> GuiToolGateway::setTextStyle(ClipId clipId, std::optional<std::string> fontFamily,
-                                          std::optional<double> pointSize,
-                                          std::optional<double> colorR,
-                                          std::optional<double> colorG,
-                                          std::optional<double> colorB,
-                                          std::optional<double> colorA,
-                                          std::optional<TextAlignment> alignment,
-                                          std::optional<double> x, std::optional<double> y) {
+Result<Json> GuiToolGateway::setTextStyle(
+    ClipId clipId, std::optional<std::string> fontFamily, std::optional<double> pointSize,
+    std::optional<double> colorR, std::optional<double> colorG, std::optional<double> colorB,
+    std::optional<double> colorA, std::optional<TextAlignment> alignment, std::optional<double> x,
+    std::optional<double> y) {
     Json args = Json::object();
     args.set("clipId", clipId.toString());
     if (fontFamily) args.set("fontFamily", *fontFamily);
@@ -296,15 +314,14 @@ Result<Json> GuiToolGateway::setTextStyle(ClipId clipId, std::optional<std::stri
     return executor_.executeTool("timeline.set_text_style", args, services::InvocationSource::Gui);
 }
 
-Result<Json> GuiToolGateway::addCaptionCue(Uuid trackId, Duration timelineStart,
-                                           Duration duration, const std::string& text) {
+Result<Json> GuiToolGateway::addCaptionCue(Uuid trackId, Duration timelineStart, Duration duration,
+                                           const std::string& text) {
     Json args = Json::object();
     args.set("trackId", trackId.toString());
     args.set("timelineStartNs", timelineStart.nanoseconds());
     args.set("durationNs", duration.nanoseconds());
     args.set("text", text);
-    return executor_.executeTool("timeline.add_caption_cue", args,
-                                 services::InvocationSource::Gui);
+    return executor_.executeTool("timeline.add_caption_cue", args, services::InvocationSource::Gui);
 }
 
 Result<Json> GuiToolGateway::setCaptionText(ClipId clipId, const std::string& text) {
@@ -354,9 +371,8 @@ Result<Json> GuiToolGateway::importMedia(const std::string& path) {
     return executor_.executeTool("media.import", args, services::InvocationSource::Gui);
 }
 
-Result<Json> GuiToolGateway::createProject(const std::string& name, double fps,
-                                           std::uint32_t width, std::uint32_t height,
-                                           const std::string& colorSpace) {
+Result<Json> GuiToolGateway::createProject(const std::string& name, double fps, std::uint32_t width,
+                                           std::uint32_t height, const std::string& colorSpace) {
     Json args = Json::object();
     args.set("name", name);
     args.set("fps", fps);

@@ -24,8 +24,8 @@ find is a defect in this document, not in the parser.
   against this port's 44. The 22 tool-category and 12 capability-area names below still
   come from the requirements document, because those are the categories Requirements 13.1
   and 13.2 name rather than an upstream artefact.
-- linux-ref: 30ed4a4de11ae41043514e151b03ba553de4b168 (branch `main`)
-- comparison-date: 2026-09-11
+- linux-ref: e07116b9a3913940052972aabb70b28e36b04481 (branch `main`)
+- comparison-date: 2026-09-14
 
 ## Status definitions (Requirement 13.7)
 
@@ -76,9 +76,9 @@ every `N. ` line as a build-order item.
 | texts | present | core::TextStyle, core::Clip::textStyle, services::ToolRegistry timeline.add_text_clip/set_text_content/set_text_style, gpu::Compositor, ui::QtTextRasterizer | - | - | - | - |
 | captions | partial | core::TrackKind::Caption, core::Clip::captionText, services::ToolRegistry timeline.add_caption_cue/set_caption_text/retime_caption_cue/remove_caption_cue/transcribe_to_captions, gpu::Compositor, services::CaptionExport | should | core::TrackKind::Caption, Clip::captionText and four cue tools plus burn-in and sidecar SRT export all work; transcribe_to_captions always reports Unsupported, since no recognizer is bundled. | - | - |
 | transcription | partial | services::TranscriptionService, services::ToolRegistry timeline.transcribe_to_captions | should | services::TranscriptionService is now constructed and reachable through timeline.transcribe_to_captions, but no recognizer backend is bundled or pluggable, so it always reports Unsupported by name. | - | - |
-| color | partial | core::EffectType::ColorGrade/ToneCurve/Lut, core::ToneCurve, gpu::CubeLut, gpu::VideoScopes, services::ToolRegistry timeline.edit_curve_point/set_effect_resource | later | Per-channel lift/gamma/gain, tone curves and .cube LUTs are all tool-reachable and scopes are in the shell; no colour-wheel control or secondary grading. | - | - |
+| color | present | core::EffectType::ColorGrade/ToneCurve/Lut/SecondaryGrade, core::ToneCurve, core::colorWheelOffsets, core::qualifierMask, gpu::CubeLut, gpu::VideoScopes, services::ToolRegistry timeline.edit_curve_point/set_effect_parameter/set_effect_resource, ui::InspectorPanel | - | - | - | - |
 | effects | present | core::EffectType, gpu::EffectKernels, gpu::Compositor, services::ToolRegistry timeline.add_effect/remove_effect/reorder_effects/set_effect_parameter, ui::InspectorPanel | - | - | - | - |
-| denoise | absent | none | later | No denoise effect type and no denoise kernel exist in core::Effect or gpu::EffectKernels, so noise reduction is unavailable on every surface. | - | - |
+| denoise | present | core::EffectType::Denoise, core::denoiseValues, gpu::EffectKernel::Denoise, gpu::applyDenoise, gpu::Compositor, services::ToolRegistry timeline.add_effect/set_effect_parameter, ui::InspectorPanel | - | - | - | - |
 | multicam | partial | core::ClipGroup, core::EditCommands::RippleTrimCommand, services::ToolRegistry timeline.ripple_trim | should | A ripple-trim on a grouped clip propagates the same source-time delta to every clipGroups member (PR 397); no angle-switching tool exists, so angles trim in sync but cannot be cut between. | - | - |
 | organize | partial | core::MediaAssetRef::tags, services::ToolRegistry media.set_tags, ui::MediaBrowserViewModel | later | MediaAssetRef::tags lets an asset carry free-form labels, round-tripping through save/open, and media.set_tags publishes this; no bin, folder, rating or colour-label structure exists. | - | - |
 | layout | present | core::Transform, core::layoutTransforms, core::EditCommands::SetClipTransformsCommand, gpu::LayerPlacement, core::EffectType::CropTransform, services::ToolRegistry timeline.apply_layout/timeline.set_clip_properties | - | - | - | - |
@@ -102,7 +102,7 @@ every `N. ` line as a build-order item.
 | multicam | partial | core::ClipGroup, core::EditCommands::RippleTrimCommand, services::ToolRegistry timeline.ripple_trim | should | A ripple-trim on a grouped clip propagates in sync to every clipGroups member (PR 397); angle switching is still deferred, so multi-angle footage trims together but cannot be cut between angles. | - | - |
 | transcription and captions | partial | core::TrackKind::Caption, services::TranscriptionService, services::ToolRegistry, services::CaptionExport, gpu::Compositor | should | Caption cues can be authored, edited, retimed, burned in and written as an SRT sidecar; the audio-to-cues bridge always reports Unsupported, since no recognizer backend is bundled or pluggable. | - | - |
 | text and graphics | partial | core::TextStyle, core::Clip::textStyle, services::ToolRegistry timeline.add_text_clip/set_text_content/set_text_style, gpu::Compositor, ui::QtTextRasterizer, ui::InspectorPanel | should | A title/lower-third text clip type, three creation/edit/style tools and a QPainter-backed renderer shared by preview and export now exist; no shape layer does. | - | - |
-| color and effects | partial | gpu::EffectKernels, gpu::Compositor, core::ToneCurve, gpu::CubeLut, gpu::LutCache, gpu::VideoScopes, ui::CurveEditorWidget, ui::ScopesPanel | later | Eight effects render on both paths, including tone curves and LUTs, with histogram, waveform and vectorscope beside the Preview; no denoise or colour wheel. | - | - |
+| color and effects | present | gpu::EffectKernels, gpu::Compositor, core::ToneCurve, core::colorWheelOffsets, core::qualifierMask, gpu::CubeLut, gpu::LutCache, gpu::VideoScopes, ui::CurveEditorWidget, ui::ScopesPanel, ui::InspectorPanel | - | - | - | - |
 | audio scrub and metering | present | media::measureLevels, ui::AudioMeterWidget, media::PeakEnvelopeService, ui::TimelineGraphView waveforms, ui::ScrubAudioController, ui::AudioPlaybackDriver | - | - | SwiftUI | Qt 6 Widgets |
 | generation and upscaling | present | services::GenerationModelCatalog, services::GenerativeBackendRegistry, services::HostedGenerativeBackend, services::ByokGenerativeBackend, services::OpenSslGenerativeHttpTransport, services::GenerativeClient, services::GenerativeMediaCoordinator, services::ToolRegistry generation.list_models/generation.generate | - | - | - | - |
 | project browser and search | partial | ui::MediaBrowserViewModel, ui::MediaBrowserPanel, core::MediaAssetRef::tags | later | The media browser panel lists the library with per-asset tags and a name/path/tag filter field now; no bin, folder structure or indexed search exists, so assets cannot be organised hierarchically. | SwiftUI | Qt 6 Widgets |
@@ -113,16 +113,17 @@ every `N. ` line as a build-order item.
 
 ## Build order (Requirement 13.9)
 
-Exactly the `absent` and `partial` entries of both tables — 21 of the 34 — sorted `must` before
+Exactly the `absent` and `partial` entries of both tables — 18 of the 34 — sorted `must` before
 `should` before `later`. This list is a **projection** of the two tables and carries no
 independent facts: an entry appears here if and only if its status above is `absent` or `partial`,
-with the priority recorded above. The thirteen omitted entries are the thirteen `present` ones —
-`import`, `export`, `projects`, `generate`, `clips`, `effects`, `project settings`, `texts` and
-`capture frame` and `layout` (all table 1; the last three as of usable-editor tasks 12 and 14
-and the transform/apply_layout work respectively), plus
-`generation and upscaling`, `timeline editing` and `audio scrub and metering` (all capability
-areas; the second as of usable-editor task 11 and the third as of monitoring-and-grading tasks 1
-to 3).
+with the priority recorded above. The sixteen omitted entries are the sixteen `present` ones —
+`import`, `export`, `projects`, `generate`, `clips`, `effects`, `project settings`, `texts`,
+`capture frame`, `layout`, `color` and `denoise` (all table 1; the last two as of the
+colour-wheel/secondary-grade and denoise work respectively), plus
+`generation and upscaling`, `timeline editing`, `audio scrub and metering` and
+`color and effects` (all capability
+areas; the second as of usable-editor task 11, the third as of monitoring-and-grading tasks 1
+to 3, and the fourth as of the same denoise and colour-wheel work).
 
 Each item is written `<name> (<table>) — <priority>` because `multicam` appears in both tables.
 
@@ -136,21 +137,18 @@ Each item is written `<name> (<table>) — <priority>` because `multicam` appear
 8. transcription and captions (capability area) — should
 9. text and graphics (capability area) — should
 10. settings (capability area) — should
-11. color (tool category) — later
-12. denoise (tool category) — later
-13. organize (tool category) — later
-14. search (tool category) — later
-15. sync (tool category) — later
-16. beats (tool category) — later
-17. words (tool category) — later
-18. color and effects (capability area) — later
-19. project browser and search (capability area) — later
-20. telemetry (capability area) — later
-21. auto-update (capability area) — later
+11. organize (tool category) — later
+12. search (tool category) — later
+13. sync (tool category) — later
+14. beats (tool category) — later
+15. words (tool category) — later
+16. project browser and search (capability area) — later
+17. telemetry (capability area) — later
+18. auto-update (capability area) — later
 
-Counts, so a reader can check the projection without re-deriving it: 34 entries total — 13 `present`, 14 `partial`, 7 `absent`; 21 in this list, of which 1 `must`, 9 `should` and 11 `later`. Per table:
-table 1 holds 22 entries (10 `present`, 7 `partial`, 5 `absent`, so 12 appear below) and table 2
-holds 12 (3 `present`, 7 `partial`, 2 `absent`, so 9 appear below).
+Counts, so a reader can check the projection without re-deriving it: 34 entries total — 16 `present`, 12 `partial`, 6 `absent`; 18 in this list, of which 1 `must`, 9 `should` and 8 `later`. Per table:
+table 1 holds 22 entries (12 `present`, 6 `partial`, 4 `absent`, so 10 appear below) and table 2
+holds 12 (4 `present`, 6 `partial`, 2 `absent`, so 8 appear below).
 
 ## Known limits of this comparison
 
@@ -339,3 +337,40 @@ those claims rest on weaker evidence than the rest.
   Three mutation anchors in `tests/docs/report_parser_test.cpp` embedded build-order item
   *numbers*, which this re-score renumbered; they are now computed from the document by name, so
   the next re-score does not break them.
+
+- **2026-09-14 re-check (denoise, colour wheels and secondary grading).** Three rows changed, and
+  all three are the rows the README named as the largest remaining gaps.
+
+  `denoise` (tool category) moves from `absent` to `present`, the first row to move all the way
+  from `absent` since `capture frame`. It is a real effect rather than a renamed blur:
+  `core::EffectType::Denoise` renders through `gpu::applyDenoise` on the software path and
+  `gpu::EffectKernel::Denoise` on the GPU path as a BILATERAL average, weighting each neighbour by
+  a Gaussian of its Rec.601 luma distance from the centre pixel, so flat noise averages away while
+  edges keep their contrast. It is reachable through `timeline.add_effect` with `type: "denoise"`
+  and tuned through `timeline.set_effect_parameter` (`strength`, `radius`), and the Inspector names
+  it. The distinction from blur is asserted, not asserted-to: `DenoisePreservesAHardEdgeThatBlur
+  Destroys` filters the same step edge both ways and requires denoise to retain more of it.
+
+  `color` (tool category) moves from `partial` to `present`: the two gaps its own rationale named
+  are both closed. Secondary grading is `core::EffectType::SecondaryGrade` — the identical
+  gain/lift/gamma/saturation correction ColorGrade applies, multiplied by an HSL qualifier
+  (`core::qualifierMask`: a hue arc, a saturation band, a luma band and a `softness` that feathers
+  all three), evaluated on the UNGRADED pixel so a correction cannot widen its own selection. The
+  colour wheels are `core::colorWheelOffsets`, three polar controls whose per-channel offsets sum
+  to zero — a colour balance rather than a second brightness — folded into the nine lift/gamma/gain
+  values by `core::colorGradeValues`, which is why no shader changed to add them and why the two
+  render paths cannot disagree about them. Both are reachable through the existing effect tools and
+  both appear in the Inspector; there is no draggable wheel *widget*, so the wheel is exposed as
+  its two coordinates rather than as a disc, which `docs/TOOLS.md` states plainly.
+
+  `color and effects` (capability area) moves from `partial` to `present` for the same two reasons,
+  its rationale having named exactly `denoise` and a colour wheel.
+
+  Two properties hold the new code to the old: a secondary grade whose qualifier selects everything
+  must produce BYTE-IDENTICAL pixels to the primary grade with the same correction, and a wheel at
+  amount 0 must resolve bit-for-bit to what the project resolved to before wheels existed — so no
+  saved project's appearance moved. The suite went from 1852 to 1887 cases, all passing.
+
+  Nothing else was re-read, so no other row's status or rationale changed. The build-order
+  projection and its counts were recomputed from the tables rather than edited: 34 entries, now
+  16 `present`, 12 `partial`, 6 `absent`, with 18 in the list (1 `must`, 9 `should`, 8 `later`).

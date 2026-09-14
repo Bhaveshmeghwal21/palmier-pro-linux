@@ -50,6 +50,10 @@ std::string_view effectTypeName(EffectType type) {
             return "tone_curve";
         case EffectType::Lut:
             return "lut";
+        case EffectType::Denoise:
+            return "denoise";
+        case EffectType::SecondaryGrade:
+            return "secondary_grade";
         case EffectType::Custom:
             return "custom";
     }
@@ -60,11 +64,12 @@ std::string_view effectTypeName(EffectType type) {
 /// is both the `ArgSpec::enumValues` the schema publishes and the exact set
 /// `parseEffectType` accepts, so the advertised enum and the handler agree
 /// (Requirement 9.12). `invert_colors` is the ported upstream PR 408 effect
-/// (Requirement 14.4).
+/// (Requirement 14.4); `denoise` and `secondary_grade` close the upstream
+/// `denoise` category and the secondary-grading half of the `color` category.
 const std::vector<std::string>& effectTypeValues() {
     static const std::vector<std::string> values = {
-        "brightness",    "contrast",   "blur", "crop_transform", "color_grade",
-        "invert_colors", "tone_curve", "lut",  "custom"};
+        "brightness", "contrast", "blur",    "crop_transform",  "color_grade", "invert_colors",
+        "tone_curve", "lut",      "denoise", "secondary_grade", "custom"};
     return values;
 }
 
@@ -77,6 +82,8 @@ std::optional<EffectType> parseEffectType(std::string_view s) {
     if (s == "invert_colors") return EffectType::InvertColors;
     if (s == "tone_curve") return EffectType::ToneCurve;
     if (s == "lut") return EffectType::Lut;
+    if (s == "denoise") return EffectType::Denoise;
+    if (s == "secondary_grade") return EffectType::SecondaryGrade;
     if (s == "custom") return EffectType::Custom;
     return std::nullopt;
 }

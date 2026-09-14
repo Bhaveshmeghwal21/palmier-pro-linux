@@ -48,8 +48,7 @@ Effect makeEffect(EffectType type, std::map<std::string, double> params) {
 }
 
 /// A width*height RGBA8 buffer filled with one color.
-std::vector<std::uint8_t> solid(std::uint32_t w, std::uint32_t h,
-                                std::uint8_t r, std::uint8_t g,
+std::vector<std::uint8_t> solid(std::uint32_t w, std::uint32_t h, std::uint8_t r, std::uint8_t g,
                                 std::uint8_t b, std::uint8_t a) {
     std::vector<std::uint8_t> px(static_cast<std::size_t>(w) * h * 4u);
     for (std::size_t i = 0; i < px.size(); i += 4) {
@@ -67,64 +66,60 @@ std::vector<std::uint8_t> solid(std::uint32_t w, std::uint32_t h,
 
 TEST(SoftwareEffect, BrightnessShiftsRgbAndPreservesAlpha) {
     auto px = solid(2, 2, 100, 100, 100, 200);
-    applyEffectSoftware(makeEffect(EffectType::Brightness, {{"amount", 0.2}}),
-                        px.data(), 2, 2);
-    EXPECT_NEAR(px[0], 151, 1); // 100 + 0.2*255
+    applyEffectSoftware(makeEffect(EffectType::Brightness, {{"amount", 0.2}}), px.data(), 2, 2);
+    EXPECT_NEAR(px[0], 151, 1);  // 100 + 0.2*255
     EXPECT_NEAR(px[1], 151, 1);
     EXPECT_NEAR(px[2], 151, 1);
-    EXPECT_EQ(px[3], 200); // alpha preserved
+    EXPECT_EQ(px[3], 200);  // alpha preserved
 }
 
 TEST(SoftwareEffect, BrightnessClampsAtChannelBounds) {
     auto px = solid(1, 1, 250, 5, 128, 255);
-    applyEffectSoftware(makeEffect(EffectType::Brightness, {{"amount", 0.5}}),
-                        px.data(), 1, 1); // +127.5
-    EXPECT_EQ(px[0], 255); // 250 + 127.5 clamps high
+    applyEffectSoftware(makeEffect(EffectType::Brightness, {{"amount", 0.5}}), px.data(), 1,
+                        1);  // +127.5
+    EXPECT_EQ(px[0], 255);   // 250 + 127.5 clamps high
     EXPECT_NEAR(px[1], 133, 1);
 }
 
 TEST(SoftwareEffect, ContrastScalesAboutMidGray) {
     auto px = solid(1, 1, 200, 128, 50, 255);
-    applyEffectSoftware(makeEffect(EffectType::Contrast, {{"amount", 1.0}}),
-                        px.data(), 1, 1); // factor 2 about 128
-    EXPECT_EQ(px[0], 255);         // (200-128)*2+128 = 272 -> clamp 255
-    EXPECT_EQ(px[1], 128);         // mid-gray unchanged
-    EXPECT_NEAR(px[2], 0, 1);      // (50-128)*2+128 = -28 -> clamp 0
+    applyEffectSoftware(makeEffect(EffectType::Contrast, {{"amount", 1.0}}), px.data(), 1,
+                        1);    // factor 2 about 128
+    EXPECT_EQ(px[0], 255);     // (200-128)*2+128 = 272 -> clamp 255
+    EXPECT_EQ(px[1], 128);     // mid-gray unchanged
+    EXPECT_NEAR(px[2], 0, 1);  // (50-128)*2+128 = -28 -> clamp 0
 }
 
 TEST(SoftwareEffect, BlurOfUniformImageIsUnchanged) {
     auto px = solid(4, 4, 80, 90, 100, 255);
     const auto before = px;
-    applyEffectSoftware(makeEffect(EffectType::Blur, {{"radius", 2.0}}),
-                        px.data(), 4, 4);
-    EXPECT_EQ(px, before); // averaging a constant leaves it constant
+    applyEffectSoftware(makeEffect(EffectType::Blur, {{"radius", 2.0}}), px.data(), 4, 4);
+    EXPECT_EQ(px, before);  // averaging a constant leaves it constant
 }
 
 TEST(SoftwareEffect, BlurRadiusZeroIsNoOp) {
     auto px = solid(3, 3, 10, 20, 30, 255);
-    px[0] = 200; // perturb one pixel
+    px[0] = 200;  // perturb one pixel
     const auto before = px;
-    applyEffectSoftware(makeEffect(EffectType::Blur, {{"radius", 0.0}}),
-                        px.data(), 3, 3);
+    applyEffectSoftware(makeEffect(EffectType::Blur, {{"radius", 0.0}}), px.data(), 3, 3);
     EXPECT_EQ(px, before);
 }
 
 TEST(SoftwareEffect, BlurAveragesEdgeClampedWindow) {
     // 2x1 image: left R=0, right R=200. radius 1 -> each pixel averages both.
     std::vector<std::uint8_t> px = {0, 0, 0, 255, 200, 0, 0, 255};
-    applyEffectSoftware(makeEffect(EffectType::Blur, {{"radius", 1.0}}),
-                        px.data(), 2, 1);
-    EXPECT_EQ(px[0], 100); // (0 + 200) / 2
+    applyEffectSoftware(makeEffect(EffectType::Blur, {{"radius", 1.0}}), px.data(), 2, 1);
+    EXPECT_EQ(px[0], 100);  // (0 + 200) / 2
     EXPECT_EQ(px[4], 100);
-    EXPECT_EQ(px[3], 255); // alpha preserved
+    EXPECT_EQ(px[3], 255);  // alpha preserved
     EXPECT_EQ(px[7], 255);
 }
 
 TEST(SoftwareEffect, CropTransformClearsOutsideRectToTransparent) {
     // 4x4 opaque white; keep the right half (cropLeft = 0.5).
     auto px = solid(4, 4, 255, 255, 255, 255);
-    applyEffectSoftware(
-        makeEffect(EffectType::CropTransform, {{"cropLeft", 0.5}}), px.data(), 4, 4);
+    applyEffectSoftware(makeEffect(EffectType::CropTransform, {{"cropLeft", 0.5}}), px.data(), 4,
+                        4);
 
     // Column 0 (x=0) is outside -> transparent black; column 2 is inside -> kept.
     auto pixel = [&](std::uint32_t x, std::uint32_t y) {
@@ -140,38 +135,36 @@ TEST(SoftwareEffect, CropTransformClearsOutsideRectToTransparent) {
 TEST(SoftwareEffect, CropTransformFullRectIsNoOp) {
     auto px = solid(3, 3, 12, 34, 56, 255);
     const auto before = px;
-    applyEffectSoftware(makeEffect(EffectType::CropTransform,
-                                   {{"cropLeft", 0.0}, {"cropTop", 0.0},
-                                    {"cropRight", 1.0}, {"cropBottom", 1.0}}),
-                        px.data(), 3, 3);
+    applyEffectSoftware(
+        makeEffect(EffectType::CropTransform,
+                   {{"cropLeft", 0.0}, {"cropTop", 0.0}, {"cropRight", 1.0}, {"cropBottom", 1.0}}),
+        px.data(), 3, 3);
     EXPECT_EQ(px, before);
 }
 
 TEST(SoftwareEffect, ColorGradeAppliesPerChannelGain) {
     auto px = solid(1, 1, 50, 60, 70, 128);
-    applyEffectSoftware(makeEffect(EffectType::ColorGrade, {{"gainR", 2.0}}),
-                        px.data(), 1, 1);
-    EXPECT_EQ(px[0], 100); // 50 * 2
-    EXPECT_EQ(px[1], 60);  // unchanged
+    applyEffectSoftware(makeEffect(EffectType::ColorGrade, {{"gainR", 2.0}}), px.data(), 1, 1);
+    EXPECT_EQ(px[0], 100);  // 50 * 2
+    EXPECT_EQ(px[1], 60);   // unchanged
     EXPECT_EQ(px[2], 70);
-    EXPECT_EQ(px[3], 128); // alpha preserved
+    EXPECT_EQ(px[3], 128);  // alpha preserved
 }
 
 TEST(SoftwareEffect, ColorGradeZeroSaturationYieldsGray) {
     auto px = solid(1, 1, 200, 100, 0, 255);
-    applyEffectSoftware(makeEffect(EffectType::ColorGrade, {{"saturation", 0.0}}),
-                        px.data(), 1, 1);
+    applyEffectSoftware(makeEffect(EffectType::ColorGrade, {{"saturation", 0.0}}), px.data(), 1, 1);
     // luma = 0.299*200 + 0.587*100 + 0.114*0 = 59.8 + 58.7 = 118.5 -> ~119
     EXPECT_NEAR(px[0], 119, 1);
-    EXPECT_EQ(px[0], px[1]); // gray: all channels equal
+    EXPECT_EQ(px[0], px[1]);  // gray: all channels equal
     EXPECT_EQ(px[1], px[2]);
 }
 
 TEST(SoftwareEffect, ColorGradeLiftAddsOffset) {
     auto px = solid(1, 1, 10, 10, 10, 255);
-    applyEffectSoftware(makeEffect(EffectType::ColorGrade, {{"lift", 0.1}}),
-                        px.data(), 1, 1); // +25.5
-    EXPECT_NEAR(px[0], 36, 1); // 10 + 25.5
+    applyEffectSoftware(makeEffect(EffectType::ColorGrade, {{"lift", 0.1}}), px.data(), 1,
+                        1);     // +25.5
+    EXPECT_NEAR(px[0], 36, 1);  // 10 + 25.5
 }
 
 // --- Lift / gamma / gain primary grade (monitoring-and-grading Requirement 4) ---
@@ -242,23 +235,21 @@ TEST(ColorGradePrimaryGrade, ALegacyEffectRendersByteIdenticallyToThePreviousImp
     // gamma step's clamp would silently change if it were not guarded), a lift that
     // pushes past white, and saturation both under and over 1.
     const std::vector<Case> cases = {
-        {1.0, 1.0, 1.0, 0.0, 1.0},   {2.0, 1.0, 1.0, 0.0, 1.0},
-        {1.0, 0.5, 1.5, 0.0, 1.0},   {1.0, 1.0, 1.0, -0.3, 1.0},
-        {1.0, 1.0, 1.0, 0.4, 1.0},   {1.0, 1.0, 1.0, 0.0, 0.0},
-        {1.0, 1.0, 1.0, 0.0, 1.8},   {1.7, 0.3, 1.1, -0.25, 0.4},
-        {0.0, 0.0, 0.0, 0.6, 1.2},   {1.9, 1.9, 1.9, -0.45, 1.6},
+        {1.0, 1.0, 1.0, 0.0, 1.0},   {2.0, 1.0, 1.0, 0.0, 1.0},   {1.0, 0.5, 1.5, 0.0, 1.0},
+        {1.0, 1.0, 1.0, -0.3, 1.0},  {1.0, 1.0, 1.0, 0.4, 1.0},   {1.0, 1.0, 1.0, 0.0, 0.0},
+        {1.0, 1.0, 1.0, 0.0, 1.8},   {1.7, 0.3, 1.1, -0.25, 0.4}, {0.0, 0.0, 0.0, 0.6, 1.2},
+        {1.9, 1.9, 1.9, -0.45, 1.6},
     };
 
     for (const Case& c : cases) {
         std::vector<std::uint8_t> viaCurrent = fullRangeImage();
         std::vector<std::uint8_t> viaLegacy = viaCurrent;
 
-        applyEffectSoftware(makeEffect(EffectType::ColorGrade,
-                                       {{"gainR", c.gainR},
-                                        {"gainG", c.gainG},
-                                        {"gainB", c.gainB},
-                                        {"lift", c.lift},
-                                        {"saturation", c.saturation}}),
+        applyEffectSoftware(makeEffect(EffectType::ColorGrade, {{"gainR", c.gainR},
+                                                                {"gainG", c.gainG},
+                                                                {"gainB", c.gainB},
+                                                                {"lift", c.lift},
+                                                                {"saturation", c.saturation}}),
                             viaCurrent.data(), 256, 1);
         legacyColorGrade(viaLegacy, c.gainR, c.gainG, c.gainB, c.lift, c.saturation);
 
@@ -286,8 +277,8 @@ TEST(ColorGradePrimaryGrade, AUnityGammaIsSkippedRatherThanComputed) {
     std::vector<std::uint8_t> withoutGamma = fullRangeImage();
     std::vector<std::uint8_t> withUnityGamma = withoutGamma;
     applyEffectSoftware(makeEffect(EffectType::ColorGrade, legacy), withoutGamma.data(), 256, 1);
-    applyEffectSoftware(makeEffect(EffectType::ColorGrade, explicitUnity),
-                        withUnityGamma.data(), 256, 1);
+    applyEffectSoftware(makeEffect(EffectType::ColorGrade, explicitUnity), withUnityGamma.data(),
+                        256, 1);
 
     EXPECT_EQ(withoutGamma, withUnityGamma)
         << "spelling gamma out as 1.0 must be indistinguishable from omitting it";
@@ -315,15 +306,15 @@ TEST(ColorGradePrimaryGrade, GammaAboveOneBrightensMidtonesAndBelowOneDarkensThe
     const std::uint8_t mid = 128;
 
     auto brighter = solid(1, 1, mid, mid, mid, 255);
-    applyEffectSoftware(makeEffect(EffectType::ColorGrade,
-                                   {{"gammaR", 2.0}, {"gammaG", 2.0}, {"gammaB", 2.0}}),
-                        brighter.data(), 1, 1);
+    applyEffectSoftware(
+        makeEffect(EffectType::ColorGrade, {{"gammaR", 2.0}, {"gammaG", 2.0}, {"gammaB", 2.0}}),
+        brighter.data(), 1, 1);
     EXPECT_GT(brighter[0], mid) << "gamma 2.0 must brighten, i.e. pow(x, 1/gamma)";
 
     auto darker = solid(1, 1, mid, mid, mid, 255);
-    applyEffectSoftware(makeEffect(EffectType::ColorGrade,
-                                   {{"gammaR", 0.5}, {"gammaG", 0.5}, {"gammaB", 0.5}}),
-                        darker.data(), 1, 1);
+    applyEffectSoftware(
+        makeEffect(EffectType::ColorGrade, {{"gammaR", 0.5}, {"gammaG", 0.5}, {"gammaB", 0.5}}),
+        darker.data(), 1, 1);
     EXPECT_LT(darker[0], mid) << "gamma 0.5 must darken";
 
     // pow(0.5, 1/2.0) = 0.7071 -> 180.3; pow(0.5, 2.0) = 0.25 -> 63.75. Computed from
@@ -335,9 +326,9 @@ TEST(ColorGradePrimaryGrade, GammaAboveOneBrightensMidtonesAndBelowOneDarkensThe
     // The endpoints are fixed points of pow, so gamma must leave them alone.
     auto ends = solid(2, 1, 0, 0, 0, 255);
     ends[4] = ends[5] = ends[6] = 255;
-    applyEffectSoftware(makeEffect(EffectType::ColorGrade,
-                                   {{"gammaR", 2.2}, {"gammaG", 2.2}, {"gammaB", 2.2}}),
-                        ends.data(), 2, 1);
+    applyEffectSoftware(
+        makeEffect(EffectType::ColorGrade, {{"gammaR", 2.2}, {"gammaG", 2.2}, {"gammaB", 2.2}}),
+        ends.data(), 2, 1);
     EXPECT_EQ(ends[0], 0);
     EXPECT_EQ(ends[4], 255);
 }
@@ -359,11 +350,10 @@ TEST(ColorGradePrimaryGrade, TheDocumentedOrderOfOperationsIsTheImplementedOne) 
     // the POST-gamma values. Applying gamma after the collapse would give a different
     // gray, because gamma is non-linear and the channels differ before it.
     auto grey = solid(1, 1, 200, 100, 20, 255);
-    applyEffectSoftware(makeEffect(EffectType::ColorGrade, {{"gammaR", 2.2},
-                                                            {"gammaG", 2.2},
-                                                            {"gammaB", 2.2},
-                                                            {"saturation", 0.0}}),
-                        grey.data(), 1, 1);
+    applyEffectSoftware(
+        makeEffect(EffectType::ColorGrade,
+                   {{"gammaR", 2.2}, {"gammaG", 2.2}, {"gammaB", 2.2}, {"saturation", 0.0}}),
+        grey.data(), 1, 1);
     const double gr = std::pow(200.0 / 255.0, 1.0 / 2.2) * 255.0;
     const double gg = std::pow(100.0 / 255.0, 1.0 / 2.2) * 255.0;
     const double gb = std::pow(20.0 / 255.0, 1.0 / 2.2) * 255.0;
@@ -389,9 +379,8 @@ TEST(ColorGradePrimaryGrade, ADegenerateGammaIsClampedRatherThanDividingByZero) 
         px[6] = 77;
         auto again = px;
 
-        const Effect e = makeEffect(
-            EffectType::ColorGrade,
-            {{"gammaR", gamma}, {"gammaG", gamma}, {"gammaB", gamma}});
+        const Effect e = makeEffect(EffectType::ColorGrade,
+                                    {{"gammaR", gamma}, {"gammaG", gamma}, {"gammaB", gamma}});
         applyEffectSoftware(e, px.data(), 2, 1);
         applyEffectSoftware(e, again.data(), 2, 1);
 
@@ -416,7 +405,7 @@ namespace {
 
 /// Parameters holding one channel's points, built through the production name builder.
 std::map<std::string, double> curveParams(CurveChannel channel,
-                                         const std::vector<CurvePoint>& points) {
+                                          const std::vector<CurvePoint>& points) {
     std::map<std::string, double> params;
     for (std::size_t i = 0; i < points.size(); ++i) {
         params.emplace(curvePointParameterName(channel, i, /*isY=*/false), points[i].x);
@@ -437,10 +426,9 @@ TEST(SoftwareToneCurve, AnEffectWithNoPointsLeavesEveryPixelUntouched) {
 TEST(SoftwareToneCurve, AMasterCurveMapsEveryChannelThroughTheSameTransferFunction) {
     // A curve from (0,0) to (1,0.5) halves everything.
     auto px = solid(1, 1, 0, 128, 254, 200);
-    applyEffectSoftware(
-        makeEffect(EffectType::ToneCurve, curveParams(CurveChannel::Master, {{0.0, 0.0},
-                                                                            {1.0, 0.5}})),
-        px.data(), 1, 1);
+    applyEffectSoftware(makeEffect(EffectType::ToneCurve,
+                                   curveParams(CurveChannel::Master, {{0.0, 0.0}, {1.0, 0.5}})),
+                        px.data(), 1, 1);
     EXPECT_EQ(px[0], 0u);
     EXPECT_EQ(px[1], 64u);   // 128 -> 0.50196 -> 0.25098 -> 64.0
     EXPECT_EQ(px[2], 127u);  // 254 -> 0.99608 -> 0.49804 -> 127.0
@@ -449,10 +437,9 @@ TEST(SoftwareToneCurve, AMasterCurveMapsEveryChannelThroughTheSameTransferFuncti
 
 TEST(SoftwareToneCurve, APerChannelCurveTouchesOnlyItsOwnChannel) {
     auto px = solid(1, 1, 200, 200, 200, 255);
-    applyEffectSoftware(
-        makeEffect(EffectType::ToneCurve, curveParams(CurveChannel::Green, {{0.0, 1.0},
-                                                                           {1.0, 0.0}})),
-        px.data(), 1, 1);
+    applyEffectSoftware(makeEffect(EffectType::ToneCurve,
+                                   curveParams(CurveChannel::Green, {{0.0, 1.0}, {1.0, 0.0}})),
+                        px.data(), 1, 1);
     EXPECT_EQ(px[0], 200u);
     EXPECT_EQ(px[2], 200u);
     EXPECT_LT(px[1], 100u) << "an inverting green curve must actually invert green";
@@ -505,10 +492,10 @@ TEST(SoftwareEffect, InvertColorsSubtractsEachRgbChannelFrom255) {
     auto px = solid(2, 2, 0, 128, 255, 200);
     applyEffectSoftware(makeEffect(EffectType::InvertColors, {}), px.data(), 2, 2);
     for (std::size_t i = 0; i < px.size(); i += 4) {
-        EXPECT_EQ(px[i + 0], 255); // 255 - 0
-        EXPECT_EQ(px[i + 1], 127); // 255 - 128
-        EXPECT_EQ(px[i + 2], 0);   // 255 - 255
-        EXPECT_EQ(px[i + 3], 200); // alpha unchanged
+        EXPECT_EQ(px[i + 0], 255);  // 255 - 0
+        EXPECT_EQ(px[i + 1], 127);  // 255 - 128
+        EXPECT_EQ(px[i + 2], 0);    // 255 - 255
+        EXPECT_EQ(px[i + 3], 200);  // alpha unchanged
     }
 }
 
@@ -528,7 +515,7 @@ TEST(SoftwareEffect, InvertColorsHoldsForEveryByteValueAndLeavesAlphaAlone) {
         for (int c = 0; c < 3; ++c) {
             EXPECT_EQ(px[v * 4 + c], 255 - before[v * 4 + c]) << "value " << v << " channel " << c;
         }
-        EXPECT_EQ(px[v * 4 + 3], before[v * 4 + 3]); // alpha unchanged
+        EXPECT_EQ(px[v * 4 + 3], before[v * 4 + 3]);  // alpha unchanged
     }
 }
 
@@ -580,7 +567,7 @@ TEST(SoftwareEffect, InvertColorsKernelSemanticsMatchTheSoftwareReference) {
             EXPECT_LE(std::abs(kernel - static_cast<int>(cpu[v * 4 + c])), 1)
                 << "value " << static_cast<int>(src[v * 4 + c]) << " channel " << c;
         }
-        const int kernelAlpha = static_cast<int>(src[v * 4 + 3]); // kernel copies alpha
+        const int kernelAlpha = static_cast<int>(src[v * 4 + 3]);  // kernel copies alpha
         EXPECT_EQ(kernelAlpha, static_cast<int>(cpu[v * 4 + 3]));
     }
 }
@@ -591,16 +578,226 @@ TEST(EffectKernels, InvertColorsKernelIsMappedAndCarriesTheInversionMath) {
     EXPECT_EQ(effectKernelName(EffectKernel::InvertColors), "invert_colors");
 
     const std::string src{effectKernelSource(EffectKernel::InvertColors)};
-    EXPECT_NE(src.find("vec3(1.0) - c.rgb"), std::string::npos); // 255 - value
-    EXPECT_NE(src.find("vec4(rgb, c.a)"), std::string::npos);    // alpha unchanged
+    EXPECT_NE(src.find("vec3(1.0) - c.rgb"), std::string::npos);  // 255 - value
+    EXPECT_NE(src.find("vec4(rgb, c.a)"), std::string::npos);     // alpha unchanged
 }
 
 TEST(SoftwareEffect, CustomEffectIsPassThrough) {
     auto px = solid(2, 2, 11, 22, 33, 44);
     const auto before = px;
-    applyEffectSoftware(makeEffect(EffectType::Custom, {{"anything", 1.0}}),
-                        px.data(), 2, 2);
+    applyEffectSoftware(makeEffect(EffectType::Custom, {{"anything", 1.0}}), px.data(), 2, 2);
     EXPECT_EQ(px, before);
+}
+
+// --- Denoise (upstream parity: the `denoise` tool category) -----------------
+//
+// The property that matters is not "it smooths" -- blur already does that -- but that it
+// smooths WITHOUT destroying edges. The comparison against blur below is therefore the
+// central test of this effect, not a nicety.
+
+TEST(SoftwareEffect, DenoiseDefaultsToAnExactNoOp) {
+    // A freshly added denoise effect carries no parameters, and must change nothing until
+    // it is given a strength. Anything else would make `add_effect` a destructive call.
+    auto px = solid(4, 4, 30, 90, 200, 123);
+    px[4 * 5] = 250;  // some structure, so a no-op is not trivially satisfied
+    const auto before = px;
+    applyEffectSoftware(makeEffect(EffectType::Denoise, {}), px.data(), 4, 4);
+    EXPECT_EQ(px, before);
+}
+
+TEST(SoftwareEffect, DenoiseIsAnExactNoOpAtZeroStrengthOrZeroRadius) {
+    for (const auto& params : std::vector<std::map<std::string, double>>{
+             {{"strength", 0.0}, {"radius", 4.0}},
+             {{"strength", 0.8}, {"radius", 0.0}},
+             {{"strength", -1.0}, {"radius", 3.0}},  // clamped up to 0
+             {{"strength", 0.5}, {"radius", -2.0}}}) {
+        auto px = solid(3, 3, 10, 20, 30, 40);
+        px[4 * 4] = 200;
+        const auto before = px;
+        applyEffectSoftware(makeEffect(EffectType::Denoise, params), px.data(), 3, 3);
+        EXPECT_EQ(px, before) << "strength " << params.at("strength") << " radius "
+                              << params.at("radius");
+    }
+}
+
+TEST(SoftwareEffect, DenoiseLeavesAUniformFieldAndItsAlphaUntouched) {
+    // Every weight is exp(0) == 1 and every neighbour is identical, so the average is the
+    // input. This pins the arithmetic: a normalization bug shows up here as a shifted value.
+    auto px = solid(5, 5, 77, 128, 201, 66);
+    const auto before = px;
+    applyEffectSoftware(makeEffect(EffectType::Denoise, {{"strength", 1.0}, {"radius", 3.0}}),
+                        px.data(), 5, 5);
+    EXPECT_EQ(px, before);
+}
+
+TEST(SoftwareEffect, DenoiseReducesNoiseInAFlatRegion) {
+    // A flat mid-grey field with alternating +/-12 noise. After denoising, every pixel
+    // should sit closer to the true mean than it started.
+    constexpr int kW = 8, kH = 8, kMean = 128, kNoise = 12;
+    std::vector<std::uint8_t> px(static_cast<std::size_t>(kW) * kH * 4u, 255);
+    for (int y = 0; y < kH; ++y) {
+        for (int x = 0; x < kW; ++x) {
+            const int v = kMean + (((x + y) % 2 == 0) ? kNoise : -kNoise);
+            const std::size_t o = (static_cast<std::size_t>(y) * kW + x) * 4u;
+            px[o + 0] = px[o + 1] = px[o + 2] = static_cast<std::uint8_t>(v);
+        }
+    }
+    const auto before = px;
+    applyEffectSoftware(makeEffect(EffectType::Denoise, {{"strength", 1.0}, {"radius", 2.0}}),
+                        px.data(), kW, kH);
+
+    long deviationBefore = 0, deviationAfter = 0;
+    for (std::size_t i = 0; i < px.size(); i += 4) {
+        deviationBefore += std::abs(static_cast<int>(before[i]) - kMean);
+        deviationAfter += std::abs(static_cast<int>(px[i]) - kMean);
+    }
+    EXPECT_LT(deviationAfter, deviationBefore / 2)
+        << "denoise removed " << deviationBefore - deviationAfter << " of " << deviationBefore
+        << " total deviation from the mean";
+}
+
+TEST(SoftwareEffect, DenoisePreservesAHardEdgeThatBlurDestroys) {
+    // THE distinguishing property. A vertical step from 0 to 255 down the middle, filtered
+    // once by denoise and once by blur at the same radius. Blur averages across the step and
+    // collapses its contrast; denoise weights the far side to near zero and keeps it.
+    constexpr int kW = 8, kH = 4;
+    const auto stepImage = []() {
+        std::vector<std::uint8_t> px(static_cast<std::size_t>(kW) * kH * 4u, 255);
+        for (int y = 0; y < kH; ++y) {
+            for (int x = 0; x < kW; ++x) {
+                const auto v = static_cast<std::uint8_t>(x < kW / 2 ? 0 : 255);
+                const std::size_t o = (static_cast<std::size_t>(y) * kW + x) * 4u;
+                px[o + 0] = px[o + 1] = px[o + 2] = v;
+            }
+        }
+        return px;
+    };
+    // Contrast across the two pixels straddling the step, on the first row.
+    const auto edgeContrast = [](const std::vector<std::uint8_t>& px) {
+        const int left = px[(static_cast<std::size_t>(kW / 2 - 1)) * 4u];
+        const int right = px[(static_cast<std::size_t>(kW / 2)) * 4u];
+        return std::abs(right - left);
+    };
+
+    auto denoised = stepImage();
+    applyEffectSoftware(makeEffect(EffectType::Denoise, {{"strength", 0.2}, {"radius", 2.0}}),
+                        denoised.data(), kW, kH);
+
+    auto blurred = stepImage();
+    applyEffectSoftware(makeEffect(EffectType::Blur, {{"radius", 2.0}}), blurred.data(), kW, kH);
+
+    EXPECT_EQ(edgeContrast(stepImage()), 255);
+    EXPECT_GT(edgeContrast(denoised), edgeContrast(blurred))
+        << "denoise kept " << edgeContrast(denoised) << " of the step, blur kept "
+        << edgeContrast(blurred);
+    // And it must be a real preservation, not a marginal one.
+    EXPECT_GT(edgeContrast(denoised), 200);
+}
+
+TEST(SoftwareEffect, DenoiseClampsAnAbsurdRadiusRatherThanRejectingIt) {
+    // Cost is O(radius^2), so the radius is bounded. Asking for far more than the ceiling
+    // must behave exactly as asking for the ceiling.
+    auto huge = solid(6, 6, 40, 40, 40, 255);
+    huge[4 * 7] = 220;
+    auto pinned = huge;
+
+    applyEffectSoftware(makeEffect(EffectType::Denoise, {{"strength", 0.5}, {"radius", 100000.0}}),
+                        huge.data(), 6, 6);
+    applyEffectSoftware(
+        makeEffect(EffectType::Denoise,
+                   {{"strength", 0.5}, {"radius", static_cast<double>(kMaxDenoiseRadius)}}),
+        pinned.data(), 6, 6);
+    EXPECT_EQ(huge, pinned);
+}
+
+TEST(SoftwareEffect, DenoiseValuesResolvesDefaultsAndClampsOnce) {
+    // The single source of the defaults the renderer, the kernel's push constants and the
+    // Inspector all read. Tested directly so a change here cannot silently move all three.
+    const DenoiseValues absent = denoiseValues(std::map<std::string, double>{});
+    EXPECT_DOUBLE_EQ(absent.strength, 0.0);
+    EXPECT_EQ(absent.radius, 1);
+    EXPECT_TRUE(absent.isIdentity());
+
+    EXPECT_DOUBLE_EQ(denoiseValues(std::map<std::string, double>{{"strength", 5.0}}).strength, 1.0);
+    EXPECT_DOUBLE_EQ(denoiseValues(std::map<std::string, double>{{"strength", -5.0}}).strength,
+                     0.0);
+    EXPECT_EQ(denoiseValues(std::map<std::string, double>{{"radius", 2.4}}).radius, 2);
+    EXPECT_EQ(denoiseValues(std::map<std::string, double>{{"radius", 2.5}}).radius, 3);
+    EXPECT_EQ(denoiseValues(std::map<std::string, double>{{"radius", 1e9}}).radius,
+              kMaxDenoiseRadius);
+    EXPECT_FALSE(denoiseValues(std::map<std::string, double>{{"strength", 0.5}}).isIdentity());
+}
+
+TEST(SoftwareEffect, DenoiseKernelSemanticsMatchTheSoftwareReference) {
+    // Recompute the GLSL's math here -- normalized space, Rec.601 luma, the same sigma --
+    // and require the host reference to agree within property P5's per-channel tolerance.
+    // Written independently of Compositor.cpp so a change to one side fails this.
+    constexpr int kW = 6, kH = 6;
+    constexpr double kStrength = 0.35;
+    constexpr int kRadius = 2;
+
+    std::vector<std::uint8_t> px(static_cast<std::size_t>(kW) * kH * 4u);
+    for (std::size_t i = 0; i < static_cast<std::size_t>(kW) * kH; ++i) {
+        px[i * 4 + 0] = static_cast<std::uint8_t>((i * 37) % 256);
+        px[i * 4 + 1] = static_cast<std::uint8_t>((i * 91) % 256);
+        px[i * 4 + 2] = static_cast<std::uint8_t>((i * 13) % 256);
+        px[i * 4 + 3] = static_cast<std::uint8_t>((i * 7) % 256);
+    }
+    const auto src = px;
+    applyEffectSoftware(makeEffect(EffectType::Denoise, {{"strength", kStrength},
+                                                         {"radius", static_cast<double>(kRadius)}}),
+                        px.data(), kW, kH);
+
+    const auto luma = [](double r, double g, double b) {
+        return 0.299 * r + 0.587 * g + 0.114 * b;
+    };
+    const double sigma = kStrength * 0.25;
+    const double denom = 2.0 * sigma * sigma;
+
+    for (int y = 0; y < kH; ++y) {
+        for (int x = 0; x < kW; ++x) {
+            const std::size_t centre = (static_cast<std::size_t>(y) * kW + x) * 4u;
+            const double centreLuma =
+                luma(src[centre + 0] / 255.0, src[centre + 1] / 255.0, src[centre + 2] / 255.0);
+            double sum[3] = {0.0, 0.0, 0.0};
+            double weightSum = 0.0;
+            for (int sy = std::max(0, y - kRadius); sy <= std::min(kH - 1, y + kRadius); ++sy) {
+                for (int sx = std::max(0, x - kRadius); sx <= std::min(kW - 1, x + kRadius); ++sx) {
+                    const std::size_t s = (static_cast<std::size_t>(sy) * kW + sx) * 4u;
+                    const double sr = src[s + 0] / 255.0;
+                    const double sg = src[s + 1] / 255.0;
+                    const double sb = src[s + 2] / 255.0;
+                    const double d = luma(sr, sg, sb) - centreLuma;
+                    const double weight = std::exp(-(d * d) / denom);
+                    sum[0] += weight * sr;
+                    sum[1] += weight * sg;
+                    sum[2] += weight * sb;
+                    weightSum += weight;
+                }
+            }
+            for (int c = 0; c < 3; ++c) {
+                const int expected =
+                    static_cast<int>(std::lround(std::clamp(sum[c] / weightSum, 0.0, 1.0) * 255.0));
+                EXPECT_LE(std::abs(expected - static_cast<int>(px[centre + c])), 1)
+                    << "pixel (" << x << "," << y << ") channel " << c;
+            }
+            EXPECT_EQ(px[centre + 3], src[centre + 3]) << "alpha at (" << x << "," << y << ")";
+        }
+    }
+}
+
+TEST(EffectKernels, DenoiseKernelIsMappedAndCarriesTheBilateralWeighting) {
+    EXPECT_EQ(kernelForEffectType(EffectType::Denoise), EffectKernel::Denoise);
+    EXPECT_EQ(effectTypeForKernel(EffectKernel::Denoise), EffectType::Denoise);
+    EXPECT_EQ(effectKernelName(EffectKernel::Denoise), "denoise");
+
+    const std::string src{effectKernelSource(EffectKernel::Denoise)};
+    EXPECT_NE(src.find("#version 450"), std::string::npos);
+    // The range weight is what makes this denoise and not blur. If these vanish, the kernel
+    // has silently become a box average while still being called `denoise`.
+    EXPECT_NE(src.find("exp("), std::string::npos);
+    EXPECT_NE(src.find("kLuma"), std::string::npos);
+    EXPECT_NE(src.find("vec4(sum / weightSum, c.a)"), std::string::npos);  // alpha preserved
 }
 
 // Requirement 6.4 (usable-editor task 9): a clip's rendered output depends on
@@ -646,7 +843,7 @@ TEST(SoftwareEffect, TransitionCrossDissolvesTwoFrames) {
     std::vector<std::uint8_t> out(a.size());
     applyTransitionSoftware(a.data(), b.data(), out.data(), 2, 2, 0.5);
     for (std::size_t i = 0; i < out.size(); i += 4) {
-        EXPECT_NEAR(out[i + 0], 128, 1); // 0*0.5 + 255*0.5
+        EXPECT_NEAR(out[i + 0], 128, 1);  // 0*0.5 + 255*0.5
         EXPECT_EQ(out[i + 3], 255);       // alpha blended (255<->255)
     }
 }
@@ -657,10 +854,10 @@ TEST(SoftwareEffect, TransitionEndpointsReturnInputs) {
     std::vector<std::uint8_t> out(4);
 
     applyTransitionSoftware(a.data(), b.data(), out.data(), 1, 1, 0.0);
-    EXPECT_EQ(out, a); // progress 0 -> frame A
+    EXPECT_EQ(out, a);  // progress 0 -> frame A
 
     applyTransitionSoftware(a.data(), b.data(), out.data(), 1, 1, 1.0);
-    EXPECT_EQ(out, b); // progress 1 -> frame B
+    EXPECT_EQ(out, b);  // progress 1 -> frame B
 }
 
 // ===========================================================================
@@ -689,7 +886,7 @@ TEST(EffectKernels, KernelNamesAreDistinct) {
 TEST(EffectKernels, KernelAndEffectTypeMappingsRoundTrip) {
     // The six per-clip effect kinds map both ways.
     const EffectType types[] = {EffectType::Brightness, EffectType::Contrast,
-                                EffectType::Blur, EffectType::CropTransform,
+                                EffectType::Blur,       EffectType::CropTransform,
                                 EffectType::ColorGrade, EffectType::InvertColors};
     for (const EffectType type : types) {
         const auto kernel = kernelForEffectType(type);
@@ -709,7 +906,7 @@ TEST(EffectKernels, CompileProducesValidSpirvOrUnsupportedWithoutShaderc) {
         const SpirvModule& mod = result.value();
         EXPECT_TRUE(mod.valid());
         ASSERT_FALSE(mod.code.empty());
-        EXPECT_EQ(mod.code.front(), 0x07230203u); // SPIR-V magic number
+        EXPECT_EQ(mod.code.front(), 0x07230203u);  // SPIR-V magic number
         EXPECT_EQ(mod.entryPoint, "main");
     } else {
         ASSERT_TRUE(result.isError());
@@ -728,7 +925,7 @@ TEST(EffectKernels, RegistryBuildsAndRegistersEffectTypeKernels) {
 
     ASSERT_TRUE(built.isOk()) << built.error().toString();
     const EffectKernelRegistry& registry = built.value();
-    EXPECT_EQ(registry.size(), allEffectKernels().size()); // every kernel compiled
+    EXPECT_EQ(registry.size(), allEffectKernels().size());  // every kernel compiled
 
     // Every kernel module is valid SPIR-V, including the transition kernel.
     for (const EffectKernel kernel : allEffectKernels()) {
@@ -766,5 +963,5 @@ TEST(EffectKernels, RegistryBuildsAndRegistersEffectTypeKernels) {
     EXPECT_TRUE(comp.isEffectRegistered(EffectType::ToneCurve));
 }
 
-} // namespace
-} // namespace palmier::gpu
+}  // namespace
+}  // namespace palmier::gpu

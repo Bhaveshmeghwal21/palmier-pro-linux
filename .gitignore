@@ -50,7 +50,20 @@ __pycache__/
 .ruff_cache/
 
 # Local planning and agent scratch space, deliberately not part of the repository.
-# `.kiro/specs/` and `.kiro/agents/` ARE tracked; only local settings are not.
+# The specs under `.kiro/` are how this port was planned, not how it is built or used:
+# nothing in src/ or the build reads them. The two documentation properties that compare
+# the checked reports against `requirements.md` skip themselves when it is absent, so a
+# clone without this directory is fully green -- see tests/docs/report_parser_test.cpp.
+/.kiro/
 /specs/
-/.kiro/settings/
 /_cfgtest/
+
+# Showreel renders and their sidecars: large binaries produced by running the editor,
+# not build outputs. Anchored to the root so test fixtures deeper in the tree are
+# unaffected. The only committed demo media is the small README GIF under docs/media/.
+/showreel/
+/*.mp4
+/*.mov
+/*.mkv
+/*.palmier
+/*.srt

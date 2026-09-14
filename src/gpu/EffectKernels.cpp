@@ -99,6 +99,58 @@ void main() {
 }
 )glsl";
 
+// Edge-preserving bilateral denoise (upstream parity: the `denoise` tool category).
+//
+// One term separates this from kBlurSrc above: each neighbour is weighted by a Gaussian of
+// its Rec.601 luma distance from the centre pixel, so an edge's neighbours are weighted to
+// near zero and survive while noise in a flat region averages out.
+//
+// `rgba8` images are UNORM, so imageLoad yields [0,1] here and the CPU reference divides by
+// 255 to reach the same units. That matters more than it does for blur: the weight is
+// NON-LINEAR, so byte-space and normalized-space arithmetic would not agree. The sigma
+// scale, the luma coefficients and the exp() are therefore written identically on both
+// sides -- see gpu::applyDenoise in Compositor.cpp.
+constexpr std::string_view kDenoiseSrc = R"glsl(#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba8) uniform readonly  image2D inImage;
+layout(binding = 1, rgba8) uniform writeonly image2D outImage;
+layout(push_constant) uniform Params { float strength; int radius; } pc;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(inImage);
+    if (p.x >= size.x || p.y >= size.y) return;
+    vec4 c = imageLoad(inImage, p);
+    float strength = clamp(pc.strength, 0.0, 1.0);
+    int r = pc.radius;
+    // Exact no-op, matching DenoiseValues::isIdentity() on the host.
+    if (strength <= 0.0 || r <= 0) { imageStore(outImage, p, c); return; }
+
+    const vec3 kLuma = vec3(0.299, 0.587, 0.114);
+    float centreLuma = dot(c.rgb, kLuma);
+    float sigma = strength * 0.25;
+    float denom = 2.0 * sigma * sigma;
+
+    int x0 = max(0, p.x - r);
+    int x1 = min(size.x - 1, p.x + r);
+    int y0 = max(0, p.y - r);
+    int y1 = min(size.y - 1, p.y + r);
+
+    vec3  sum = vec3(0.0);
+    float weightSum = 0.0;
+    for (int y = y0; y <= y1; ++y) {
+        for (int x = x0; x <= x1; ++x) {
+            vec3  s = imageLoad(inImage, ivec2(x, y)).rgb;
+            float d = dot(s, kLuma) - centreLuma;
+            float weight = exp(-(d * d) / denom);
+            sum += weight * s;
+            weightSum += weight;
+        }
+    }
+    // weightSum >= 1: the centre pixel's own weight is exp(0).
+    imageStore(outImage, p, vec4(sum / weightSum, c.a)); // alpha preserved
+}
+)glsl";
+
 constexpr std::string_view kCropTransformSrc = R"glsl(#version 450
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(binding = 0, rgba8) uniform readonly  image2D inImage;
@@ -164,6 +216,100 @@ void main() {
     rgb = mix(vec3(luma), rgb, pc.saturation);
     rgb = clamp(rgb, 0.0, 1.0);
     imageStore(outImage, p, vec4(rgb, c.a));
+}
+)glsl";
+
+// Secondary (qualifier-masked) grade -- upstream parity: the `color` category's secondary
+// grading half.
+//
+// The correction is kColorGradeSrc's, unchanged, so the two must stay identical; the host
+// side pins that with a byte-for-byte equivalence test rather than by sharing code.
+//
+// The qualifier mirrors core::qualifierMask. Three details are load-bearing:
+//
+//   * `mod()` is used for the hue sector, and the host reference uses a FLOOR-based modulo
+//     rather than fmod for exactly that reason -- fmod disagrees for negative operands.
+//   * saturation is HSV saturation (delta/max), not HSL saturation.
+//   * the mask reads the UNGRADED pixel, so raising a gain cannot widen the selection.
+//
+// A mask of 1 stores the graded value directly instead of mixing to it, matching the host
+// so a fully selected pixel is graded in full rather than to within a rounding step.
+constexpr std::string_view kSecondaryGradeSrc = R"glsl(#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba8) uniform readonly  image2D inImage;
+layout(binding = 1, rgba8) uniform writeonly image2D outImage;
+layout(push_constant) uniform Params {
+    float gainR;  float gainG;  float gainB;
+    float liftR;  float liftG;  float liftB;
+    float gammaR; float gammaG; float gammaB;
+    float saturation;
+    float hueCenter; float hueWidth;
+    float satMin;    float satMax;
+    float lumaMin;   float lumaMax;
+    float softness;
+} pc;
+
+float bandWeight(float v, float lo, float hi, float feather) {
+    if (v >= lo && v <= hi) return 1.0;
+    float d = v < lo ? lo - v : v - hi;
+    if (feather <= 0.0) return 0.0;
+    return max(0.0, 1.0 - d / feather);
+}
+
+float qualifierMask(vec3 rgb) {
+    float softness = clamp(pc.softness, 0.0, 1.0);
+    float maxc = max(rgb.r, max(rgb.g, rgb.b));
+    float minc = min(rgb.r, min(rgb.g, rgb.b));
+    float delta = maxc - minc;
+
+    float hueWeight = 1.0;
+    float width = clamp(pc.hueWidth, 0.0, 360.0);
+    if (width < 360.0) {
+        float hue = 0.0;
+        if (delta > 0.0) {
+            float sector;
+            if (maxc == rgb.r)      sector = (rgb.g - rgb.b) / delta;
+            else if (maxc == rgb.g) sector = (rgb.b - rgb.r) / delta + 2.0;
+            else                    sector = (rgb.r - rgb.g) / delta + 4.0;
+            hue = 60.0 * mod(sector, 6.0);
+        }
+        float centre = mod(pc.hueCenter, 360.0);
+        float distance = abs(hue - centre);
+        if (distance > 180.0) distance = 360.0 - distance;
+        hueWeight = bandWeight(distance, 0.0, width * 0.5, softness * 60.0);
+    }
+    if (hueWeight <= 0.0) return 0.0;
+
+    float saturation = maxc <= 0.0 ? 0.0 : delta / maxc;
+    float satWeight = bandWeight(saturation, pc.satMin, pc.satMax, softness * 0.5);
+    if (satWeight <= 0.0) return 0.0;
+
+    float luma = dot(rgb, vec3(0.299, 0.587, 0.114)); // Rec.601
+    float lumaWeight = bandWeight(luma, pc.lumaMin, pc.lumaMax, softness * 0.5);
+
+    return hueWeight * satWeight * lumaWeight;
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(inImage);
+    if (p.x >= size.x || p.y >= size.y) return;
+    vec4 c = imageLoad(inImage, p);
+
+    float mask = qualifierMask(c.rgb);
+    if (mask <= 0.0) { imageStore(outImage, p, c); return; }
+
+    vec3 rgb = c.rgb * vec3(pc.gainR, pc.gainG, pc.gainB)
+                     + vec3(pc.liftR, pc.liftG, pc.liftB);
+    vec3 gamma = vec3(pc.gammaR, pc.gammaG, pc.gammaB);
+    if (gamma != vec3(1.0)) {
+        rgb = pow(max(rgb, vec3(0.0)), vec3(1.0) / max(gamma, vec3(1.0 / 1024.0)));
+    }
+    float luma = dot(rgb, vec3(0.299, 0.587, 0.114)); // Rec.601
+    rgb = mix(vec3(luma), rgb, pc.saturation);
+
+    vec3 outRgb = mask >= 1.0 ? rgb : mix(c.rgb, rgb, mask);
+    imageStore(outImage, p, vec4(clamp(outRgb, 0.0, 1.0), c.a));
 }
 )glsl";
 
@@ -313,64 +459,116 @@ void main() {
 }
 )glsl";
 
-} // namespace
+}  // namespace
 
 std::string_view effectKernelName(EffectKernel kernel) noexcept {
     switch (kernel) {
-        case EffectKernel::Brightness:    return "brightness";
-        case EffectKernel::Contrast:      return "contrast";
-        case EffectKernel::Blur:          return "blur";
-        case EffectKernel::CropTransform: return "crop_transform";
-        case EffectKernel::ColorGrade:    return "color_grade";
-        case EffectKernel::InvertColors:  return "invert_colors";
-        case EffectKernel::ToneCurve:     return "tone_curve";
-        case EffectKernel::Lut:           return "lut";
-        case EffectKernel::Transition:    return "transition";
+        case EffectKernel::Brightness:
+            return "brightness";
+        case EffectKernel::Contrast:
+            return "contrast";
+        case EffectKernel::Blur:
+            return "blur";
+        case EffectKernel::CropTransform:
+            return "crop_transform";
+        case EffectKernel::ColorGrade:
+            return "color_grade";
+        case EffectKernel::InvertColors:
+            return "invert_colors";
+        case EffectKernel::ToneCurve:
+            return "tone_curve";
+        case EffectKernel::Lut:
+            return "lut";
+        case EffectKernel::Denoise:
+            return "denoise";
+        case EffectKernel::SecondaryGrade:
+            return "secondary_grade";
+        case EffectKernel::Transition:
+            return "transition";
     }
     return "unknown";
 }
 
 std::optional<EffectType> effectTypeForKernel(EffectKernel kernel) noexcept {
     switch (kernel) {
-        case EffectKernel::Brightness:    return EffectType::Brightness;
-        case EffectKernel::Contrast:      return EffectType::Contrast;
-        case EffectKernel::Blur:          return EffectType::Blur;
-        case EffectKernel::CropTransform: return EffectType::CropTransform;
-        case EffectKernel::ColorGrade:    return EffectType::ColorGrade;
-        case EffectKernel::InvertColors:  return EffectType::InvertColors;
-        case EffectKernel::ToneCurve:     return EffectType::ToneCurve;
-        case EffectKernel::Lut:           return EffectType::Lut;
-        case EffectKernel::Transition:    return std::nullopt; // no per-clip EffectType
+        case EffectKernel::Brightness:
+            return EffectType::Brightness;
+        case EffectKernel::Contrast:
+            return EffectType::Contrast;
+        case EffectKernel::Blur:
+            return EffectType::Blur;
+        case EffectKernel::CropTransform:
+            return EffectType::CropTransform;
+        case EffectKernel::ColorGrade:
+            return EffectType::ColorGrade;
+        case EffectKernel::InvertColors:
+            return EffectType::InvertColors;
+        case EffectKernel::ToneCurve:
+            return EffectType::ToneCurve;
+        case EffectKernel::Lut:
+            return EffectType::Lut;
+        case EffectKernel::Denoise:
+            return EffectType::Denoise;
+        case EffectKernel::SecondaryGrade:
+            return EffectType::SecondaryGrade;
+        case EffectKernel::Transition:
+            return std::nullopt;  // no per-clip EffectType
     }
     return std::nullopt;
 }
 
 std::optional<EffectKernel> kernelForEffectType(EffectType type) noexcept {
     switch (type) {
-        case EffectType::Brightness:    return EffectKernel::Brightness;
-        case EffectType::Contrast:      return EffectKernel::Contrast;
-        case EffectType::Blur:          return EffectKernel::Blur;
-        case EffectType::CropTransform: return EffectKernel::CropTransform;
-        case EffectType::ColorGrade:    return EffectKernel::ColorGrade;
-        case EffectType::InvertColors:  return EffectKernel::InvertColors;
-        case EffectType::ToneCurve:     return EffectKernel::ToneCurve;
-        case EffectType::Lut:           return EffectKernel::Lut;
-        case EffectType::Custom:        return std::nullopt; // caller-supplied kernel
+        case EffectType::Brightness:
+            return EffectKernel::Brightness;
+        case EffectType::Contrast:
+            return EffectKernel::Contrast;
+        case EffectType::Blur:
+            return EffectKernel::Blur;
+        case EffectType::CropTransform:
+            return EffectKernel::CropTransform;
+        case EffectType::ColorGrade:
+            return EffectKernel::ColorGrade;
+        case EffectType::InvertColors:
+            return EffectKernel::InvertColors;
+        case EffectType::ToneCurve:
+            return EffectKernel::ToneCurve;
+        case EffectType::Lut:
+            return EffectKernel::Lut;
+        case EffectType::Denoise:
+            return EffectKernel::Denoise;
+        case EffectType::SecondaryGrade:
+            return EffectKernel::SecondaryGrade;
+        case EffectType::Custom:
+            return std::nullopt;  // caller-supplied kernel
     }
     return std::nullopt;
 }
 
 std::string_view effectKernelSource(EffectKernel kernel) noexcept {
     switch (kernel) {
-        case EffectKernel::Brightness:    return kBrightnessSrc;
-        case EffectKernel::Contrast:      return kContrastSrc;
-        case EffectKernel::Blur:          return kBlurSrc;
-        case EffectKernel::CropTransform: return kCropTransformSrc;
-        case EffectKernel::ColorGrade:    return kColorGradeSrc;
-        case EffectKernel::InvertColors:  return kInvertColorsSrc;
-        case EffectKernel::ToneCurve:     return kToneCurveSrc;
-        case EffectKernel::Lut:           return kLutSrc;
-        case EffectKernel::Transition:    return kTransitionSrc;
+        case EffectKernel::Brightness:
+            return kBrightnessSrc;
+        case EffectKernel::Contrast:
+            return kContrastSrc;
+        case EffectKernel::Blur:
+            return kBlurSrc;
+        case EffectKernel::CropTransform:
+            return kCropTransformSrc;
+        case EffectKernel::ColorGrade:
+            return kColorGradeSrc;
+        case EffectKernel::InvertColors:
+            return kInvertColorsSrc;
+        case EffectKernel::ToneCurve:
+            return kToneCurveSrc;
+        case EffectKernel::Lut:
+            return kLutSrc;
+        case EffectKernel::Denoise:
+            return kDenoiseSrc;
+        case EffectKernel::SecondaryGrade:
+            return kSecondaryGradeSrc;
+        case EffectKernel::Transition:
+            return kTransitionSrc;
     }
     return {};
 }
@@ -392,15 +590,14 @@ Result<SpirvModule> compileEffectKernel([[maybe_unused]] EffectKernel kernel) {
     shaderc::CompileOptions options;
     options.SetOptimizationLevel(shaderc_optimization_level_performance);
 
-    const shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(
-        source.data(), source.size(), shaderc_glsl_compute_shader,
-        std::string(name).c_str(), "main", options);
+    const shaderc::SpvCompilationResult result =
+        compiler.CompileGlslToSpv(source.data(), source.size(), shaderc_glsl_compute_shader,
+                                  std::string(name).c_str(), "main", options);
 
     if (result.GetCompilationStatus() != shaderc_compilation_status_success) {
-        return err<SpirvModule>(makeError(
-            ErrorCode::Internal,
-            "EffectKernels: failed to compile '" + std::string(name) +
-                "' GLSL to SPIR-V: " + result.GetErrorMessage()));
+        return err<SpirvModule>(makeError(ErrorCode::Internal,
+                                          "EffectKernels: failed to compile '" + std::string(name) +
+                                              "' GLSL to SPIR-V: " + result.GetErrorMessage()));
     }
 
     SpirvModule module;
@@ -408,22 +605,21 @@ Result<SpirvModule> compileEffectKernel([[maybe_unused]] EffectKernel kernel) {
     module.entryPoint = "main";
     if (!module.valid()) {
         return err<SpirvModule>(makeError(
-            ErrorCode::Internal,
-            "EffectKernels: shaderc produced an empty SPIR-V module for '" +
-                std::string(name) + "'"));
+            ErrorCode::Internal, "EffectKernels: shaderc produced an empty SPIR-V module for '" +
+                                     std::string(name) + "'"));
     }
     return module;
 #else
-    return err<SpirvModule>(unsupported(
-        "EffectKernels: shaderc is not compiled into this build; GLSL cannot be "
-        "compiled to SPIR-V (the software effect path remains available)"));
+    return err<SpirvModule>(
+        unsupported("EffectKernels: shaderc is not compiled into this build; GLSL cannot be "
+                    "compiled to SPIR-V (the software effect path remains available)"));
 #endif
 }
 
 Result<EffectKernelRegistry> EffectKernelRegistry::build() {
     if (!shadercAvailable()) {
-        return err<EffectKernelRegistry>(unsupported(
-            "EffectKernelRegistry::build: shaderc is not available in this build"));
+        return err<EffectKernelRegistry>(
+            unsupported("EffectKernelRegistry::build: shaderc is not available in this build"));
     }
 
     EffectKernelRegistry registry;
@@ -446,11 +642,11 @@ std::size_t EffectKernelRegistry::registerWith(Compositor& compositor) const {
     std::size_t registered = 0;
     for (const auto& [kernel, module] : modules_) {
         const std::optional<EffectType> type = effectTypeForKernel(kernel);
-        if (!type) continue; // Transition is not a per-clip EffectType.
+        if (!type) continue;  // Transition is not a per-clip EffectType.
         compositor.registerEffect(*type, module);
         ++registered;
     }
     return registered;
 }
 
-} // namespace palmier::gpu
+}  // namespace palmier::gpu

@@ -32,7 +32,7 @@ Tool makeAddEffectTool(ProjectSession* session) {
                      .required = true,
                      .description = "Effect type: brightness, contrast, blur, "
                                     "crop_transform, color_grade, invert_colors, "
-                                    "tone_curve, custom.",
+                                    "tone_curve, lut, denoise, secondary_grade, custom.",
                      .enumValues = effectTypeValues()})
         .arg(ArgSpec{.name = "parameters",
                      .kind = JsonKind::Object,
