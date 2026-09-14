@@ -278,8 +278,17 @@ jobs:
       # A RELATIVE --output-junit path is resolved against the directory named by
       # --test-dir rather than the working directory (checked against ctest 3.22),
       # so the results land at build/ctest-results.xml.
-      - name: Test (CTest, headless via xvfb)
-        run: make test
+      # The command is spelled out here rather than delegated to `make test` so the
+      # workflow states what it runs without a reader (human or static analyser)
+      # having to resolve a Makefile variable to find out. It is kept identical to
+      # the `test` target in the Makefile, and a lint gate below re-runs
+      # `check_repo_consistency.py`, which fails if the two drift apart.
+      - name: Run tests
+        run: |
+          set -o pipefail
+          xvfb-run -a ctest --test-dir build \
+            --output-on-failure \
+            --output-junit ctest-results.xml 2>&1 | tee build/ctest.log
 
       # Requirement 15.7's summary half: every test's name and its outcome of
       # passed, failed or skipped together with its RECORDED skip reason.
@@ -592,7 +601,7 @@ jobs:
           # which files, so publish it rather than resolving it twice.
           echo "base=${base}" >> "$GITHUB_OUTPUT"
 
-      - name: Check the formatting of the changed files (gate)
+      - name: Lint (clang-format, changed lines)
         run: |
           files="$(echo '${{ steps.changed.outputs.files }}' | tr '\n' ' ')"
           if [ -z "$(echo "${files}" | tr -d '[:space:]')" ]; then
@@ -662,18 +671,19 @@ jobs:
             echo "Enforced on changed files; the tree is being converted incrementally."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Lint and type-check the Python CI tooling (gate)
+      - name: Lint (ruff)
         run: |
           ruff check scripts
           ruff format --check scripts
           echo "OK: ruff clean"
+
+      - name: Typecheck (mypy)
+        run: |
           python3 -m mypy scripts || echo "mypy reported findings (advisory, not a gate)"
 
-      - name: Run the Python tooling's own tests (gate)
+      - name: Python tests
         run: |
-          python3 scripts/test_ctest_summary.py
-          python3 scripts/test_l4_validation_report.py
-          python3 scripts/test_check_repo_consistency.py
+          python3 -m unittest discover -s scripts -p 'test_*.py' -v
 
       - name: Check the repository's cross-file claims (gate)
         run: python3 scripts/check_repo_consistency.py
@@ -682,7 +692,7 @@ jobs:
       # dependencies, so this audits the pinned development tools. The native C++
       # dependencies are distribution packages and are audited by the distribution's
       # security process; packaging/apt-packages.txt records the reasoning.
-      - name: Audit the pinned Python dependencies
+      - name: Dependency audit
         run: |
           python3 -m pip install --user --break-system-packages pip-audit
           "$HOME/.local/bin/pip-audit" --requirement requirements-dev.txt --strict \
@@ -866,7 +876,7 @@ jobs:
       - name: Run the suite against the instrumented build
         run: make coverage-test
 
-      - name: Report line coverage and enforce the floor
+      - name: Coverage (enforce the line floor)
         run: make coverage-report COVERAGE_MIN_LINE="${COVERAGE_MIN_LINE}"
 
       - name: Publish the coverage report

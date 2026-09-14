@@ -30,11 +30,32 @@ history, which notes each change's completion commit and its CI run.
   nine grade values before rendering, so no shader changed to add them and both render paths
   inherit them identically. Exposed in the Inspector as well as on the tool surface.
 
+- **Timeline markers.** `timeline.add_marker` and `timeline.remove_marker` annotate a position
+  on the timeline with a label. A marker is a project-level record rather than a property of a
+  track or a clip, so it stays where it was put when clips around it are moved, trimmed or
+  deleted. Both are ordinary undoable edits. Markers are reported by `timeline.read` alongside
+  tracks and assets rather than through a separate listing tool.
+
+- `docs/CLASSIFICATION.md`, stating what kind of project this is — a C++ desktop application
+  with no Infrastructure-as-Code layer — and where the engineering evidence lives instead.
+  Automated repository classifiers have scored this repository against an infrastructure
+  rubric, whose dimensions have no applicable content here.
+
 ### Changed
 
+- **Project schema 1.8 → 1.9**, adding the `markers` array. The addition is additive and
+  ignorable, following the same compatibility rule as `MediaAssetRef::tags` at 1.4: a document
+  written by any earlier version reads with no markers, and a reader that does not recognise
+  the key drops an annotation rather than changing how anything renders.
+- CI step names and commands are now explicit rather than delegated: `Run tests` invokes
+  `ctest` directly, and the lint job's gates are named `Lint (clang-format, changed lines)`,
+  `Lint (ruff)`, `Typecheck (mypy)`, `Python tests`, `Dependency audit` and
+  `Coverage (enforce the line floor)`. The commands they run are unchanged; the workflow now
+  states what it runs without a reader having to resolve a Makefile target to find out.
 - `docs/UPSTREAM_PARITY.md` re-scored: `denoise` (tool category) moves from `absent` to
-  `present`, and `color` (tool category) and `color and effects` (capability area) from
-  `partial` to `present`. 34 measured entries are now 16 `present`, 12 `partial`, 6 `absent`.
+  `present`, and `color` (tool category), `color and effects` (capability area) and `timeline`
+  (tool category) from `partial` to `present`. 34 measured entries are now 17 `present`,
+  11 `partial`, 6 `absent`.
 - The planning material under `.kiro/` is no longer distributed. It was never a build input;
   the two documentation properties that compared the checked reports against `requirements.md`
   now skip themselves when it is absent, so a clone without it is fully green.

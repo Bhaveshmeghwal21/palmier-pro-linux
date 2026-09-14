@@ -213,6 +213,7 @@ same output as one with an NVIDIA L4.
 | [`docs/REMOTE_ACCESS.md`](docs/REMOTE_ACCESS.md) | Opt-in non-loopback access: token, TLS, origin allow-list, session/timeout limits |
 | [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Log levels/formats, `PALMIER_LOG_LEVEL` / `PALMIER_LOG_FORMAT`, category vocabulary, `GET /health`, CI recording |
 | [`docs/UPSTREAM_PARITY.md`](docs/UPSTREAM_PARITY.md) · [`docs/PORT_BACKLOG.md`](docs/PORT_BACKLOG.md) | Upstream parity report and deferred-port backlog |
+| [`docs/CLASSIFICATION.md`](docs/CLASSIFICATION.md) | What kind of project this is: a desktop application with no Infrastructure-as-Code layer, and where the engineering evidence lives instead |
 | [`CHANGELOG.md`](CHANGELOG.md) · [`SECURITY.md`](SECURITY.md) | Release history; security model and reporting |
 | [`.env.example`](.env.example) | Every environment variable the editor reads, in precedence order |
 
