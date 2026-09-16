@@ -1,3 +1,5 @@
+<div align="center">
+
 # Palmier Pro for Linux
 
 [![CI](https://github.com/Bhaveshmeghwal21/palmier-pro-linux/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Bhaveshmeghwal21/palmier-pro-linux/actions/workflows/ci.yml)
@@ -5,6 +7,8 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Qt 6](https://img.shields.io/badge/Qt-6-41cd52.svg)](https://www.qt.io/)
 [![Platform: Linux](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](docs/BUILD.md)
+
+</div>
 
 A multi-track video editor for Linux, ported from Palmier Pro to C++20, Qt 6, FFmpeg and
 Vulkan. GPU compositing runs on NVIDIA, AMD and Intel; a CPU fallback is a first-class path,
@@ -15,15 +19,21 @@ published as tools over a local [Model Context Protocol](docs/MCP_CLIENTS.md) se
 Code, Codex, Cursor, or any other MCP client can drive the timeline directly. The in-app agent
 chat calls the same tools, and a property test checks that both paths produce identical edits.
 
-[Quick start](#quick-start) ·
-[Driving it from an agent](#driving-it-from-an-agent) ·
-[Testing](#testing) ·
-[Documentation](#documentation) ·
-[Project status](#project-status)
+<p align="center">
+<a href="#quick-start">Quick start</a> ·
+<a href="#driving-it-from-an-agent">Driving it from an agent</a> ·
+<a href="#testing">Testing</a> ·
+<a href="#documentation">Documentation</a> ·
+<a href="#project-status">Project status</a>
+</p>
 
 ## Example
 
-![A 39-second aerial survey reel cut by an AI agent driving Palmier Pro for Linux: an animated title, a split-screen grade comparison, an animated picture-in-picture inset, and a four-up grid](docs/media/showreel.gif)
+<p align="center">
+  <img src="docs/media/showreel.gif" width="720" alt="A 39-second aerial survey reel cut by an AI agent driving Palmier Pro for Linux: an animated title, a split-screen grade comparison, an animated picture-in-picture inset, and a four-up grid">
+</p>
+
+<!-- markdown-link-check: docs/media/showreel.gif -->
 
 This reel was cut with no manual timeline editing: an agent issued 150 tool calls across 19
 distinct tools — import, cut, layout, grade, keyframe, caption, export — with zero failures,
