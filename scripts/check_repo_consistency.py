@@ -13,8 +13,9 @@
 #      a documented one is renamed in code, the file becomes actively misleading â€” worse
 #      than absent, because a reader trusts it.
 #
-#   2. README.md, SECURITY.md and CHANGELOG.md link to files by relative path. A
-#      renamed document turns the project's front door into a 404.
+#   2. README.md, SECURITY.md and CHANGELOG.md link to files by relative path, through
+#      Markdown links and through HTML <img> tags. A renamed document or image turns the
+#      project's front door into a 404.
 #
 #   3. The Makefile's `help` target lists targets by scraping its own `##` comments, and
 #      .PHONY has to be maintained by hand beside them. A target in one and not the
@@ -104,14 +105,23 @@ def check_environment_example(root: str) -> List[str]:
 
 
 def check_relative_links(root: str) -> List[str]:
-    """Every relative Markdown link in the root documents resolves to a real path."""
+    """Every relative Markdown link and HTML <img src> in the root documents resolves.
+
+    <img> tags are included because GitHub cannot align a Markdown image, so a centred logo or
+    screenshot is necessarily an <img> tag, and a check that only read Markdown syntax let the
+    README's hero image fall out of it unnoticed.
+    """
     failures: List[str] = []
     for document in LINKED_DOCUMENTS:
         if not os.path.isfile(os.path.join(root, document)):
             continue
         text = _read(root, document)
-        for match in re.finditer(r"\[[^\]]*\]\(([^)#\s]+)(?:#[^)]*)?\)", text):
-            target = match.group(1)
+        targets = [m.group(1) for m in re.finditer(r"\[[^\]]*\]\(([^)#\s]+)(?:#[^)]*)?\)", text)]
+        targets += [
+            m.group(1)
+            for m in re.finditer(r"<img\b[^>]*?\bsrc\s*=\s*[\"']([^\"'#\s]+)", text, flags=re.I)
+        ]
+        for target in targets:
             if target.startswith(("http://", "https://", "mailto:")):
                 continue
             resolved = os.path.normpath(os.path.join(root, os.path.dirname(document), target))

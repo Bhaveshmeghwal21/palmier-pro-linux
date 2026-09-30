@@ -1,93 +1,117 @@
 <div align="center">
 
+<img src="packaging/shared/io.palmier.PalmierPro.svg" width="96" height="96" alt="Palmier Pro for Linux logo">
+
 # Palmier Pro for Linux
 
+**A multi-track video editor for Linux that AI agents can drive.**
+
+Every edit is an MCP tool, so Claude Code, Codex, Cursor and the built-in agent chat<br>
+work on the same timeline you do. An independent C++20, Qt 6 and Vulkan port of
+[Palmier Pro](https://github.com/palmier-io/palmier-pro).
+
 [![CI](https://github.com/Bhaveshmeghwal21/palmier-pro-linux/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Bhaveshmeghwal21/palmier-pro-linux/actions/workflows/ci.yml)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Qt 6](https://img.shields.io/badge/Qt-6-41cd52.svg)](https://www.qt.io/)
-[![Platform: Linux](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](docs/BUILD.md)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C.svg?logo=cplusplus&logoColor=white)](https://en.cppreference.com/w/cpp/20)
+[![Qt 6](https://img.shields.io/badge/Qt-6-41CD52.svg?logo=qt&logoColor=white)](https://www.qt.io/)
+[![Vulkan](https://img.shields.io/badge/Vulkan-GPU-AC162C.svg?logo=vulkan&logoColor=white)](https://www.vulkan.org/)
+[![MCP](https://img.shields.io/badge/MCP-server-6E56CF.svg)](docs/MCP_CLIENTS.md)
+[![Platform: Linux](https://img.shields.io/badge/platform-Linux-FCC624.svg?logo=linux&logoColor=black)](docs/BUILD.md)
+
+[**Quick start**](#quick-start) ·
+[**Connect an agent**](#connect-an-agent) ·
+[**Features**](#features) ·
+[**Documentation**](#documentation) ·
+[**Roadmap**](#status-and-roadmap)
+
+<br>
+
+<img src="docs/media/showreel.gif" width="760" alt="A 39-second aerial survey reel cut by an AI agent driving Palmier Pro for Linux: an animated title, a split-screen grade comparison, an animated picture-in-picture inset, and a four-up grid">
+
+<sub>Cut entirely by an agent over MCP: 150 tool calls across 19 tools, zero failures,
+exported to 1080p30 H.264 with NVENC on an NVIDIA L4.</sub>
 
 </div>
 
-A multi-track video editor for Linux, ported from Palmier Pro to C++20, Qt 6, FFmpeg and
-Vulkan. GPU compositing runs on NVIDIA, AMD and Intel; a CPU fallback is a first-class path,
-not a degraded one.
+## Highlights
 
-The editor's entire edit surface — clips, tracks, effects, grading, transitions, export — is
-published as tools over a local [Model Context Protocol](docs/MCP_CLIENTS.md) server. Claude
-Code, Codex, Cursor, or any other MCP client can drive the timeline directly. The in-app agent
-chat calls the same tools, and a property test checks that both paths produce identical edits.
+- **Agents edit the real timeline.** Over 40 MCP tools cover import, cut, trim, ripple, layout,
+  keyframes, grading, captions, undo/redo and export. The in-app agent chat calls the same tools,
+  and a property test checks that both paths produce identical edits.
+- **Colour tools you would expect from an NLE.** Primary grade, three colour wheels, per-channel
+  tone curves, HSL-qualified secondary grades, 3D `.cube` LUTs, and histogram, waveform and
+  vectorscope scopes.
+- **GPU when you have one, CPU when you don't.** Vulkan compositing on NVIDIA, AMD and Intel,
+  with a software renderer that a parity test holds to the same output. The editor runs on any
+  machine, including a CI runner with no GPU.
+- **Hardware encode.** NVENC, VAAPI and Quick Sync through FFmpeg, with automatic software
+  fallback. NVENC is validated on a real NVIDIA L4.
+- **Local by default.** The MCP server listens on `127.0.0.1` only, and remote access is opt-in
+  with a token and TLS. Editing needs no network connection.
+- **Thoroughly tested.** The suite holds more than 1900 GoogleTest and RapidCheck cases across
+  90 test executables, and CI gates line coverage.
 
-<p align="center">
-<a href="#quick-start">Quick start</a> ·
-<a href="#driving-it-from-an-agent">Driving it from an agent</a> ·
-<a href="#testing">Testing</a> ·
-<a href="#documentation">Documentation</a> ·
-<a href="#project-status">Project status</a>
-</p>
+## Features
 
-## Example
+<table>
+  <tr>
+    <td width="33%"><img src="docs/media/grade.jpg" width="100%" alt="Split-screen comparison of the same aerial footage ungraded and graded with a primary grade, tone curve and 3D LUT"></td>
+    <td width="33%"><img src="docs/media/picture-in-picture.jpg" width="100%" alt="Street footage with a night-time picture-in-picture inset in the top-right corner"></td>
+    <td width="33%"><img src="docs/media/grid.jpg" width="100%" alt="Four aerial and street angles arranged in a two-by-two grid"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Grade</b><br><sub>Primary grade, tone curve and 3D LUT</sub></td>
+    <td align="center"><b>Picture-in-picture</b><br><sub>Layout preset, then keyframed motion</sub></td>
+    <td align="center"><b>Grid</b><br><sub>Four sources, independent grades</sub></td>
+  </tr>
+</table>
 
-<p align="center">
-  <img src="docs/media/showreel.gif" width="720" alt="A 39-second aerial survey reel cut by an AI agent driving Palmier Pro for Linux: an animated title, a split-screen grade comparison, an animated picture-in-picture inset, and a four-up grid">
-</p>
-
-<!-- markdown-link-check: docs/media/showreel.gif -->
-
-This reel was cut with no manual timeline editing: an agent issued 150 tool calls across 19
-distinct tools — import, cut, layout, grade, keyframe, caption, export — with zero failures,
-and the result was encoded to 1080p30 H.264 via NVENC on an NVIDIA L4.
-
-| Moment | Subsystem |
+| Area | What you get |
 |---|---|
-| Opening title, drifting and scaling | Shared text renderer (preview and export); keyframe animation on scale and position |
-| `UNGRADED` vs. `GRADED` split | Primary grade, tone curve, 3D `.cube` LUT, composited via `apply_layout` |
-| Night inset crossing the frame | `apply_layout picture_in_picture` with keyframed centre and scale |
-| Four angles at once | `apply_layout grid`, four tracks, independent grades per source |
-
-The same edit runs clips at 0.5× and 2.0×, applies wipe/slide/dip-to-colour transitions, burns
-in captions with an `.srt` sidecar, and keyframes the audio bed's gain. Every tool used is
-documented in [`docs/TOOLS.md`](docs/TOOLS.md).
+| **Editing** | Up to 50 tracks; trim, split, move, reorder, ripple delete, ripple trim and close gap; timeline markers; undo and redo |
+| **Motion** | Per-clip position, scale, rotation, flips and opacity; edge fades; keyframes with linear or smooth interpolation; clip speed; side-by-side, picture-in-picture and grid layouts |
+| **Colour** | Lift, gamma and gain; three colour wheels; per-channel tone curves; qualifier-masked secondary grades; 3D LUTs; histogram, waveform and vectorscope |
+| **Effects** | Brightness, contrast, blur, edge-preserving denoise, invert and crop; crossfade, fade, dip-to-colour, wipe and slide transitions |
+| **Text and captions** | Styled text clips; caption cues you can edit and retime; burned-in captions and `.srt` sidecars |
+| **Audio** | PipeWire and ALSA output, level meters, timeline waveforms, scrub audio, keyframed gain, per-track mute |
+| **Export** | MP4, MOV, MKV and WebM; H.264, HEVC and VP9; up to 3840×2160 and 120 fps; hardware encode with software fallback |
+| **Agents** | MCP server at `127.0.0.1:19789`, in-app agent chat, frame capture so an agent can check its own work, opt-in remote access |
 
 ## Quick start
 
-Three ways to get a build. Each is self-contained.
-
-### Docker
-
-```bash
-git clone https://github.com/Bhaveshmeghwal21/palmier-pro-linux.git
-cd palmier-pro-linux
-make docker-test
-```
-
-or with Compose:
-
-```bash
-docker compose run --rm test        # build and run the full suite
-docker compose up editor            # launch the editor on your X display
-docker compose run --rm shell       # a shell with the full toolchain
-```
-
-The image is `ubuntu:24.04`, pinned by digest, installing the packages listed in
-[`packaging/apt-packages.txt`](packaging/apt-packages.txt) — the same file CI installs from.
-
-### Ubuntu 24.04 (or another Debian derivative)
+There are no prebuilt packages yet, so build from source. On Ubuntu 24.04 or another Debian
+derivative:
 
 ```bash
 git clone https://github.com/Bhaveshmeghwal21/palmier-pro-linux.git
 cd palmier-pro-linux
 
-make deps        # Qt 6, FFmpeg, Vulkan, vendor codec SDKs (uses sudo)
-make build       # CMake + Ninja configure and compile
-make test        # full suite, headless under Xvfb
-make run         # launch the editor
+make deps     # Qt 6, FFmpeg, Vulkan and the vendor codec SDKs (uses sudo)
+make build    # CMake + Ninja
+make run      # launch the editor
 ```
 
-Run `make` with no target for the full list.
+`make test` runs the full suite headless under Xvfb. Run `make` on its own to list every
+target.
 
-### CMake directly
+<details>
+<summary><b>With only Docker installed</b></summary>
+
+```bash
+docker compose run --rm test     # build and run the full suite
+docker compose up editor         # launch the editor on your X display
+docker compose run --rm shell    # a shell with the whole toolchain
+```
+
+The image is `ubuntu:24.04` pinned by digest and installs
+[`packaging/apt-packages.txt`](packaging/apt-packages.txt), the same package list CI uses. A
+[devcontainer](.devcontainer/devcontainer.json) reuses the same Dockerfile for VS Code and
+Codespaces.
+
+</details>
+
+<details>
+<summary><b>With CMake directly</b></summary>
 
 ```bash
 cmake -S . -B build -G Ninja \
@@ -103,27 +127,65 @@ xvfb-run -a ctest --test-dir build --output-on-failure
 ./build/bin/palmier-pro
 ```
 
-Same flags CI uses in [`.github/workflows/ci.yml`](.github/workflows/ci.yml). Other
-distributions, package names, every `PALMIER_*` option, and minimum host requirements are in
-[`docs/BUILD.md`](docs/BUILD.md).
+These are the flags CI uses. Other distributions, every `PALMIER_*` option and the minimum host
+specification are in [`docs/BUILD.md`](docs/BUILD.md).
 
-### No GPU, no audio device, no display
+</details>
 
-All three are supported configurations, and CI runs on a bare runner that has none of them:
+<details>
+<summary><b>No GPU, no audio device, no display</b></summary>
 
-- **No Vulkan device** — status bar reports "No compatible GPU was found; using CPU
-  processing"; compositing runs on the CPU.
-- **No audio output** — sink order is PipeWire → ALSA → null. With none available, audio is
-  suppressed; video keeps playing.
-- **No display** — the test suite runs under `xvfb-run`; the editor binary itself requires a
-  display to launch.
+All three are supported, and CI runs on a runner that has none of them.
 
-## Driving it from an agent
+- **No Vulkan device:** the status bar says so and compositing runs on the CPU.
+- **No audio output:** the editor tries PipeWire, then ALSA, then a null sink. Video keeps
+  playing without sound.
+- **No display:** the test suite runs under `xvfb-run`. The editor itself needs a display.
 
-Point any MCP client at `127.0.0.1:19789`. A grade, end to end:
+</details>
+
+## Connect an agent
+
+Start the editor, then register its MCP endpoint with your agent. For Claude Code:
+
+```bash
+claude mcp add --transport http palmier-pro http://127.0.0.1:19789/mcp
+```
+
+<details>
+<summary><b>Codex</b></summary>
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.palmier-pro]
+url = "http://127.0.0.1:19789/mcp"
+```
+
+</details>
+
+<details>
+<summary><b>Cursor</b></summary>
+
+Add to `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "palmier-pro": {
+      "url": "http://127.0.0.1:19789/mcp"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary><b>What a tool call looks like</b></summary>
 
 ```jsonc
-// tools/call — edge-preserving denoise, then warm the highlights
+// Edge-preserving denoise, then warm the highlights with a colour wheel
 { "name": "timeline.add_effect",
   "arguments": { "clipId": "…", "type": "denoise",
                  "parameters": { "strength": 0.35, "radius": 2 } } }
@@ -133,166 +195,123 @@ Point any MCP client at `127.0.0.1:19789`. A grade, end to end:
                  "parameters": { "highlightsHue": 40, "highlightsAmount": 0.5 } } }
 ```
 
-Every tool, argument and result field is in [`docs/TOOLS.md`](docs/TOOLS.md); a
-documentation-consistency test fails the build if a tool ships undocumented. Client setup for
-Claude Code, Codex and Cursor is in [`docs/MCP_CLIENTS.md`](docs/MCP_CLIENTS.md). The endpoint
-binds to loopback only unless explicitly reconfigured — see
+</details>
+
+Every tool, argument and result field is listed in [`docs/TOOLS.md`](docs/TOOLS.md), and a test
+fails the build if a tool ships undocumented. Other clients and the stdio bridge are covered in
+[`docs/MCP_CLIENTS.md`](docs/MCP_CLIENTS.md). To reach the endpoint from another machine, see
 [`docs/REMOTE_ACCESS.md`](docs/REMOTE_ACCESS.md).
 
-## Testing
+## How it's built
 
-```bash
-make test              # full suite, headless
-make test-verbose      # per-test output, JUnit XML, generated summary
-make coverage          # instrumented build, gcovr line-coverage report
-```
+- **Layered.** `core` has no dependency on Qt, FFmpeg or Vulkan. Most UI logic lives in view
+  models that are tested without a display. Errors are a typed `Result<T>`, not exceptions.
+- **Two renderers, one answer.** Every effect has a GPU kernel and a host-memory reference, and a
+  parity property checks that they agree per channel.
+- **One tool surface.** The Qt UI, the agent chat and external MCP clients all edit through the
+  same undoable commands.
 
-The suite holds more than 1900 GoogleTest and RapidCheck cases across 90 test executables, run
-by CI on every
-push and pull request against `main`. Beyond unit tests: property tests over generated
-timelines, round-trip tests over the project file format, agent/UI edit-equivalence tests, and
-documentation-consistency tests that fail the build when a CMake option or tool is added
-without being documented.
-
-Line coverage is around 81%, gated at a floor of 78% by a dedicated CI job that publishes
-Cobertura XML, an lcov `coverage.info`, and drill-down HTML. Branch coverage (around 46%) is
-not gated: most unhit branches are vendor hardware-codec and Vulkan paths that no hosted
-runner can exercise, and gating them would penalize the absence of a GPU rather than the
-quality of the tests.
-
-CI also launches the built binary on a virtual display, confirms it maps a window and paints a
-UI, and publishes the screenshot as an artifact — so "the editor starts" is a measured result,
-not an inference from widget tests.
-
-Examples of what specific tests pin:
-
-- Denoise must preserve an edge that a blur destroys — the same step edge is filtered both
-  ways and compared.
-- A secondary grade with a qualifier that selects everything must produce byte-identical
-  pixels to the primary grade with the same correction.
-- A colour wheel at amount zero must resolve bit-for-bit to what the project resolved to
-  before wheels existed, so no saved project's rendered output can silently change.
-
-### Developer tooling
-
-```bash
-make format            # clang-format (config: .clang-format)
-make format-check      # fail if changed files are misformatted
-make tidy              # clang-tidy the changed files (config: .clang-tidy)
-make py-lint           # ruff + mypy over the Python CI helpers
-make py-test           # unit tests for those helpers
-make lint              # format-check + py-lint
-make ci                # build, test, lint, py-test — what CI runs
-```
-
-A [devcontainer](.devcontainer/devcontainer.json) reuses the same Dockerfile, so VS Code or
-Codespaces opens ready to build.
-
-## Project layout
+<details>
+<summary><b>Project layout</b></summary>
 
 ```
 src/core/        Domain model: timeline, clips, effects, undo/redo, tone curves, logging
 src/media/       FFmpeg: decode, encode, export, audio graph, peak envelopes
 src/gpu/         Vulkan compositing, effect kernels, scopes, LUTs, codec bridge
 src/services/    Project store, MCP server, tool registry, export coordination
-src/ui/          Qt 6 widgets and view models (view models are Qt-free where possible)
+src/ui/          Qt 6 widgets and view models
 src/app/         Entry point, settings, platform checks
-tests/           90 test executables: unit, property, integration, e2e, docs
+tests/           90 test executables: unit, property, integration, end-to-end, docs
 docs/            Operational documentation
-packaging/       Debian, Flatpak and AppImage packaging, apt manifest
-scripts/         CI report generators (stdlib-only Python) and their tests
+packaging/       Debian, Flatpak and AppImage packaging
+scripts/         CI report generators and their tests
 ```
 
-Dependency direction is layered: `core` has no dependency on Qt, FFmpeg or Vulkan, and most UI
-logic lives in view models testable without a display. Errors are a typed `Result<T>`, not
-exceptions.
+</details>
 
-Every effect renders twice — once on the GPU, once on a host-memory software reference — and a
-parity property checks per-channel agreement. A machine with no Vulkan device produces the
-same output as one with an NVIDIA L4.
+## Testing
+
+```bash
+make test            # full suite, headless
+make test-verbose    # per-test output, JUnit XML and a summary
+make coverage        # instrumented build and a gcovr line-coverage report
+make lint            # clang-format on changed lines, ruff, mypy
+```
+
+CI runs the suite on every push and pull request. Besides unit tests there are property tests
+over generated timelines, round-trip tests over the project file format, agent/UI
+edit-equivalence tests, and documentation tests that fail when a CMake option or tool is added
+without being documented. Line coverage is around 81%, gated at a floor of 78%. CI also launches
+the built editor on a virtual display and checks that it paints a window.
+
+## Status and roadmap
+
+Working and covered by CI: multi-track editing, media import, GPU and CPU compositing, grading,
+effects, transitions, keyframes, text and captions, audio playback, export, project save and
+load, the MCP server and the agent chat. NVENC hardware encode is verified on an NVIDIA L4
+([results](docs/HARDWARE_ENCODE.md)). VAAPI, Quick Sync and the Vulkan compositor build in CI,
+but no hosted runner has the hardware to run them.
+
+Upstream parity is tracked in [`docs/UPSTREAM_PARITY.md`](docs/UPSTREAM_PARITY.md): 17 of 34
+areas are complete.
+
+- [x] Edge-preserving denoise
+- [x] Colour wheels and qualifier-masked secondary grades
+- [x] Timeline markers
+- [ ] Multicam angle switching
+- [ ] Shape layers
+- [ ] Media bins and search
+- [ ] Server-sent events on the MCP endpoint
+- [ ] Prebuilt `.deb`, Flatpak and AppImage releases
+
+Out of scope by design: bundled speech-to-text (no recogniser ships with the editor), telemetry,
+and in-app auto-update (the package manager's job on Linux).
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
-| [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | Build, launch and drive the editor end to end, plus remediation for a missing GPU, missing audio, or a refused MCP connection |
-| [`docs/BUILD.md`](docs/BUILD.md) | Full build pipeline, native packages per distribution, every `PALMIER_*` option, minimum host spec, environment pitfalls |
-| [`docs/MCP_CLIENTS.md`](docs/MCP_CLIENTS.md) | Connecting Claude Code, Codex and Cursor to `127.0.0.1:19789` |
+| [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | Build, launch and drive the editor end to end, with fixes for a missing GPU, missing audio or a refused MCP connection |
+| [`docs/BUILD.md`](docs/BUILD.md) | Build pipeline, packages per distribution, every `PALMIER_*` option, minimum host |
+| [`docs/MCP_CLIENTS.md`](docs/MCP_CLIENTS.md) | Connecting Claude Code, Codex and Cursor |
 | [`docs/TOOLS.md`](docs/TOOLS.md) | Every published tool, argument and result field |
-| [`docs/HARDWARE_ENCODE.md`](docs/HARDWARE_ENCODE.md) | NVENC, Quick Sync and VAAPI prerequisites, software fallback, host verification, L4 validation |
-| [`docs/REMOTE_ACCESS.md`](docs/REMOTE_ACCESS.md) | Opt-in non-loopback access: token, TLS, origin allow-list, session/timeout limits |
-| [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Log levels/formats, `PALMIER_LOG_LEVEL` / `PALMIER_LOG_FORMAT`, category vocabulary, `GET /health`, CI recording |
-| [`docs/UPSTREAM_PARITY.md`](docs/UPSTREAM_PARITY.md) · [`docs/PORT_BACKLOG.md`](docs/PORT_BACKLOG.md) | Upstream parity report and deferred-port backlog |
-| [`docs/CLASSIFICATION.md`](docs/CLASSIFICATION.md) | What kind of project this is: a desktop application with no Infrastructure-as-Code layer, and where the engineering evidence lives instead |
+| [`docs/HARDWARE_ENCODE.md`](docs/HARDWARE_ENCODE.md) | NVENC, Quick Sync and VAAPI setup, software fallback, L4 validation |
+| [`docs/REMOTE_ACCESS.md`](docs/REMOTE_ACCESS.md) | Opt-in network access: token, TLS, origin allow-list, limits |
+| [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Log levels and formats, `GET /health`, what CI records |
+| [`docs/UPSTREAM_PARITY.md`](docs/UPSTREAM_PARITY.md) · [`docs/PORT_BACKLOG.md`](docs/PORT_BACKLOG.md) | Parity with upstream Palmier Pro and the deferred-port backlog |
+| [`docs/CLASSIFICATION.md`](docs/CLASSIFICATION.md) | What kind of project this is, and where the engineering evidence lives |
 | [`CHANGELOG.md`](CHANGELOG.md) · [`SECURITY.md`](SECURITY.md) | Release history; security model and reporting |
-| [`.env.example`](.env.example) | Every environment variable the editor reads, in precedence order |
-
-## Project status
-
-**Working, covered by CI:** multi-track editing with undo/redo; media import and validation;
-software and hardware codec paths; GPU and CPU compositing; export; audio playback and
-metering; timeline waveforms; scrub audio; primary grade with tone curves and three colour
-wheels; qualifier-masked secondary grading; edge-preserving denoise; video scopes; 3D LUTs;
-keyframe animation; clip speed; project save/load; MCP server and agent chat; localization.
-
-**Packaging** is verified at three depths, since only one format builds on a hosted runner.
-The `.deb` is built by CI on every `v*` tag and inspected with `dpkg-deb` for contents,
-declared dependencies and metadata. Flatpak and AppImage recipes are fed as source input to
-`flatpak-builder` and `appimage-builder`; their manifests are cross-checked against the shared
-freedesktop files on every run, so a renamed app id, executable, licence, or missing asset
-fails the build. The images themselves are not built in CI and are the least exercised part of
-the repository.
-
-**Hardware encode**, verified on real hardware: the `l4-validation` job runs on a self-hosted
-NVIDIA L4 and exports a 300-frame 1920x1080/30fps fixture:
-
-```
-PALMIER_L4_ENCODER_NAME=h264_nvenc      PALMIER_L4_USED_HARDWARE_ENCODE=true
-PALMIER_L4_FRAMES_ENCODED=300           PALMIER_L4_SOFTWARE_FALLBACK=false
-PALMIER_L4_ELAPSED_MS=30115             PALMIER_L4_OUTPUT_BYTES=622870
-```
-
-The same job checks that the hardware and software exports of that fixture agree on frame
-count and duration. Re-running at a later commit reproduced the encoder, frame count and byte
-count exactly (622870 bytes both runs); `PALMIER_L4_ELAPSED_MS` moved from 11863 to 30115 on
-the same fixture and hardware, since the runner is shared. Treat the byte count as
-reproducible and the wall-clock figure as order-of-magnitude only. Details in
-[`docs/HARDWARE_ENCODE.md`](docs/HARDWARE_ENCODE.md).
-
-**Compiled but not runtime-verified:** VAAPI, Quick Sync, and the Vulkan compositor. No hosted
-runner has an AMD or Intel encode device, so CI confirms these build and that the software
-fallback runs correctly when no device is present.
-
-**Upstream parity:** tracked in [`docs/UPSTREAM_PARITY.md`](docs/UPSTREAM_PARITY.md) as 34
-scored entries, 17 complete. Remaining gaps: multicam angle switching, a shape layer, media
-bins and search, and an SSE stream on the MCP endpoint.
-
-Three items are marked as intentionally out of scope rather than pending: speech-to-text
-captions (no recognizer is bundled, and none will ship proprietary); telemetry (a GPL editor
-collecting usage data is the wrong default); in-app auto-update (Linux delivery is the package
-manager's job).
+| [`.env.example`](.env.example) | Every environment variable the editor reads |
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). Two things before your first commit:
+Issues and pull requests are welcome, and the unchecked roadmap items above are good places to
+start. See [`CONTRIBUTING.md`](CONTRIBUTING.md). Two things before your first commit:
 
-1. Every source file requires a GPLv3 header — templates in
-   [`docs/LICENSE-HEADER.txt`](docs/LICENSE-HEADER.txt); a test fails the build if one is
+1. Every source file needs a GPLv3 header. Templates are in
+   [`docs/LICENSE-HEADER.txt`](docs/LICENSE-HEADER.txt), and a test fails the build if one is
    missing.
-2. `make lint && make test` is exactly what CI checks — the Makefile and the workflow run the
-   same commands.
+2. `make lint && make test` runs the same checks CI does.
+
+If the project is useful to you, starring the repository helps other people find it.
+
+## Acknowledgements
+
+- [Palmier Pro](https://github.com/palmier-io/palmier-pro) by Palmier, Inc., the macOS editor
+  this project ports. Its source was published under GPLv3 through the tag `last-gpl-source`.
+- [Qt](https://www.qt.io/), [FFmpeg](https://ffmpeg.org/), [Vulkan](https://www.vulkan.org/),
+  [GoogleTest](https://github.com/google/googletest) and
+  [RapidCheck](https://github.com/emil-e/rapidcheck).
 
 ## License
 
-GPLv3-or-later for the editor, with a closed hosted service for generative AI. Full terms in
-[`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+Palmier Pro for Linux is free software under the [GNU General Public License v3.0 or
+later](LICENSE). Third-party libraries keep their own licences; see [`NOTICE`](NOTICE).
 
-**Open source (GPLv3-or-later):** the multi-track timeline editor, domain core, media engine,
-GPU abstraction layer, export engine, localization and Qt 6 UI; the local MCP server; the
-in-app agent chat. All fully functional with no network connection to the generative service.
+This is an independent project. It is not affiliated with, endorsed by or supported by Palmier,
+Inc. "Palmier" and "Palmier Pro" are names of Palmier, Inc., used here only to identify the
+upstream project. Please report problems with this port here, not upstream.
 
-**Closed service (account-gated):** the generative-AI capability is a hosted, proprietary
-service requiring an authenticated account or BYOK credentials. Its backend and models are not
-distributed under GPLv3 and are not part of this repository beyond the GPLv3 client that
-contacts it. The open-source editor works without degradation when the service is
-unreachable or unauthenticated.
+The optional generative features call a hosted service that needs an account or your own API
+credentials. That service is not part of this repository and is not covered by its licence.
+Everything else works offline.

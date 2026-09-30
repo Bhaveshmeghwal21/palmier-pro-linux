@@ -130,6 +130,23 @@ class RelativeLinks(unittest.TestCase):
         write(self.root, "README.md", "See [opts](docs/BUILD.md#options).\n")
         self.assertEqual(checker.check_relative_links(self.root), [])
 
+    def test_an_html_image_to_an_absent_file_is_a_failure(self):
+        # A centred image has to be an <img> tag, because Markdown image syntax cannot be
+        # aligned. The check must still see it, or the README's hero image can 404 silently.
+        write(self.root, "README.md", '<p align="center"><img src="docs/media/gone.gif"></p>\n')
+        failures = checker.check_relative_links(self.root)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("docs/media/gone.gif", failures[0])
+
+    def test_an_html_image_to_a_present_file_is_clean(self):
+        write(self.root, "docs/media/logo.svg", "<svg/>\n")
+        write(self.root, "README.md", '<img width="96" src=\'docs/media/logo.svg\' alt="x">\n')
+        self.assertEqual(checker.check_relative_links(self.root), [])
+
+    def test_an_absolute_html_image_is_not_checked(self):
+        write(self.root, "README.md", '<img src="https://example.invalid/badge.svg">\n')
+        self.assertEqual(checker.check_relative_links(self.root), [])
+
 
 class MakefileTargets(unittest.TestCase):
     def setUp(self) -> None:

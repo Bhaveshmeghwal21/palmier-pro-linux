@@ -280,9 +280,9 @@ jobs:
       # so the results land at build/ctest-results.xml.
       # The command is spelled out here rather than delegated to `make test` so the
       # workflow states what it runs without a reader (human or static analyser)
-      # having to resolve a Makefile variable to find out. It is kept identical to
-      # the `test` target in the Makefile, and a lint gate below re-runs
-      # `check_repo_consistency.py`, which fails if the two drift apart.
+      # having to resolve a Makefile variable to find out. Keep it identical to the
+      # `test` target in the Makefile by hand: nothing checks the two against each
+      # other.
       - name: Run tests
         run: |
           set -o pipefail
