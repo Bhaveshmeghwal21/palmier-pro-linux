@@ -34,7 +34,7 @@
 include_guard(GLOBAL)
 
 set(CPACK_PACKAGE_NAME "palmier-pro")
-set(CPACK_PACKAGE_VENDOR "Palmier, Inc. and contributors")
+set(CPACK_PACKAGE_VENDOR "The Palmier Pro for Linux contributors")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 # A plain-ASCII summary, deliberately not PROJECT_DESCRIPTION (which carries an
 # em dash): Debian control file fields are conventionally single-line ASCII,
@@ -42,7 +42,8 @@ set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "AI-native multi-track video editor (Linux port with GPU acceleration)")
 set(CPACK_PACKAGE_HOMEPAGE_URL "${PROJECT_HOMEPAGE_URL}")
-set(CPACK_PACKAGE_CONTACT "https://github.com/palmier-io/palmier-pro-linux/issues")
+set(CPACK_PACKAGE_CONTACT
+    "Bhaveshmeghwal21 <118756339+Bhaveshmeghwal21@users.noreply.github.com>")
 set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
 
 set(CPACK_GENERATOR "DEB")

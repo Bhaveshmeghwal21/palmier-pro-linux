@@ -1,5 +1,26 @@
 Palmier Pro for Linux
-Copyright (C) 2024 Palmier, Inc. and contributors
+Copyright (C) 2026 The Palmier Pro for Linux contributors
+
+================================================================================
+Relationship to Palmier Pro
+================================================================================
+
+Palmier Pro for Linux is an independent Linux port of Palmier Pro, the macOS
+video editor by Palmier, Inc. (https://github.com/palmier-io/palmier-pro).
+Palmier Pro's source code through the tag `last-gpl-source` was published under
+the GNU General Public License, version 3. This port reimplements that editor
+for Linux in C++20 with Qt 6, FFmpeg and Vulkan, and is distributed under the
+GPLv3 as well, as that license requires of a work based on GPLv3 source.
+
+Palmier, Inc. retains copyright in any material in this repository that is
+derived from Palmier Pro. The port itself was written starting on 2026-07-01;
+its history is the Git history of this repository, which records every change
+made and when (GPLv3 section 5(a)).
+
+This port is not affiliated with, endorsed by or supported by Palmier, Inc.
+"Palmier" and "Palmier Pro" are names of Palmier, Inc., used here only to
+identify the upstream project. Report problems with this port at
+https://github.com/Bhaveshmeghwal21/palmier-pro-linux/issues, not upstream.
 
 ================================================================================
 Licensing overview
@@ -33,7 +54,7 @@ root:
                         (part of src/services).
 
 These components operate with full functionality without any network connection
-to the closed generative service (see Requirement 13.3).
+to the closed generative service.
 
 --------------------------------------------------------------------------------
 2. Closed-source capability  --  NOT covered by the GPLv3 grant
@@ -42,7 +63,7 @@ to the closed generative service (see Requirement 13.3).
 The generative-AI capability (the "Generative_AI_Service") is a closed-source,
 hosted service that is account-gated and requires a valid authenticated user
 account (an active subscription entitlement or valid Bring-Your-Own-Key
-credentials) before access is granted (see Requirements 6, 9, and 13.2).
+credentials) before access is granted.
 
   * The Generative_AI_Service backend, its models, and its server-side source
     code are proprietary and are NOT distributed under the GPLv3 and are NOT
@@ -55,7 +76,7 @@ credentials) before access is granted (see Requirements 6, 9, and 13.2).
   * When no network connection or authenticated account is available, the
     open-source editor, MCP server, and agent chat continue to function; only
     the generative capability is unavailable, and the application surfaces a
-    non-blocking indication to that effect (see Requirement 13.4).
+    non-blocking indication to that effect.
 
 --------------------------------------------------------------------------------
 3. Third-party dependencies
@@ -63,7 +84,7 @@ credentials) before access is granted (see Requirements 6, 9, and 13.2).
 
 This software links against third-party libraries, each distributed under its
 own license. Those licenses are not superseded by the GPLv3 grant that covers
-Palmier Pro's own source code. No third-party source is vendored into this
+this project's own source code. No third-party source is vendored into this
 repository; every library below is linked dynamically from the host system, and
 the versions actually required are declared in packaging/apt-packages.txt and
 packaging/deb/debian/control.

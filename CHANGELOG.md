@@ -43,6 +43,16 @@ history, which notes each change's completion commit and its CI run.
 
 ### Changed
 
+- **Attribution corrected for a fork.** The packaging metadata named Palmier, Inc. as this
+  port's maintainer and copyright holder, gave `maintainers@palmier.io` as its contact, and
+  pointed the homepage, bug tracker, in-app Help → Documentation link and AppImage
+  self-update channel at the upstream macOS repository. They now name this repository and its
+  contributors. `NOTICE` gains a section stating the relationship to upstream Palmier Pro, the
+  GPLv3 terms its source was published under, that Palmier, Inc. keeps copyright in any
+  material derived from it, and that this port is unaffiliated. The licence itself is
+  unchanged: GPLv3-or-later.
+- `docs/BUILD.md`'s clone command pointed at a repository that does not exist; it now clones
+  this one.
 - **Project schema 1.8 → 1.9**, adding the `markers` array. The addition is additive and
   ignorable, following the same compatibility rule as `MediaAssetRef::tags` at 1.4: a document
   written by any earlier version reads with no markers, and a reader that does not recognise

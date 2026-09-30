@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Palmier Pro for Linux -- appimage-builder recipe.
-# Copyright (C) 2024 Palmier, Inc. and contributors
+# Copyright (C) 2026 The Palmier Pro for Linux contributors
 #
 # Produces a relocatable AppImage that bundles the runtime dependencies (Qt 6,
 # FFmpeg/libav*, the Vulkan loader, shaderc, libva, lcms2, and libsecret) so the
@@ -80,6 +80,6 @@ AppDir:
 
 AppImage:
   arch: x86_64
-  update-information: 'gh-releases-zsync|palmier-io|palmier-pro|latest|Palmier_Pro-*x86_64.AppImage.zsync'
+  update-information: 'gh-releases-zsync|Bhaveshmeghwal21|palmier-pro-linux|latest|Palmier_Pro-*x86_64.AppImage.zsync'
   # AppImages embed the GPLv3 binaries; the full license ships in the AppDir.
   comp: xz

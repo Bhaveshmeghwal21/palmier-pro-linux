@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Palmier Pro for Linux -- standalone CPack configuration (.deb generator).
-# Copyright (C) 2024 Palmier, Inc. and contributors
+# Copyright (C) 2026 The Palmier Pro for Linux contributors
 #
 # This file is intentionally standalone and is NOT wired into the root
 # CMakeLists.txt, so it does not modify or depend on any existing build target.
@@ -17,10 +17,11 @@
 set(CPACK_GENERATOR "DEB")
 set(CPACK_PACKAGE_NAME "palmier-pro")
 set(CPACK_PACKAGE_VERSION "0.4.0")
-set(CPACK_PACKAGE_CONTACT "Palmier, Inc. and contributors <maintainers@palmier.io>")
+set(CPACK_PACKAGE_CONTACT
+    "Bhaveshmeghwal21 <118756339+Bhaveshmeghwal21@users.noreply.github.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "AI-native multi-track video editor with GPU acceleration")
-set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/palmier-io/palmier-pro")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/Bhaveshmeghwal21/palmier-pro-linux")
 
 set(CPACK_DEBIAN_PACKAGE_SECTION "video")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")

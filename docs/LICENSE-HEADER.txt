@@ -19,7 +19,7 @@ C++ sources and headers (.cpp, .hpp, .h, .cc, .cxx) and GLSL/shader sources
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Palmier Pro for Linux -- <one-line description of this file's purpose>
-// Copyright (C) <YEAR> Palmier, Inc. and contributors
+// Copyright (C) <YEAR> The Palmier Pro for Linux contributors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -41,7 +41,7 @@ Hash-comment files (CMakeLists.txt, *.cmake, shell scripts, YAML, Python)
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Palmier Pro for Linux -- <one-line description of this file's purpose>
-# Copyright (C) <YEAR> Palmier, Inc. and contributors
+# Copyright (C) <YEAR> The Palmier Pro for Linux contributors
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -62,7 +62,7 @@ QML files (.qml)
 
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Palmier Pro for Linux -- <one-line description>
-// Copyright (C) <YEAR> Palmier, Inc. and contributors
+// Copyright (C) <YEAR> The Palmier Pro for Linux contributors
 // Licensed under the GNU GPL v3 or later; see the LICENSE file at the
 // repository root or <https://www.gnu.org/licenses/>.
 

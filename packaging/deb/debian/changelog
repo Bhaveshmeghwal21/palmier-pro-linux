@@ -6,4 +6,4 @@ palmier-pro (0.1.0-1) unstable; urgency=medium
   * Declares runtime dependencies on Qt 6, FFmpeg (libav*), the Vulkan loader,
     shaderc, libva, lcms2, and libsecret.
 
- -- Palmier, Inc. and contributors <maintainers@palmier.io>  Mon, 01 Jan 2024 00:00:00 +0000
+ -- Bhaveshmeghwal21 <118756339+Bhaveshmeghwal21@users.noreply.github.com>  Mon, 31 Aug 2026 18:50:13 +0530

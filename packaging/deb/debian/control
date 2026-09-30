@@ -1,7 +1,7 @@
 Source: palmier-pro
 Section: video
 Priority: optional
-Maintainer: Palmier, Inc. and contributors <maintainers@palmier.io>
+Maintainer: Bhaveshmeghwal21 <118756339+Bhaveshmeghwal21@users.noreply.github.com>
 Build-Depends: debhelper-compat (= 13),
                cmake (>= 3.22),
                ninja-build,
@@ -20,7 +20,7 @@ Build-Depends: debhelper-compat (= 13),
                liblcms2-dev,
                libsecret-1-dev
 Standards-Version: 4.6.2
-Homepage: https://github.com/palmier-io/palmier-pro
+Homepage: https://github.com/Bhaveshmeghwal21/palmier-pro-linux
 Rules-Requires-Root: no
 
 Package: palmier-pro

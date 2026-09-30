@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Palmier Pro for Linux -- AppImage build script (linuxdeploy + Qt plugin).
-# Copyright (C) 2024 Palmier, Inc. and contributors
+# Copyright (C) 2026 The Palmier Pro for Linux contributors
 #
 # Alternative to the appimage-builder recipe: stages the installed tree into an
 # AppDir and lets linuxdeploy bundle the runtime dependencies (Qt 6, FFmpeg,

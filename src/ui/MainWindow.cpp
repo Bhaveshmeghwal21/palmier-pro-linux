@@ -876,16 +876,20 @@ void MainWindow::onProjectSettings() {
 
 void MainWindow::onDocumentation() {
     QDesktopServices::openUrl(
-        QUrl(QStringLiteral("https://github.com/palmier-io/palmier-pro")));
+        QUrl(QStringLiteral("https://github.com/Bhaveshmeghwal21/palmier-pro-linux")));
 }
 
 void MainWindow::onAbout() {
     QMessageBox::about(
-        this, QStringLiteral("About Palmier Pro"),
-        QStringLiteral("Palmier Pro — an AI-native, multi-track video editor.\n\n"
-                       "GPLv3-licensed timeline editor and MCP server; the "
-                       "generative-AI capability is an optional, account-gated "
-                       "closed service."));
+        this, QStringLiteral("About Palmier Pro for Linux"),
+        QStringLiteral("Palmier Pro for Linux — a multi-track video editor that AI agents can "
+                       "drive over MCP.\n\n"
+                       "An independent Linux port of Palmier Pro by Palmier, Inc., not "
+                       "affiliated with or endorsed by Palmier, Inc.\n\n"
+                       "Free software under the GNU General Public License v3.0 or later, "
+                       "with NO WARRANTY. The optional generative-AI capability is an "
+                       "account-gated hosted service and is not covered by that licence.\n\n"
+                       "https://github.com/Bhaveshmeghwal21/palmier-pro-linux"));
 }
 
 // ---------------------------------------------------------------------------

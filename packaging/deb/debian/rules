@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Palmier Pro for Linux -- Debian packaging rules.
-# Copyright (C) 2024 Palmier, Inc. and contributors
+# Copyright (C) 2026 The Palmier Pro for Linux contributors
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 

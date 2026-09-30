@@ -1,10 +1,15 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: palmier-pro
-Upstream-Contact: Palmier, Inc. and contributors <maintainers@palmier.io>
-Source: https://github.com/palmier-io/palmier-pro
+Upstream-Contact: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/issues
+Source: https://github.com/Bhaveshmeghwal21/palmier-pro-linux
+Comment: An independent Linux port of Palmier Pro by Palmier, Inc.
+ (https://github.com/palmier-io/palmier-pro), whose source through the tag
+ last-gpl-source is licensed under the GNU GPL version 3. This port is not
+ affiliated with or endorsed by Palmier, Inc.
 
 Files: *
-Copyright: 2024 Palmier, Inc. and contributors
+Copyright: 2026 The Palmier Pro for Linux contributors
+           Palmier, Inc., for any material derived from Palmier Pro
 License: GPL-3.0-or-later
 
 License: GPL-3.0-or-later

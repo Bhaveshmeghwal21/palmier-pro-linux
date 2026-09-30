@@ -71,7 +71,7 @@ Two build trees are conventional in this project, and both are gitignored local 
 `palmier-pro` executable.
 
 ```sh
-git clone https://github.com/palmier-io/palmier-pro-linux.git
+git clone https://github.com/Bhaveshmeghwal21/palmier-pro-linux.git
 cd palmier-pro-linux
 
 # 1. Configure. Add PKG_CONFIG_PATH=... if any dependency is a /usr/local install.

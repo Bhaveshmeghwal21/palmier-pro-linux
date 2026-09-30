@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Copyright (C) 2024 Palmier, Inc. and contributors -->
+<!-- Copyright (C) 2026 The Palmier Pro for Linux contributors -->
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <component type="desktop-application">
   <id>io.palmier.PalmierPro</id>
@@ -50,12 +50,12 @@
     <keyword>GPU</keyword>
   </keywords>
 
-  <url type="homepage">https://github.com/palmier-io/palmier-pro</url>
-  <url type="bugtracker">https://github.com/palmier-io/palmier-pro/issues</url>
-  <url type="vcs-browser">https://github.com/palmier-io/palmier-pro</url>
+  <url type="homepage">https://github.com/Bhaveshmeghwal21/palmier-pro-linux</url>
+  <url type="bugtracker">https://github.com/Bhaveshmeghwal21/palmier-pro-linux/issues</url>
+  <url type="vcs-browser">https://github.com/Bhaveshmeghwal21/palmier-pro-linux</url>
 
-  <developer id="io.palmier">
-    <name>Palmier, Inc. and contributors</name>
+  <developer id="io.github.bhaveshmeghwal21">
+    <name>The Palmier Pro for Linux contributors</name>
   </developer>
 
   <provides>
