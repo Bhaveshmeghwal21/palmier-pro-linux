@@ -28,7 +28,7 @@
 # the suite passes, but hardware encode and audible playback are not exercised here.
 # Pass `--device /dev/dri` and a PipeWire socket to test those on a capable host.
 
-FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS build
+FROM ubuntu:25.10@sha256:7cc5e35f6567ee8c66d2abb4aab0fd866669e6207c237c3a8f0947a5c7f17092 AS build
 
 # Non-interactive apt, and keep the layer cache useful by installing before copying source.
 ENV DEBIAN_FRONTEND=noninteractive \
