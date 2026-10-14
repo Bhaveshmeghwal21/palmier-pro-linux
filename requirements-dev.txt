@@ -24,4 +24,4 @@ ruff==0.16.6
 
 # Static type checker. Advisory rather than blocking — see the note in pyproject.toml
 # under [tool.mypy] explaining why disallow_untyped_defs stays off.
-mypy==2.3.1
+mypy==2.4.0
