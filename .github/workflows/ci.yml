@@ -122,7 +122,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install native build dependencies
         run: |
@@ -189,7 +189,7 @@ jobs:
           python3 scripts/test_check_repo_consistency.py
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
           key: ccache-${{ runner.os }}-${{ github.sha }}
@@ -318,7 +318,7 @@ jobs:
 
       - name: Upload the complete test log and the summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ctest-results
           path: |
@@ -502,7 +502,7 @@ jobs:
 
       - name: Upload the launch screenshot and the editor's own output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: launch-smoke-test
           path: |
@@ -546,7 +546,7 @@ jobs:
       # Full history: the format gate diffs this commit against what came before, and
       # a depth-1 clone has no "before" to diff against.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -762,7 +762,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -831,7 +831,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # 92 test executables linked unoptimised is a lot of bytes, and the hosted image
       # ships several toolchains this project never uses. Removing them buys roughly
@@ -861,7 +861,7 @@ jobs:
           rm -rf /tmp/nv-codec-headers
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
           key: ccache-coverage-${{ runner.os }}-${{ github.sha }}
@@ -881,7 +881,7 @@ jobs:
 
       - name: Publish the coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: |
@@ -917,7 +917,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install mandatory build dependencies only
         run: |
@@ -1058,7 +1058,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install native build dependencies
         run: |
@@ -1262,7 +1262,7 @@ jobs:
 
       - name: Upload the package, its log, and the launch screenshot
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: palmier-pro-deb-package
           path: |
@@ -1335,7 +1335,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Fail here, with the cause named, rather than three steps later inside a
       # skip reason. Only the specific tools are queried; nothing dumps the
@@ -1442,7 +1442,7 @@ jobs:
 
       - name: Upload the L4 log, configure log and measurements
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: l4-validation
           path: |
