@@ -20,7 +20,7 @@
 # when either tool releases a new version.
 
 # Linter and formatter for scripts/. Configured in pyproject.toml under [tool.ruff].
-ruff==0.16.6
+ruff==0.17.2
 
 # Static type checker. Advisory rather than blocking — see the note in pyproject.toml
 # under [tool.mypy] explaining why disallow_untyped_defs stays off.
