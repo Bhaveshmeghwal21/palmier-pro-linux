@@ -43,10 +43,10 @@ def check_sample_edit(path: Path) -> None:
         raise RuntimeError("MCP initialize returned no session ID")
     post("notifications/initialized", session=session)
 
-    def tool(name, **arguments):
-        result, _ = post("tools/call", {"name": name, "arguments": arguments}, session)
+    def tool(tool_name, **arguments):
+        result, _ = post("tools/call", {"name": tool_name, "arguments": arguments}, session)
         if result["isError"]:
-            raise RuntimeError(f"{name} failed: {result['content']}")
+            raise RuntimeError(f"{tool_name} failed: {result['content']}")
         return result["structuredContent"]
 
     second = 1_000_000_000
