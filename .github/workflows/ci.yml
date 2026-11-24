@@ -1038,8 +1038,8 @@ jobs:
   #        generator with CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON declares them.
   # 13.3: "produced by CI from a tagged commit, and CI SHALL verify that the
   #        produced artifact launches and renders, reusing the launch smoke
-  #        test already in ci.yml." Gated on a `v*` tag push so an ordinary
-  #        push or pull request never builds or publishes a release artifact.
+  #        test already in ci.yml." Tag pushes and ordinary dispatches build
+  #        both Ubuntu packages. Jammy also builds on main and pull requests.
   # 13.4: the installed application carries the GPLv3 LICENCE text and NOTICE
   #        — src/app/CMakeLists.txt's install() rules place both in
   #        share/doc/palmier-pro, verified below by inspecting the installed
@@ -1052,9 +1052,13 @@ jobs:
   # first job's tree contains.
   # ---------------------------------------------------------------------------
   package:
-    name: Build and verify the installable .deb (Requirement 13)
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-24.04
+    name: Build and verify the .deb (${{ matrix.ubuntu }})
+    if: github.event_name != 'workflow_dispatch' || !inputs.run_l4_validation
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ${{ fromJSON((startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && '["ubuntu-22.04", "ubuntu-24.04"]' || '["ubuntu-22.04"]') }}
+    runs-on: ${{ matrix.ubuntu }}
 
     steps:
       - name: Checkout
@@ -1063,34 +1067,7 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo rm -rf /var/lib/apt/lists/*
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            cmake \
-            ninja-build \
-            pkg-config \
-            xvfb \
-            qt6-base-dev \
-            qt6-base-dev-tools \
-            qt6-declarative-dev \
-            qt6-tools-dev \
-            qt6-tools-dev-tools \
-            qml6-module-qtquick \
-            qml6-module-qtquick-controls \
-            qml6-module-qtquick-window \
-            qml6-module-qtqml-workerscript \
-            libgl1-mesa-dev \
-            libavcodec-dev \
-            libavformat-dev \
-            libavutil-dev \
-            libavfilter-dev \
-            libswscale-dev \
-            libswresample-dev \
-            libavdevice-dev \
-            libvulkan-dev \
-            libshaderc-dev \
-            liblcms2-dev \
-            libsecret-1-dev
+          make deps
 
       - name: Configure (CMake + Ninja, tests off)
         run: |
@@ -1114,7 +1091,11 @@ jobs:
         run: |
           set -o pipefail
           cd build-pkg
-          cpack -G DEB 2>&1 | tee ../cpack.log
+          args=()
+          if [[ '${{ matrix.ubuntu }}' == 'ubuntu-22.04' ]]; then
+            args+=(-D 'CPACK_DEBIAN_PACKAGE_RELEASE=1~ubuntu22.04')
+          fi
+          cpack -G DEB "${args[@]}" 2>&1 | tee ../cpack.log
 
       - name: Locate the built package
         id: locate
@@ -1161,30 +1142,27 @@ jobs:
             exit 1
           fi
 
-      # Requirement 13.3: install the package for real with dpkg (exercising the
-      # SAME Depends: resolution a user's apt/dpkg would), then run the identical
-      # launch-and-render smoke test build-and-test's job already runs — reused
-      # here rather than re-invented — against the INSTALLED /usr/bin/palmier-pro
-      # rather than a build-tree binary, so the artifact under test is the one a
-      # user who ran `apt install ./palmier-pro_*.deb` would actually get.
-      - name: Install the package with dpkg
+      # The clean runtime exposes any dependencies masked by the build host.
+      - name: Install and launch the package in a clean Ubuntu runtime
+        env:
+          DEB_PATH: ${{ steps.locate.outputs.path }}
+          RUNNER_DISTRO: ${{ matrix.ubuntu }}
         run: |
-          deb="${{ steps.locate.outputs.path }}"
-          sudo apt-get install -y --no-install-recommends "$(readlink -f "$deb")"
+          set -euo pipefail
+          mkdir -p smoke
+          docker run --rm -i \
+            --mount "type=bind,src=$PWD/$DEB_PATH,dst=/tmp/palmier-pro.deb,readonly" \
+            --mount "type=bind,src=$PWD/smoke,dst=/work/smoke" \
+            --workdir /work \
+            "ubuntu:${RUNNER_DISTRO#ubuntu-}" bash -s <<'SMOKE'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y --no-install-recommends /tmp/palmier-pro.deb \
+            xvfb xauth x11-utils xdotool imagemagick fonts-dejavu-core
           command -v palmier-pro
           dpkg -L palmier-pro | grep -E '/(LICENSE|NOTICE)$'
 
-      - name: Install the launch smoke-test tools
-        run: |
-          sudo apt-get install -y --no-install-recommends \
-            imagemagick \
-            xdotool \
-            x11-utils
-
-      - name: Launch the installed package headlessly and capture a screenshot
-        run: |
-          set -uo pipefail
-          mkdir -p smoke
           export DISPLAY=:99
 
           Xvfb "$DISPLAY" -screen 0 1600x1000x24 -nolisten tcp >smoke/xvfb.log 2>&1 &
@@ -1251,20 +1229,16 @@ jobs:
           fi
 
           echo "OK: the installed .deb's palmier-pro launched, mapped its main window and painted ${colours} distinct colours"
+          printf '%s\n' "$colours" >smoke/colours
+          SMOKE
 
-          {
-            echo "### Installed-package launch smoke test"
-            echo
-            echo "The Debian package built by this job was installed with \`dpkg\`/\`apt\`"
-            echo "and \`palmier-pro\` (resolved from \`/usr/bin\` via \`PATH\`) launched under"
-            echo "Xvfb, mapped its main window and painted ${colours} distinct colours."
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "The package installed in a clean Ubuntu runtime and painted $(cat smoke/colours) distinct colours under Xvfb." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the package, its log, and the launch screenshot
-        if: always()
+        if: always() && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || failure())
         uses: actions/upload-artifact@v4
         with:
-          name: palmier-pro-deb-package
+          name: ${{ matrix.ubuntu == 'ubuntu-24.04' && 'palmier-pro-deb-package' || 'palmier-pro-deb-package-ubuntu-22.04' }}
           path: |
             build-pkg/*.deb
             cpack.log

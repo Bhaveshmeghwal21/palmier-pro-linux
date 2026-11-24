@@ -7,11 +7,7 @@
 # self-contained installable artifact for a documented set of distributions,
 # bundling or declaring every runtime dependency the platform check requires."
 #
-# A Debian package (.deb) is the artifact this project produces: CI already
-# builds and tests on ubuntu-24.04 (docs/BUILD.md's own "direct evidence"
-# column), and docs/BUILD.md documents Ubuntu 22.04+/Debian 12+ as one of the
-# supported distribution families this Requirement asks for "a documented set
-# of" — not every family at once.
+# CI builds each .deb against the system libraries of its target Ubuntu LTS.
 #
 # CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON runs `dpkg-shlibdeps` over the installed
 # palmier-pro binary, which inspects its actual ELF NEEDED entries and writes
@@ -59,6 +55,8 @@ set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${CPACK_PACKAGE_HOMEPAGE_URL}")
 # not the runtime package names a Depends: field needs, which differ by distro
 # release — exactly what shlibdeps looks up instead of guessing).
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+# These libraries and the Qt platform plugins are loaded at runtime.
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "liblcms2-2, libsecret-1-0, qt6-qpa-plugins")
 
 # Architecture-qualified filename (e.g. palmier-pro_0.1.0_amd64.deb) so the
 # launch smoke test's packaging job (ci.yml) can name it deterministically

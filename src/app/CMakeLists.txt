@@ -31,6 +31,7 @@ add_library(Palmier::app_platform ALIAS palmier_app_platform)
 
 target_include_directories(palmier_app_platform PUBLIC
     "${PROJECT_SOURCE_DIR}/src")
+target_include_directories(palmier_app_platform SYSTEM PRIVATE ${FFMPEG_INCLUDE_DIRS})
 
 target_compile_features(palmier_app_platform PUBLIC cxx_std_20)
 

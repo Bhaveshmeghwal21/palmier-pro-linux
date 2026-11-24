@@ -357,7 +357,7 @@ void freeFfmpegAudioStream(FfmpegAudioStream& audio) noexcept {
     if (spec.bitrateBitsPerSecond > 0) {
         ctx->bit_rate = spec.bitrateBitsPerSecond;
     }
-#if LIBAVUTIL_VERSION_MAJOR >= 57
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 24, 100)
     av_channel_layout_default(&ctx->ch_layout, spec.channels);
 #else
     ctx->channels = spec.channels;
@@ -384,7 +384,7 @@ void freeFfmpegAudioStream(FfmpegAudioStream& audio) noexcept {
     audio.frameSize = ctx->frame_size > 0 ? ctx->frame_size : 1024;
 
     SwrContext* swr = nullptr;
-#if LIBAVUTIL_VERSION_MAJOR >= 57
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 24, 100)
     AVChannelLayout inLayout;
     av_channel_layout_default(&inLayout, spec.channels);
     if (swr_alloc_set_opts2(&swr, &ctx->ch_layout, ctx->sample_fmt, ctx->sample_rate, &inLayout,
@@ -414,7 +414,7 @@ void freeFfmpegAudioStream(FfmpegAudioStream& audio) noexcept {
     frame->format = ctx->sample_fmt;
     frame->sample_rate = ctx->sample_rate;
     frame->nb_samples = audio.frameSize;
-#if LIBAVUTIL_VERSION_MAJOR >= 57
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 24, 100)
     av_channel_layout_copy(&frame->ch_layout, &ctx->ch_layout);
 #else
     frame->channels = ctx->channels;

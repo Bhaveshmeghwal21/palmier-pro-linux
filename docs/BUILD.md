@@ -21,9 +21,9 @@ names below were read out of `cmake/PalmierOptions.cmake`, `cmake/PalmierDepende
 | Memory | 8 GB RAM (4 GB for a `PALMIER_BUILD_UI=OFF` build) | recommendation; nothing in the tree measures it |
 | GPU and driver | any device with a Vulkan 1.1 driver reachable through `libvulkan.so.1` | `gpu::GpuContext` requests `VK_API_VERSION_1_1`. **No GPU is strictly required**: an absent or incompatible device yields the software fallback plus the `gpuUnavailableNotice` in the status bar (Requirement 1.6), and the editor still opens all five panels |
 | C library | glibc 2.31 or later | `CompatibilityRequirements::minGlibc = {2, 31}`; an undetectable glibc fails the gate conservatively |
-| Distribution | Ubuntu 22.04+, Debian 12+, Fedora 38+, RHEL/Alma/Rocky 9+, or Arch (rolling) | glibc ≥ 2.31 and Qt ≥ 6.2 together. CI runs `ubuntu-24.04` |
+| Distribution | Ubuntu 22.04+, Debian 12+, Fedora 38+, RHEL/Alma/Rocky 9+, or Arch (rolling) | CI packages Ubuntu 22.04 and 24.04. The build requires glibc ≥ 2.31, Qt ≥ 6.2 and FFmpeg ≥ 4.4. |
 | Toolchain | CMake ≥ 3.22, a C++20 compiler (GCC 11+ or Clang 14+), `pkg-config` | `cmake_minimum_required(VERSION 3.22)`, `CMAKE_CXX_STANDARD 20`, `find_package(PkgConfig REQUIRED)` |
-| Runtime shared libraries | `libQt6Core.so.6`, `libQt6Gui.so.6`, `libQt6Widgets.so.6`, `libavcodec.so`, `libavformat.so`, `libavutil.so`, `libvulkan.so.1`, `liblcms2.so.2`, `libsecret-1.so.0` | the launch gate `dlopen`s each of these and refuses to construct the editor while any is unloadable, naming each missing item |
+| Runtime shared libraries | Qt 6 Core, Gui and Widgets, FFmpeg codec, format and utility libraries, Vulkan, LittleCMS and libsecret | The launch gate checks the versioned library names. For FFmpeg it uses the major versions from the build headers. |
 
 The memory and core-count figures are the only rows above that are **not** derived from code or
 from the requirements: nothing in the tree asserts them. Treat them as a recommendation and correct
@@ -44,7 +44,7 @@ direct evidence behind it.
 | QML runtime modules (UI build) | `qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-window qml6-module-qtqml-workerscript` | `qt6-qtdeclarative` | `qt6-declarative` |
 | FFmpeg | `libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev` | `ffmpeg-devel` (RPM Fusion) | `ffmpeg` |
 | Vulkan | `libvulkan-dev vulkan-tools` | `vulkan-loader-devel vulkan-headers vulkan-tools` | `vulkan-icd-loader vulkan-headers vulkan-tools` |
-| shaderc | `libshaderc-dev` | `libshaderc-devel` | `shaderc` |
+| shaderc | `libshaderc-dev` on 24.04 and Debian 12. On 22.04, `make deps` builds a pinned static library with its glslang and SPIR-V dependencies. | `libshaderc-devel` | `shaderc` |
 | LittleCMS | `liblcms2-dev` | `lcms2-devel` | `lcms2` |
 | libsecret | `libsecret-1-dev` | `libsecret-devel` | `libsecret` |
 | OpenGL / GLX headers (needed for `find_package(Qt6)` — see the traps below) | `libgl1-mesa-dev libglu1-mesa-dev` | `mesa-libGL-devel mesa-libEGL-devel libglvnd-devel` | `mesa libglvnd` |
@@ -65,6 +65,10 @@ Test-only: a virtual X server is needed to run the Qt-dependent tests headlessly
 `xvfb` (Debian/Ubuntu), `xorg-x11-server-Xvfb` (Fedora/RHEL), `xorg-server-xvfb` (Arch).
 
 ## Configure → build → test → launch, from a clean checkout
+
+On Ubuntu 22.04 and 24.04, run `make deps` before configuring. On 22.04 it needs
+GitHub access to fetch shaderc and its pinned dependencies and stages the resulting
+library in `build-deps/shaderc`. CMake picks it up automatically.
 
 Two build trees are conventional in this project, and both are gitignored local artifacts:
 `build-nogui` is the primary headless verification tree, and `build-ui` adds `src/ui` and the
@@ -177,29 +181,33 @@ software media path is mandatory, so no vendor SDK ever appears in that message.
 
 ## Installable package (usable-editor Requirement 13)
 
-`cmake/PalmierPackaging.cmake` configures [CPack](https://cmake.org/cmake/help/latest/module/CPack.html)'s
-`DEB` generator, producing a self-contained Debian package for the documented Debian/Ubuntu family
-above — the family CI itself builds and tests on (`ubuntu-24.04`), so it is also the one with direct
-evidence behind the packaged artifact. Build one from an existing `build-ui` configuration:
+CI builds and launch-tests AMD64 packages on their target Ubuntu versions. On a tagged
+[CI run](https://github.com/Bhaveshmeghwal21/palmier-pro-linux/actions/workflows/ci.yml),
+download and extract the artifact for your distribution, then install the contained
+package with `sudo apt install ./palmier-pro_*.deb`:
+
+| Ubuntu | Actions artifact |
+|---|---|
+| 22.04 LTS (Jammy) | `palmier-pro-deb-package-ubuntu-22.04` |
+| 24.04 LTS (Noble) | `palmier-pro-deb-package` |
+
+To build a package on your current Ubuntu version, install the dependencies with
+`make deps` and use `make package`. From an existing `build-ui` configuration, run:
 
 ```sh
 cmake --build build-ui
 cd build-ui && cpack -G DEB
 ```
 
-The package's `Depends:` field is generated by `dpkg-shlibdeps` (`CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON`)
-inspecting the built `palmier-pro` binary's actual linked libraries — Qt 6, FFmpeg, Vulkan, shaderc,
-LittleCMS and libsecret — rather than a hand-maintained list, so `apt`/`dpkg` refuse to install the
-package at all on a host missing one of them. `PlatformCompatibility`'s launch-time gate (Requirement
-1.4) remains the second, independent check for a host whose package manager was bypassed. The GPLv3
-[`LICENSE`](../LICENSE) text and [`NOTICE`](../NOTICE) are installed into
+`dpkg-shlibdeps` generates the package dependencies from the linked libraries. CPack
+also declares libraries loaded at startup and the Qt platform plugins. The Ubuntu
+22.04 build links shaderc statically and installs its third-party license notices.
+The GPLv3 [`LICENSE`](../LICENSE) text and [`NOTICE`](../NOTICE) are installed into
 `/usr/share/doc/palmier-pro/` alongside the executable at `/usr/bin/palmier-pro`, preserving the
 licensing split the top-level [`README`](../README.md) documents.
 
-CI's `package` job (`.github/workflows/ci.yml`) builds this package, verifies its `Depends:` field is
-non-empty, installs it with `apt`/`dpkg` for real, and reuses the launch smoke test against the
-installed `/usr/bin/palmier-pro` — not a build-tree binary — whenever a commit is pushed as a `v*`
-tag.
+The `package` job installs the package with `apt` and checks that the installed
+editor renders a window under Xvfb. Jammy also runs this check on ordinary CI builds.
 
 ## Environment traps this project actually hit
 

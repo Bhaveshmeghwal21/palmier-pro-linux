@@ -30,6 +30,7 @@ extern "C" {
 #include <libavutil/opt.h>
 #include <libavutil/rational.h>
 #include <libavutil/samplefmt.h>
+#include <libavutil/version.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
@@ -309,9 +310,13 @@ private:
     /// Convert the AVFrame currently held in audioFrame_ into an interleaved
     /// float AudioBuffer at the stream's own rate and channel count.
     [[nodiscard]] Result<BackendAudioFrame> convertCurrentAudioFrame() {
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 24, 100)
         const int channels = audioFrame_->ch_layout.nb_channels > 0
                                  ? audioFrame_->ch_layout.nb_channels
                                  : audioCodec_->ch_layout.nb_channels;
+#else
+        const int channels = audioFrame_->channels > 0 ? audioFrame_->channels : audioCodec_->channels;
+#endif
         const int rate =
             audioFrame_->sample_rate > 0 ? audioFrame_->sample_rate : audioCodec_->sample_rate;
         const int inFrames = audioFrame_->nb_samples;
@@ -376,6 +381,7 @@ private:
                              "could not allocate an audio conversion context");
         }
 
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 24, 100)
         AVChannelLayout inLayout;
         AVChannelLayout outLayout;
         if (audioFrame_->ch_layout.nb_channels > 0) {
@@ -387,13 +393,20 @@ private:
 
         av_opt_set_chlayout(swr_, "in_chlayout", &inLayout, 0);
         av_opt_set_chlayout(swr_, "out_chlayout", &outLayout, 0);
+        av_channel_layout_uninit(&inLayout);
+        av_channel_layout_uninit(&outLayout);
+#else
+        const auto defaultLayout = av_get_default_channel_layout(channels);
+        const auto inputLayout = audioFrame_->channel_layout != 0
+                                     ? static_cast<std::int64_t>(audioFrame_->channel_layout)
+                                     : defaultLayout;
+        av_opt_set_channel_layout(swr_, "in_channel_layout", inputLayout, 0);
+        av_opt_set_channel_layout(swr_, "out_channel_layout", defaultLayout, 0);
+#endif
         av_opt_set_int(swr_, "in_sample_rate", rate, 0);
         av_opt_set_int(swr_, "out_sample_rate", rate, 0);
         av_opt_set_sample_fmt(swr_, "in_sample_fmt", inFormat, 0);
         av_opt_set_sample_fmt(swr_, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
-
-        av_channel_layout_uninit(&inLayout);
-        av_channel_layout_uninit(&outLayout);
 
         if (swr_init(swr_) < 0) {
             swr_free(&swr_);

@@ -49,6 +49,9 @@ packaging/appimage/build-appimage.sh build
 
 ## Debian (.deb)
 
+For the Ubuntu 22.04 and 24.04 packages built by CI, see the
+[build guide](../docs/BUILD.md#installable-package-usable-editor-requirement-13).
+
 ```sh
 # From the repository root, with packaging/deb/debian symlinked or copied to ./debian:
 dpkg-buildpackage -us -uc -b
@@ -78,6 +81,6 @@ across CMake, the CPack config, the MCP server, the AppStream metainfo, and the 
 recipe — the last two having drifted to 0.1.0 while the project was at 0.3.0, which is why
 they are gated now.
 
-Beyond that, CI builds the `.deb` on every `v*` tag and inspects it with `dpkg-deb`. The
+Beyond that, CI builds both Ubuntu `.deb` packages on every `v*` tag and inspects them with `dpkg-deb`. The
 Flatpak and AppImage images are not built by any job, so treat them as the least exercised
 artefacts here and build them once by hand before relying on them.

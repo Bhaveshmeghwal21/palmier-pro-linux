@@ -91,7 +91,14 @@ help: ## Show this help
 
 deps: ## Install the native build dependencies (Ubuntu/Debian, needs sudo)
 	sudo apt-get update
-	sudo apt-get install -y --no-install-recommends $$(sed -e 's/#.*//' packaging/apt-packages.txt)
+	@packages=$$(sed -e 's/#.*//' packaging/apt-packages.txt); \
+	if grep -qx 'UBUNTU_CODENAME=jammy' /etc/os-release; then \
+	    packages=$$(printf '%s\n' "$$packages" | sed '/^libshaderc-dev[[:space:]]*$$/d'); \
+	    sudo apt-get install -y --no-install-recommends $$packages ca-certificates git python3 && \
+	        JOBS=$(JOBS) bash scripts/build-jammy-shaderc.sh; \
+	else \
+	    sudo apt-get install -y --no-install-recommends $$packages; \
+	fi
 	@printf '\nffnvcodec headers are not in every archive snapshot; if pkg-config cannot\n'
 	@printf 'find ffnvcodec, see docs/BUILD.md for the upstream source install.\n'
 

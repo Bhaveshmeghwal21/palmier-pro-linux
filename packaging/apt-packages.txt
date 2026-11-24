@@ -1,4 +1,4 @@
-# Native build dependencies for Palmier Pro for Linux — Ubuntu 24.04 (noble).
+# Native build dependencies for Palmier Pro for Linux on Ubuntu.
 #
 # This is the project's dependency manifest. A C++/CMake project that links system
 # libraries through pkg-config has no package-manager lockfile to commit, so the
@@ -21,7 +21,7 @@
 # Without it the NVENC path simply reports itself unavailable and the software
 # encoder is used; nothing else changes.
 #
-# Version policy: these are tracked at the distribution's noble versions rather than
+# Version policy: these are tracked at the distribution's LTS versions rather than
 # pinned individually. Ubuntu 24.04 is an LTS with a frozen archive, so the
 # distribution release IS the pin; pinning each package to an exact version would
 # break on the first security update without making the build more reproducible.
@@ -36,6 +36,7 @@ ccache
 
 # --- Headless test and launch environment ---------------------------------
 xvfb
+xauth
 
 # --- Qt 6: UI, widgets, QML runtime ---------------------------------------
 qt6-base-dev
@@ -43,6 +44,7 @@ qt6-base-dev-tools
 qt6-declarative-dev
 qt6-tools-dev
 qt6-tools-dev-tools
+qt6-qpa-plugins
 qml6-module-qtquick
 qml6-module-qtquick-controls
 qml6-module-qtquick-window
@@ -63,7 +65,7 @@ libvulkan-dev
 vulkan-validationlayers
 glslang-tools
 spirv-tools
-libshaderc-dev
+libshaderc-dev # Ubuntu 24.04+. make deps builds shaderc from source on 22.04.
 
 # --- Vendor hardware codec SDKs (VAAPI, Quick Sync) ----------------------
 libva-dev

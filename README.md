@@ -79,8 +79,11 @@ exported to 1080p30 H.264 with NVENC on an NVIDIA L4.</sub>
 
 ## Quick start
 
-There are no prebuilt packages yet, so build from source. On Ubuntu 24.04 or another Debian
-derivative:
+CI builds separate AMD64 `.deb` packages for Ubuntu 22.04 and 24.04 on version tags. See
+the [packaging guide](docs/BUILD.md#installable-package-usable-editor-requirement-13)
+for artifact names and installation.
+
+To build from source on Ubuntu 22.04 or 24.04:
 
 ```bash
 git clone https://github.com/Bhaveshmeghwal21/palmier-pro-linux.git
@@ -262,7 +265,8 @@ areas are complete.
 - [ ] Shape layers
 - [ ] Media bins and search
 - [ ] Server-sent events on the MCP endpoint
-- [ ] Prebuilt `.deb`, Flatpak and AppImage releases
+- [x] Ubuntu 22.04 and 24.04 `.deb` packages in tagged CI runs
+- [ ] Published Flatpak and AppImage builds
 
 Out of scope by design: bundled speech-to-text (no recogniser ships with the editor), telemetry,
 and in-app auto-update (the package manager's job on Linux).

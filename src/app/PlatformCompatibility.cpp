@@ -12,6 +12,10 @@
 
 #include "app/PlatformCompatibility.hpp"
 
+#include <libavcodec/version.h>
+#include <libavformat/version.h>
+#include <libavutil/version.h>
+
 #include <algorithm>
 #include <cctype>
 
@@ -87,9 +91,9 @@ const CompatibilityRequirements& defaultRequirements() {
             {"Qt 6 Core", "libQt6Core.so.6"},
             {"Qt 6 Gui", "libQt6Gui.so.6"},
             {"Qt 6 Widgets", "libQt6Widgets.so.6"},
-            {"FFmpeg libavcodec", "libavcodec.so"},
-            {"FFmpeg libavformat", "libavformat.so"},
-            {"FFmpeg libavutil", "libavutil.so"},
+            {"FFmpeg libavcodec", "libavcodec.so." + std::to_string(LIBAVCODEC_VERSION_MAJOR)},
+            {"FFmpeg libavformat", "libavformat.so." + std::to_string(LIBAVFORMAT_VERSION_MAJOR)},
+            {"FFmpeg libavutil", "libavutil.so." + std::to_string(LIBAVUTIL_VERSION_MAJOR)},
             {"Vulkan loader", "libvulkan.so.1"},
             {"LittleCMS (lcms2)", "liblcms2.so.2"},
             {"libsecret", "libsecret-1.so.0"},

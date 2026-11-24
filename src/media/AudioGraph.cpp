@@ -25,6 +25,7 @@ extern "C" {
 #include <libavutil/channel_layout.h>
 #include <libavutil/opt.h>
 #include <libavutil/samplefmt.h>
+#include <libavutil/version.h>
 #include <libswresample/swresample.h>
 }
 #endif
@@ -347,6 +348,7 @@ public:
                 makeError(ErrorCode::Internal, "could not allocate a resampler context"));
         }
 
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 24, 100)
         AVChannelLayout inLayout;
         AVChannelLayout outLayout;
         av_channel_layout_default(&inLayout, inChannels);
@@ -354,13 +356,18 @@ public:
 
         av_opt_set_chlayout(swr, "in_chlayout", &inLayout, 0);
         av_opt_set_chlayout(swr, "out_chlayout", &outLayout, 0);
+        av_channel_layout_uninit(&inLayout);
+        av_channel_layout_uninit(&outLayout);
+#else
+        av_opt_set_channel_layout(swr, "in_channel_layout",
+                                  av_get_default_channel_layout(inChannels), 0);
+        av_opt_set_channel_layout(swr, "out_channel_layout",
+                                  av_get_default_channel_layout(outChannels), 0);
+#endif
         av_opt_set_int(swr, "in_sample_rate", inRate, 0);
         av_opt_set_int(swr, "out_sample_rate", outRate, 0);
         av_opt_set_sample_fmt(swr, "in_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
         av_opt_set_sample_fmt(swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
-
-        av_channel_layout_uninit(&inLayout);
-        av_channel_layout_uninit(&outLayout);
 
         if (swr_init(swr) < 0) {
             swr_free(&swr);
