@@ -75,10 +75,12 @@ def check_sample_edit(path: Path) -> None:
         len(clips) != 1
         or clips[0]["id"] != clip["clipId"]
         or clips[0]["timelineStartNs"] != 0
+        or clips[0]["sourceInNs"] != 2 * second
+        or clips[0]["sourceOutNs"] != 6 * second
         or timeline["durationNs"] != 4 * second
     ):
         raise RuntimeError(f"Expected one four-second clip at timeline zero: {timeline}")
-    print("Sample edit passed: imported the clip, cut seconds 2–6, and applied both fades.")
+    print("Sample edit passed: imported the clip, cut seconds 2 to 6, and applied both fades.")
 
 
 if __name__ == "__main__":
