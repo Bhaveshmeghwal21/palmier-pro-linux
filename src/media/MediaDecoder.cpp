@@ -74,6 +74,9 @@ gpu::CodecId toGpuCodec(MediaCodecId codec) noexcept {
 
 namespace {
 
+// The codec lookup and av_find_best_stream use mutable pointers in FFmpeg 4.4.
+using DecoderPointer = decltype(avcodec_find_decoder(AV_CODEC_ID_NONE));
+
 class FfmpegDecodeBackend final : public IDecodeBackend {
 public:
     FfmpegDecodeBackend(MediaInfo info, AVFormatContext* fmt, AVCodecContext* codec,
@@ -258,7 +261,7 @@ private:
                                  path_.string());
         }
 
-        const AVCodec* decoder = nullptr;
+        DecoderPointer decoder = nullptr;
         int resolved = streamIndex;
         if (resolved < 0) {
             resolved = av_find_best_stream(audioFmt_, AVMEDIA_TYPE_AUDIO, -1, -1, &decoder, 0);
@@ -505,7 +508,7 @@ private:
             makeError(ErrorCode::Io, "could not read stream information from: " + path.string()));
     }
 
-    const AVCodec* decoder = nullptr;
+    DecoderPointer decoder = nullptr;
     const int streamIndex = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
     if (streamIndex < 0 || decoder == nullptr) {
         // An audio-only file is a legitimate asset — a music bed, a voice-over, a sound effect
