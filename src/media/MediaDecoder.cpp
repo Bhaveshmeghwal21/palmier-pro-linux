@@ -315,7 +315,8 @@ private:
                                  ? audioFrame_->ch_layout.nb_channels
                                  : audioCodec_->ch_layout.nb_channels;
 #else
-        const int channels = audioFrame_->channels > 0 ? audioFrame_->channels : audioCodec_->channels;
+        const int channels =
+            audioFrame_->channels > 0 ? audioFrame_->channels : audioCodec_->channels;
 #endif
         const int rate =
             audioFrame_->sample_rate > 0 ? audioFrame_->sample_rate : audioCodec_->sample_rate;

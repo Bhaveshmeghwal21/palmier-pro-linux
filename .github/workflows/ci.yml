@@ -1081,6 +1081,15 @@ jobs:
       - name: Build
         run: cmake --build build-pkg
 
+      - name: Test the Ubuntu 22.04 FFmpeg audio paths
+        if: matrix.ubuntu == 'ubuntu-22.04'
+        run: |
+          cmake -S . -B build-pkg -DPALMIER_BUILD_TESTS=ON
+          cmake --build build-pkg --target palmier_media_tests palmier_media_audio_tests
+          ctest --test-dir build-pkg --output-on-failure --no-tests=error \
+            -R '^(AudioOnlyAssetTest|AudioGraph)\.'
+          cmake -S . -B build-pkg -DPALMIER_BUILD_TESTS=OFF
+
       # `dpkg-shlibdeps` (CPACK_DEBIAN_PACKAGE_SHLIBDEPS) needs it on PATH; it
       # ships in dpkg-dev, which is not part of build-essential.
       - name: Install packaging tools

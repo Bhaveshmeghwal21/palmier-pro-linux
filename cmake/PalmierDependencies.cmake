@@ -59,7 +59,7 @@ if(PALMIER_BUILD_UI)
     find_package(Qt6 6.2 QUIET COMPONENTS Core Gui Quick Qml Widgets)
     if(NOT Qt6_FOUND)
         list(APPEND _PALMIER_MISSING_DEPS
-            "  - Qt 6 (>= 6.2, components: Core Gui Quick Qml Widgets)\n      Install: apt install qt6-base-dev qt6-declarative-dev  |  dnf install qt6-qtbase-devel qt6-qtdeclarative-devel")
+            "  - Qt 6 (>= 6.2, components: Core Gui Quick Qml Widgets)\n      ${Qt6_NOT_FOUND_MESSAGE}\n      Install: apt install qt6-base-dev qt6-declarative-dev libqt6opengl6-dev  |  dnf install qt6-qtbase-devel qt6-qtdeclarative-devel")
     endif()
 endif()
 

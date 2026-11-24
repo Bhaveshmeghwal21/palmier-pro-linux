@@ -40,7 +40,7 @@ direct evidence behind it.
 | Dependency | Debian / Ubuntu | Fedora / RHEL | Arch |
 |---|---|---|---|
 | Toolchain | `build-essential cmake ninja-build pkg-config` | `gcc-c++ cmake ninja-build pkgconf-pkg-config` | `base-devel cmake ninja` |
-| Qt 6 (Core, Gui, Quick, Qml, Widgets) | `qt6-base-dev qt6-base-dev-tools qt6-declarative-dev qt6-tools-dev qt6-tools-dev-tools` | `qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel` | `qt6-base qt6-declarative qt6-tools` |
+| Qt 6 (Core, Gui, Quick, Qml, Widgets) | `qt6-base-dev qt6-base-dev-tools qt6-declarative-dev libqt6opengl6-dev qt6-tools-dev qt6-tools-dev-tools` | `qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel` | `qt6-base qt6-declarative qt6-tools` |
 | QML runtime modules (UI build) | `qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-window qml6-module-qtqml-workerscript` | `qt6-qtdeclarative` | `qt6-declarative` |
 | FFmpeg | `libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev` | `ffmpeg-devel` (RPM Fusion) | `ffmpeg` |
 | Vulkan | `libvulkan-dev vulkan-tools` | `vulkan-loader-devel vulkan-headers vulkan-tools` | `vulkan-icd-loader vulkan-headers vulkan-tools` |
