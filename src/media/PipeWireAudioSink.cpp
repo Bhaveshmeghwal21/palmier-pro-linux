@@ -119,9 +119,11 @@ struct PipeWireAudioSink::Impl {
         }
 
         std::size_t frames = buffer->datas[0].maxsize / stride;
+#if PW_CHECK_VERSION(0, 3, 50)
         if (pwBuffer->requested != 0) {
             frames = std::min<std::size_t>(frames, static_cast<std::size_t>(pwBuffer->requested));
         }
+#endif
 
         const std::size_t drained = drain(dst, frames, format.channels);
         played.fetch_add(static_cast<std::uint64_t>(drained));

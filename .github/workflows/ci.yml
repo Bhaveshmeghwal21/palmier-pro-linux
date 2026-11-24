@@ -1064,10 +1064,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restore the Jammy shader compiler
+        if: matrix.ubuntu == 'ubuntu-22.04'
+        id: shaderc-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build-deps/shaderc
+          key: shaderc-jammy-${{ runner.arch }}-${{ hashFiles('scripts/build-jammy-shaderc.sh') }}
+
       - name: Install native build dependencies
         run: |
           sudo rm -rf /var/lib/apt/lists/*
           make deps
+
+      - name: Cache the Jammy shader compiler
+        if: matrix.ubuntu == 'ubuntu-22.04' && steps.shaderc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build-deps/shaderc
+          key: ${{ steps.shaderc-cache.outputs.cache-primary-key }}
 
       - name: Configure (CMake + Ninja, tests off)
         run: |

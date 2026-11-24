@@ -4,9 +4,18 @@
 # with the exact glslang and SPIRV revisions listed in shaderc v2024.4's DEPS.
 set -euo pipefail
 
-cd "$(dirname -- "$0")/.."
+script_path=$(realpath -- "$0")
+cd "$(dirname -- "$script_path")/.."
 prefix="$PWD/build-deps/shaderc"
-source_dir="$prefix/src"
+work_dir="$PWD/build-deps/shaderc-work"
+source_dir="$work_dir/src"
+archive="$prefix/lib/libshaderc_combined.a"
+checksum=$(sha256sum -- "$script_path")
+checksum=${checksum%% *}
+if [[ -s "$archive" && -r "$prefix/build-key" && $(<"$prefix/build-key") == "$checksum" ]]; then
+    exit 0
+fi
+
 mkdir -p "$source_dir"
 
 checkout() {
@@ -29,7 +38,7 @@ checkout "$source_dir/third_party/spirv-headers" https://github.com/KhronosGroup
 checkout "$source_dir/third_party/spirv-tools" https://github.com/KhronosGroup/SPIRV-Tools.git \
     4d2f0b40bfe290dea6c6904dafdf7fd8328ba346
 
-cmake -S "$source_dir" -B "$prefix/build" -G Ninja \
+cmake -S "$source_dir" -B "$work_dir/build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DSHADERC_SKIP_TESTS=ON \
     -DSHADERC_SKIP_EXAMPLES=ON \
@@ -37,7 +46,7 @@ cmake -S "$source_dir" -B "$prefix/build" -G Ninja \
     -DSHADERC_ENABLE_WERROR_COMPILE=OFF \
     -DSPIRV_SKIP_EXECUTABLES=ON \
     -DENABLE_GLSLANG_BINARIES=OFF
-cmake --build "$prefix/build" --target shaderc_combined --parallel "${JOBS:-$(nproc)}"
+cmake --build "$work_dir/build" --target shaderc_combined --parallel "${JOBS:-$(nproc)}"
 
 licenses="$prefix/licenses"
 mkdir -p "$prefix/lib" "$prefix/include" "$licenses"
@@ -46,6 +55,6 @@ install -m 644 "$source_dir/LICENSE" "$licenses/shaderc.txt"
 install -m 644 "$source_dir/third_party/glslang/LICENSE.txt" "$licenses/glslang.txt"
 install -m 644 "$source_dir/third_party/spirv-headers/LICENSE" "$licenses/spirv-headers.txt"
 install -m 644 "$source_dir/third_party/spirv-tools/LICENSE" "$licenses/spirv-tools.txt"
-archive="$prefix/lib/libshaderc_combined.a"
-install -m 644 "$prefix/build/libshaderc/libshaderc_combined.a" "$archive.tmp"
+install -m 644 "$work_dir/build/libshaderc/libshaderc_combined.a" "$archive.tmp"
 mv -f -- "$archive.tmp" "$archive"
+printf '%s\n' "$checksum" >"$prefix/build-key"
