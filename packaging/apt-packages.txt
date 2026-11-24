@@ -70,7 +70,7 @@ libshaderc-dev # Ubuntu 24.04+. make deps builds shaderc from source on 22.04.
 
 # --- Vendor hardware codec SDKs (VAAPI, Quick Sync) ----------------------
 libva-dev
-libvpl-dev
+libvpl-dev # make deps uses libmfx-dev on Ubuntu 22.04 AMD64.
 
 # --- Colour management, secret storage, TLS ------------------------------
 liblcms2-dev

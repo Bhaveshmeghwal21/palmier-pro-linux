@@ -59,7 +59,7 @@ failure; the corresponding path is compiled out and a documented fallback takes 
 | ALSA (fallback audio sink) | `libasound2-dev` | `alsa-lib-devel` | `alsa-lib` |
 | VAAPI (Intel/AMD encode) | `libva-dev` | `libva-devel` | `libva` |
 | NVENC/NVDEC headers | `nv-codec-headers` | `nv-codec-headers` (RPM Fusion) | `ffnvcodec-headers` |
-| Intel Quick Sync (oneVPL) | `libvpl-dev` | `oneVPL-devel` | `vpl-gpu-rt libvpl` |
+| Intel Quick Sync | `libvpl-dev` on 24.04 and Debian 12, `libmfx-dev` on 22.04 AMD64 | `oneVPL-devel` | `vpl-gpu-rt libvpl` |
 
 Test-only: a virtual X server is needed to run the Qt-dependent tests headlessly —
 `xvfb` (Debian/Ubuntu), `xorg-x11-server-Xvfb` (Fedora/RHEL), `xorg-server-xvfb` (Arch).

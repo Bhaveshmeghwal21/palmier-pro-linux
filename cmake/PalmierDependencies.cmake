@@ -186,9 +186,14 @@ set(PALMIER_VAAPI_AVAILABLE ${_palmier_vaapi_available} CACHE INTERNAL
 # --- QSV (Intel Quick Sync via oneVPL, or the legacy Media SDK) -------------
 set(_palmier_qsv_available OFF)
 if(PALMIER_ENABLE_QSV)
-    # Intel Quick Sync via oneVPL (new) or legacy Media SDK (mfx).
-    pkg_check_modules(LIBVPL IMPORTED_TARGET vpl)
-    if(NOT LIBVPL_FOUND)
+    # Some distributions ship vpl.pc without the library it refers to.
+    pkg_check_modules(ONEVPL QUIET vpl)
+    if(ONEVPL_FOUND)
+        find_library(_palmier_vpl_library NAMES vpl HINTS ${ONEVPL_LIBRARY_DIRS} NO_CACHE)
+    endif()
+    if(_palmier_vpl_library)
+        pkg_check_modules(LIBVPL IMPORTED_TARGET vpl)
+    else()
         pkg_check_modules(LIBVPL IMPORTED_TARGET libmfx)
     endif()
     if(LIBVPL_FOUND)

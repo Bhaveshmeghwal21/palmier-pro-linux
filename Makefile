@@ -93,7 +93,8 @@ deps: ## Install the native build dependencies (Ubuntu/Debian, needs sudo)
 	sudo apt-get update
 	@packages=$$(sed -e 's/#.*//' packaging/apt-packages.txt); \
 	if grep -qx 'UBUNTU_CODENAME=jammy' /etc/os-release; then \
-	    packages=$$(printf '%s\n' "$$packages" | sed '/^libshaderc-dev[[:space:]]*$$/d'); \
+	    packages=$$(printf '%s\n' "$$packages" | sed -E '/^(libshaderc-dev|libvpl-dev)[[:space:]]*$$/d'); \
+	    if [ "$$(dpkg --print-architecture)" = amd64 ]; then packages="$$packages libmfx-dev"; fi; \
 	    sudo apt-get install -y --no-install-recommends $$packages ca-certificates git python3 && \
 	        JOBS=$(JOBS) bash scripts/build-jammy-shaderc.sh; \
 	else \
