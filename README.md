@@ -44,10 +44,10 @@ the folder where you saved it.
 
 ```bash
 # Ubuntu 22.04
-sudo apt install ./palmier-pro_0.4.1-1~ubuntu22.04_amd64.deb
+sudo apt install ./palmier-pro_0.4.1_ubuntu22.04_amd64.deb
 
 # Ubuntu 24.04
-sudo apt install ./palmier-pro_0.4.1_amd64.deb
+sudo apt install ./palmier-pro_0.4.1_ubuntu24.04_amd64.deb
 ```
 
 Run `palmier-pro` to open the editor.
@@ -346,7 +346,7 @@ upstream project. Please report problems with this port here, not upstream.
 The optional generative features call a hosted service that needs an account or your own API
 credentials. That service is not part of this repository and is not covered by its licence.
 
-[jammy-deb]: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/releases/download/v0.4.1/palmier-pro_0.4.1-1~ubuntu22.04_amd64.deb
-[noble-deb]: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/releases/download/v0.4.1/palmier-pro_0.4.1_amd64.deb
+[jammy-deb]: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/releases/download/v0.4.1/palmier-pro_0.4.1_ubuntu22.04_amd64.deb
+[noble-deb]: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/releases/download/v0.4.1/palmier-pro_0.4.1_ubuntu24.04_amd64.deb
 [sample]: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/releases/download/v0.4.1/palmier-sample.mp4
 Everything else works offline.
