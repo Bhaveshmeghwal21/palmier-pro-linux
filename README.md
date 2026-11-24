@@ -60,8 +60,9 @@ then paste this prompt with the full path to your copy of the clip.
 
 > Create a new project called First Cut at 960 × 540 and 30 fps. Import
 > `/absolute/path/to/palmier-sample.mp4`. Put source seconds 2 through 6 on a video
-> track starting at 0:00. Add a half-second fade in and fade out. Leave the
-> four-second edit on the timeline so I can play it.
+> track starting at 0:00 and use that file as the clip’s source path. Add a
+> half-second fade in and fade out. Leave the four-second edit on the timeline
+> so I can play it.
 
 ## Highlights
 

@@ -1292,6 +1292,7 @@ jobs:
 
           echo "OK: the installed .deb's palmier-pro launched, mapped its main window and painted ${colours} distinct colours"
           python3 check_sample_edit.py smoke/palmier-sample.mp4
+          test "$(identify -format '%k' smoke/palmier-sample-frame.png)" -ge 16
           printf '%s\n' "$colours" >smoke/colours
           SMOKE
 
@@ -1306,6 +1307,7 @@ jobs:
             build-pkg/*.deb
             cpack.log
             smoke/palmier-pro-installed-launch.png
+            smoke/palmier-sample-frame.png
             smoke/app.log
             smoke/xvfb.log
           if-no-files-found: warn

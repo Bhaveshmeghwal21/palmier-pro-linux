@@ -50,8 +50,9 @@ def check_sample_edit(path: Path) -> None:
         return result["structuredContent"]
 
     second = 1_000_000_000
+    sample_path = path.resolve(strict=True)
     tool("project.create", name="First Cut", width=960, height=540, fps=30)
-    asset = tool("media.import", path=str(path.resolve(strict=True)))
+    asset = tool("media.import", path=str(sample_path))
     if not asset["hasVideo"] or asset["durationMs"] != 8000:
         raise RuntimeError(f"Expected an eight-second video: {asset}")
     track = tool("timeline.add_track", kind="video")
@@ -59,6 +60,7 @@ def check_sample_edit(path: Path) -> None:
         "timeline.add_clip",
         trackId=track["trackId"],
         assetId=asset["assetId"],
+        sourcePath=asset["sourcePath"],
         timelineStartNs=0,
         sourceInNs=2 * second,
         sourceOutNs=6 * second,
@@ -80,7 +82,12 @@ def check_sample_edit(path: Path) -> None:
         or timeline["durationNs"] != 4 * second
     ):
         raise RuntimeError(f"Expected one four-second clip at timeline zero: {timeline}")
-    print("Sample edit passed: imported the clip, cut seconds 2 to 6, and applied both fades.")
+    tool(
+        "timeline.capture_frame",
+        outputPath=str(sample_path.with_name("palmier-sample-frame.png")),
+        positionNs=second,
+    )
+    print("Sample edit passed: imported, trimmed, applied both fades, and rendered a frame.")
 
 
 if __name__ == "__main__":
