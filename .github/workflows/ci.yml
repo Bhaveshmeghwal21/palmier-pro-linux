@@ -1051,9 +1051,40 @@ jobs:
   # inspect it directly (`dpkg-deb -c`/-x`), independent of whatever else the
   # first job's tree contains.
   # ---------------------------------------------------------------------------
+  sample-clip:
+    name: Generate the sample clip
+    if: github.event_name != 'workflow_dispatch' || !inputs.run_l4_validation
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install FFmpeg and the slate font
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core
+
+      - name: Render the eight-second sample
+        run: |
+          slate="font='DejaVu Sans':fontsize=42:fontcolor=white:x=(w-tw)/2:y=(h-th)/2"
+          lead="[0:v]drawtext=${slate}:text='Opening slate'[lead]"
+          tail="[2:v]drawtext=${slate}:text='Closing slate'[tail]"
+          ffmpeg -hide_banner -loglevel error \
+            -f lavfi -i 'color=c=0x152238:s=960x540:r=30:d=2' \
+            -f lavfi -i 'testsrc2=s=960x540:r=30:d=4' \
+            -f lavfi -i 'color=c=0x152238:s=960x540:r=30:d=2' \
+            -filter_complex "${lead};${tail};[lead][1:v][tail]concat=n=3:v=1:a=0[out]" \
+            -map '[out]' -c:v libx264 -crf 22 -pix_fmt yuv420p -movflags +faststart palmier-sample.mp4
+          ffprobe -v error -show_entries format=duration -of default=nw=1 palmier-sample.mp4
+
+      - name: Upload the sample clip
+        uses: actions/upload-artifact@v4
+        with:
+          name: palmier-sample
+          path: palmier-sample.mp4
+          if-no-files-found: error
+
   package:
     name: Build and verify the .deb (${{ matrix.ubuntu }})
     if: github.event_name != 'workflow_dispatch' || !inputs.run_l4_validation
+    needs: sample-clip
     strategy:
       fail-fast: false
       matrix:
@@ -1063,6 +1094,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download the sample clip
+        uses: actions/download-artifact@v4
+        with:
+          name: palmier-sample
+          path: smoke
 
       - name: Restore the Jammy shader compiler
         if: matrix.ubuntu == 'ubuntu-22.04'
@@ -1177,13 +1214,14 @@ jobs:
           docker run --rm -i \
             --mount "type=bind,src=$PWD/$DEB_PATH,dst=/tmp/palmier-pro.deb,readonly" \
             --mount "type=bind,src=$PWD/smoke,dst=/work/smoke" \
+            --mount "type=bind,src=$PWD/scripts/check_sample_edit.py,dst=/work/check_sample_edit.py,readonly" \
             --workdir /work \
             "ubuntu:${RUNNER_DISTRO#ubuntu-}" bash -s <<'SMOKE'
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
           apt-get install -y --no-install-recommends /tmp/palmier-pro.deb \
-            xvfb xauth x11-utils xdotool imagemagick fonts-dejavu-core
+            xvfb xauth x11-utils xdotool imagemagick fonts-dejavu-core python3
           command -v palmier-pro
           dpkg -L palmier-pro | grep -E '/(LICENSE|NOTICE)$'
 
@@ -1253,6 +1291,7 @@ jobs:
           fi
 
           echo "OK: the installed .deb's palmier-pro launched, mapped its main window and painted ${colours} distinct colours"
+          python3 check_sample_edit.py smoke/palmier-sample.mp4
           printf '%s\n' "$colours" >smoke/colours
           SMOKE
 

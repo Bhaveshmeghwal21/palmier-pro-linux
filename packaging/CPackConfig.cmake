@@ -16,7 +16,7 @@
 
 set(CPACK_GENERATOR "DEB")
 set(CPACK_PACKAGE_NAME "palmier-pro")
-set(CPACK_PACKAGE_VERSION "0.4.0")
+set(CPACK_PACKAGE_VERSION "0.4.1")
 set(CPACK_PACKAGE_CONTACT
     "Bhaveshmeghwal21 <118756339+Bhaveshmeghwal21@users.noreply.github.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY

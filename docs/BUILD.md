@@ -181,10 +181,11 @@ software media path is mandatory, so no vendor SDK ever appears in that message.
 
 ## Installable package (usable-editor Requirement 13)
 
-CI builds and launch-tests AMD64 packages on their target Ubuntu versions. On a tagged
-[CI run](https://github.com/Bhaveshmeghwal21/palmier-pro-linux/actions/workflows/ci.yml),
-download and extract the artifact for your distribution, then install the contained
-package with `sudo apt install ./palmier-pro_*.deb`:
+Download the AMD64 `.deb` for your Ubuntu version from [GitHub Releases](https://github.com/Bhaveshmeghwal21/palmier-pro-linux/releases/latest).
+Install it with `sudo apt install ./palmier-pro_*.deb` from the download folder.
+CI builds and launch-tests both packages on their target Ubuntu versions. The tagged
+[CI run](https://github.com/Bhaveshmeghwal21/palmier-pro-linux/actions/workflows/ci.yml)
+keeps its build and smoke-test artifacts:
 
 | Ubuntu | Actions artifact |
 |---|---|

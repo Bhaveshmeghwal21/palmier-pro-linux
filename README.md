@@ -31,7 +31,37 @@ work on the same timeline you do. An independent C++20, Qt 6 and Vulkan port of
 <sub>Cut entirely by an agent over MCP: 150 tool calls across 19 tools, zero failures,
 exported to 1080p30 H.264 with NVENC on an NVIDIA L4.</sub>
 
+[**Download for Ubuntu 22.04**][jammy-deb] ·
+[**Download for Ubuntu 24.04**][noble-deb] ·
+[**Try the sample edit**](#try-an-edit)
+
 </div>
+
+## Quick start
+
+Download the AMD64 `.deb` for your Ubuntu version and run the matching command from
+the folder where you saved it.
+
+```bash
+# Ubuntu 22.04
+sudo apt install ./palmier-pro_0.4.1-1~ubuntu22.04_amd64.deb
+
+# Ubuntu 24.04
+sudo apt install ./palmier-pro_0.4.1_amd64.deb
+```
+
+Run `palmier-pro` to open the editor.
+
+## Try an edit
+
+Download [`palmier-sample.mp4`][sample], an eight-second clip with an opening slate,
+a moving test pattern, and a closing slate. [Connect your agent](#connect-an-agent),
+then paste this prompt with the full path to your copy of the clip.
+
+> Create a new project called First Cut at 960 × 540 and 30 fps. Import
+> `/absolute/path/to/palmier-sample.mp4`. Put source seconds 2 through 6 on a video
+> track starting at 0:00. Add a half-second fade in and fade out. Leave the
+> four-second edit on the timeline so I can play it.
 
 ## Highlights
 
@@ -77,11 +107,7 @@ exported to 1080p30 H.264 with NVENC on an NVIDIA L4.</sub>
 | **Export** | MP4, MOV, MKV and WebM; H.264, HEVC and VP9; up to 3840×2160 and 120 fps; hardware encode with software fallback |
 | **Agents** | MCP server at `127.0.0.1:19789`, in-app agent chat, frame capture so an agent can check its own work, opt-in remote access |
 
-## Quick start
-
-CI builds separate AMD64 `.deb` packages for Ubuntu 22.04 and 24.04 on version tags. See
-the [packaging guide](docs/BUILD.md#installable-package-usable-editor-requirement-13)
-for artifact names and installation.
+## Build from source
 
 To build from source on Ubuntu 22.04 or 24.04:
 
@@ -265,7 +291,7 @@ areas are complete.
 - [ ] Shape layers
 - [ ] Media bins and search
 - [ ] Server-sent events on the MCP endpoint
-- [x] Ubuntu 22.04 and 24.04 `.deb` packages in tagged CI runs
+- [x] [Ubuntu 22.04 and 24.04 `.deb` releases](https://github.com/Bhaveshmeghwal21/palmier-pro-linux/releases)
 - [ ] Published Flatpak and AppImage builds
 
 Out of scope by design: bundled speech-to-text (no recogniser ships with the editor), telemetry,
@@ -318,4 +344,8 @@ upstream project. Please report problems with this port here, not upstream.
 
 The optional generative features call a hosted service that needs an account or your own API
 credentials. That service is not part of this repository and is not covered by its licence.
+
+[jammy-deb]: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/releases/download/v0.4.1/palmier-pro_0.4.1-1~ubuntu22.04_amd64.deb
+[noble-deb]: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/releases/download/v0.4.1/palmier-pro_0.4.1_amd64.deb
+[sample]: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/releases/download/v0.4.1/palmier-sample.mp4
 Everything else works offline.

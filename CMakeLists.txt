@@ -11,7 +11,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(PalmierProLinux
-    VERSION 0.4.0
+    VERSION 0.4.1
     DESCRIPTION "Palmier Pro — AI-native multi-track video editor (Linux port with GPU acceleration)"
     HOMEPAGE_URL "https://github.com/Bhaveshmeghwal21/palmier-pro-linux"
     LANGUAGES CXX)

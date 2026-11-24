@@ -10,8 +10,14 @@ history, which notes each change's completion commit and its CI run.
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-11-24
+
 ### Added
 
+- **Ubuntu downloads.** Separate AMD64 `.deb` packages for 22.04 and 24.04.
+  CI installs each package on its target Ubuntu version before launching the editor.
+- **First edit.** A sample MP4 and an agent prompt that removes the first and last
+  slates and fades the four-second clip in and out.
 - **Edge-preserving denoise** (`timeline.add_effect` with `type: "denoise"`). A bilateral
   average, not a blur: each neighbour is weighted by a Gaussian of its Rec.601 luma distance
   from the centre pixel, so flat noise averages away while edges keep their contrast.
@@ -530,5 +536,6 @@ FFmpeg and Vulkan.
   headlessly in CI on every push, publishing a per-test summary with every recorded
   skip reason.
 
-[Unreleased]: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/releases/tag/v0.4.1
 [0.1.0]: https://github.com/Bhaveshmeghwal21/palmier-pro-linux/releases/tag/v0.1.0
